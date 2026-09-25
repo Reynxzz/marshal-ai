@@ -1,0 +1,75 @@
+# Plant map: named points, zones and drivable segments.
+#
+# Coordinates are metres in a local plant frame. `carla` holds the matching
+# CARLA world transform; fill it in on the VM once the CARLA map is chosen
+# (scripts/pick_carla_points.py prints spawn points to pick from).
+# Scenario specs and missions refer to points only by name, never by coordinate.
+
+carla_map: Town05   # placeholder until the plant layout map is chosen
+
+zones:
+  line_end:          {description: End of the assembly line; cars wait here for release}
+  inspection_gate:   {description: Four-camera drive-through gate, 5 km/h}
+  test_track:        {description: Functional check routine (lights, reverse, brake test)}
+  finishing:         {description: Finishing lane between test track and yard}
+  finishing_corner:  {description: Blind corner into finishing, forklift traffic}
+  rework:            {description: Rework bays}
+  buffer_zone_b:     {description: Overflow parking for untested or held cars}
+  yard:              {description: Outbound yard, slots grouped by truck}
+
+points:
+  line_end:            {zone: line_end,         x: 0,   y: 0,   carla: null}
+  inspection_gate:     {zone: inspection_gate,  x: 40,  y: 0,   carla: null}
+  test_track:          {zone: test_track,       x: 90,  y: 0,   carla: null}
+  report_point:        {zone: test_track,       x: 130, y: 0,   carla: null}
+  finishing_corner.p1: {zone: finishing_corner, x: 150, y: 10,  carla: null}
+  finishing_corner.p2: {zone: finishing_corner, x: 155, y: 20,  carla: null}
+  finishing_corner.p3: {zone: finishing_corner, x: 160, y: 15,  carla: null}
+  finishing:           {zone: finishing,        x: 160, y: 40,  carla: null}
+  lane_c:              {zone: finishing,        x: 130, y: 40,  carla: null}
+  buffer_zone_b:       {zone: buffer_zone_b,    x: 20,  y: 40,  carla: null}
+  rework.paint:        {zone: rework,           x: 100, y: -40, carla: null}
+  rework.body:         {zone: rework,           x: 115, y: -40, carla: null}
+  rework.electrical:   {zone: rework,           x: 130, y: -40, carla: null}
+  rework.mechanical:   {zone: rework,           x: 145, y: -40, carla: null}
+  production_control:  {zone: rework,           x: 160, y: -40, carla: null}
+  yard.entry:          {zone: yard,             x: 200, y: 40,  carla: null}
+  yard.Y1:             {zone: yard,             x: 210, y: 30,  carla: null}
+  yard.Y2:             {zone: yard,             x: 210, y: 36,  carla: null}
+  yard.Y3:             {zone: yard,             x: 210, y: 42,  carla: null}
+  yard.Y4:             {zone: yard,             x: 210, y: 48,  carla: null}
+  yard.Y5:             {zone: yard,             x: 220, y: 30,  carla: null}
+  yard.Y6:             {zone: yard,             x: 220, y: 36,  carla: null}
+  yard.Y7:             {zone: yard,             x: 220, y: 42,  carla: null}
+  yard.Y8:             {zone: yard,             x: 220, y: 48,  carla: null}
+  loading_bay:         {zone: yard,             x: 240, y: 40,  carla: null}
+
+# Drivable segments, both directions unless one_way is set.
+# Buffer zone B only connects to line end: untested cars cannot bypass the gate.
+segments:
+  - [line_end, inspection_gate]
+  - [line_end, buffer_zone_b]
+  - [inspection_gate, test_track]
+  - [test_track, report_point]
+  - [report_point, finishing_corner.p1]
+  - [finishing_corner.p1, finishing_corner.p2]
+  - [finishing_corner.p2, finishing_corner.p3]
+  - [finishing_corner.p3, finishing]
+  - [report_point, lane_c]
+  - [lane_c, finishing]
+  - {from: report_point, to: rework.paint, one_way: true}
+  - [rework.paint, rework.body]
+  - [rework.body, rework.electrical]
+  - [rework.electrical, rework.mechanical]
+  - [rework.mechanical, production_control]
+  - {from: rework.paint, to: inspection_gate, one_way: true}   # repaired cars are re-inspected
+  - [finishing, yard.entry]
+  - [yard.entry, yard.Y1]
+  - [yard.entry, yard.Y2]
+  - [yard.entry, yard.Y3]
+  - [yard.entry, yard.Y4]
+  - [yard.entry, yard.Y5]
+  - [yard.entry, yard.Y6]
+  - [yard.entry, yard.Y7]
+  - [yard.entry, yard.Y8]
+  - [yard.entry, loading_bay]

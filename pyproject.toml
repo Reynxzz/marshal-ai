@@ -1,0 +1,36 @@
+[project]
+name = "marshal-ai"
+version = "0.1.0"
+description = "Gemini agents that run a car plant's yard, inspections and driving-system tests. The agents never drive."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "google-adk>=1.0",
+    "pydantic>=2.6",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+gcp = [
+    "google-cloud-pubsub>=2.21",
+    "google-cloud-firestore>=2.16",
+]
+# The CARLA client matches the server version on the GPU VM; install it there only.
+carla = [
+    "carla==0.9.15",
+]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/marshal_ai"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
