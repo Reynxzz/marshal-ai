@@ -23,10 +23,10 @@ from marshal_ai.flows.yard import YardTraffic
 from marshal_ai.lab.adversarial import AdversarialTester
 from marshal_ai.lab.generator import ScenarioGenerator
 from marshal_ai.lab.regression import ReleaseGate
-from marshal_ai.lab.runner import CarlaRunner, Runner, SimRunner
+from marshal_ai.lab.runner import Runner, make_runner
 from marshal_ai.lab.sim import DriverProfile
 from marshal_ai.records import Car, CarState, InspectionResult
-from marshal_ai.runtime import Runtime, SimClock
+from marshal_ai.runtime import SIMULATED, Runtime, SimClock
 
 # Driving system releases the lab can evaluate locally. 1.1 adds the fix the demo failure suggests.
 RELEASES = {
@@ -46,8 +46,7 @@ class MarshalApp:
         self.functional = FunctionalChecker(self)
         self.router = ReportRouter(self)
         if runner is None:
-            runner = (CarlaRunner(rt.map, rt.settings.carla_host, rt.settings.carla_port)
-                      if rt.settings.driving == "carla" else SimRunner(rt.map, RELEASES["behavior-agent-1.0"]))
+            runner = make_runner(rt.settings, rt.map, RELEASES["behavior-agent-1.0"])
         self.runner = runner
         self.generator = ScenarioGenerator(rt, runner)
         self.adversarial = AdversarialTester(rt, runner)
@@ -56,6 +55,10 @@ class MarshalApp:
         self.auto_generate = False
         self._loop: asyncio.Task | None = None
         self._subscribe()
+
+    def runner_for(self, release: str) -> Runner:
+        """The lab runner for a driving system release (see RELEASES)."""
+        return self.runner.with_driver(RELEASES[release])
 
     def _subscribe(self) -> None:
         bus = self.rt.bus
@@ -104,7 +107,7 @@ class MarshalApp:
         self.assistance.check_escalations()
 
     async def run_for(self, seconds: float, dt: float = 0.5) -> None:
-        """Advance a fake plant by simulated seconds (fake driving system only)."""
+        """Advance a simulated plant (fake or MetaDrive driving system) by simulated seconds."""
         fake = self.rt.driving
         elapsed, since_tick = 0.0, 1.0
         while elapsed < seconds:
@@ -121,7 +124,7 @@ class MarshalApp:
         """Run the plant in the background in real time (for chatting with the agents)."""
         if self._loop is not None:
             return
-        if self.rt.settings.driving == "fake":
+        if self.rt.settings.driving in SIMULATED:
             async def loop():
                 while True:
                     await asyncio.sleep(0.5)

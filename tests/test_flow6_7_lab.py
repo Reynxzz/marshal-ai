@@ -63,7 +63,7 @@ def test_design_doc_request_becomes_a_dry_run_scenario_then_joins_the_library(ap
     assert result.ok, result.errors
     s = result.scenario.spec
     assert s["time_of_day"] == "dusk" and s["actors"][1]["start"] == "behind:forklift"
-    assert result.dry_run_metrics["no_contact"] == 1.0 and "import carla" in result.code
+    assert result.dry_run_metrics["no_contact"] == 1.0 and result.code == app.runner.compile(ScenarioSpec.model_validate(s))
     assert app.generator.review(result.scenario.id, approve=True, engineer="eng-kim").status == ScenarioStatus.IN_LIBRARY
 
 

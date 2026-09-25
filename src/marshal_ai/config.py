@@ -14,6 +14,9 @@ class Settings:
     driving: str = field(default_factory=lambda: os.getenv("MARSHAL_DRIVING", "fake"))
     llm: str = field(default_factory=lambda: os.getenv("MARSHAL_LLM", "gemini"))   # or "offline"
     gcp_project: str | None = field(default_factory=lambda: os.getenv("GOOGLE_CLOUD_PROJECT"))
+    lab: str = field(default_factory=lambda: os.getenv("MARSHAL_LAB", ""))   # sim | scenic | carla
+    render: bool = field(default_factory=lambda: os.getenv("MARSHAL_RENDER", "") in ("1", "true"))
+    view: str = field(default_factory=lambda: os.getenv("MARSHAL_VIEW", ""))       # topdown | 3d
     carla_host: str = field(default_factory=lambda: os.getenv("CARLA_HOST", "localhost"))
     carla_port: int = field(default_factory=lambda: int(os.getenv("CARLA_PORT", "2000")))
 

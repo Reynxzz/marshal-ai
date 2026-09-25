@@ -272,6 +272,12 @@ class AdversarialTester:
         if result.failure is None:
             return result
         result.minimal = self._shrink(base_spec, base, result.failure, result)
+        record_clip = getattr(self.runner, "clip", None)
+        if record_clip is not None:            # a real recording of the minimal failure
+            uri = record_clip(result.minimal.spec)
+            if uri:
+                result.minimal.run = result.minimal.run.model_copy(update={"clip_uri": uri})
+                self.rt.store.put(result.minimal.run)
         result.explanation = self._explain(base_spec, result.minimal)
         result.regression_id = self._add_to_suite(result)
         return result

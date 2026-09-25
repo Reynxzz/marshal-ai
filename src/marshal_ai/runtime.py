@@ -20,6 +20,9 @@ from marshal_ai.records import now
 from marshal_ai.store import Store, make_store
 
 
+SIMULATED = ("fake", "metadrive")    # backends whose time Marshal advances with tick()
+
+
 @dataclass
 class SimClock:
     """Simulated time for the fake plant, so timeouts and KPIs follow simulated seconds."""
@@ -57,7 +60,7 @@ class Runtime:
     gate_camera: GateCamera
     track_camera: TrackCamera
     plant: PlantState = field(default_factory=PlantState)
-    world: FakeWorld | None = None            # simulation ground truth (fake backend only)
+    world: FakeWorld | None = None            # simulation ground truth (fake and MetaDrive backends)
     clock: Callable[[], datetime] = now
     proposals: dict[str, Proposal] = field(default_factory=dict)
     _ids: dict[str, itertools.count] = field(default_factory=dict)
@@ -95,6 +98,12 @@ def build_runtime(s: Settings = default_settings, llm: LLM | None = None,
     if s.driving == "carla":
         driving_kwargs.setdefault("host", s.carla_host)
         driving_kwargs.setdefault("port", s.carla_port)
+    if s.driving in SIMULATED:
+        world = world or FakeWorld()
+    if s.driving == "metadrive":
+        driving_kwargs.setdefault("world", world)
+        driving_kwargs.setdefault("render", s.render)
+        driving_kwargs.setdefault("view", s.view or None)
     driving = make_driving_system(s.driving, plant_map, **driving_kwargs)
     if llm is None:
         if s.llm == "offline":
@@ -106,11 +115,10 @@ def build_runtime(s: Settings = default_settings, llm: LLM | None = None,
         from marshal_ai.driving.carla_backend import CarlaGateCamera, CarlaTrackCamera
         gate, track = CarlaGateCamera(driving), CarlaTrackCamera(driving)
     else:
-        world = world or FakeWorld()
         gate, track = FakeGateCamera(world), FakeTrackCamera(world)
     return Runtime(s, plant_map, bus, store, driving, MissionClient(driving, plant_map, bus),
                    llm, gate, track, world=world,
-                   clock=SimClock() if s.driving == "fake" else now)
+                   clock=SimClock() if s.driving in SIMULATED else now)
 
 
 def get_runtime() -> Runtime:

@@ -106,7 +106,7 @@ class ScenarioGenerator:
                 errors = check.errors
                 continue
             spec = check.spec
-            code = compile_spec(spec, self.rt.map)
+            code = self.runner.compile(spec) if hasattr(self.runner, "compile") else compile_spec(spec, self.rt.map)
             dry = self.runner.run(spec)
             errors = self._dry_run_errors(spec, dry)
             if errors:

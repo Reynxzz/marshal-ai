@@ -9,7 +9,6 @@ from google.adk.agents import Agent
 from marshal_ai.agents.common import HUMAN_DECISION_RULE
 from marshal_ai.app import RELEASES, get_app
 from marshal_ai.config import settings
-from marshal_ai.lab.runner import SimRunner
 from marshal_ai.records import Scenario, ScenarioStatus
 
 
@@ -59,7 +58,7 @@ async def evaluate_release(release: str) -> dict:
     profile = RELEASES.get(release)
     if profile is None:
         return {"error": f"unknown release; known: {sorted(RELEASES)}"}
-    runner = SimRunner(app.rt.map, profile) if app.rt.settings.driving == "fake" else app.runner
+    runner = app.runner_for(release)
     report = await asyncio.to_thread(app.release_gate.evaluate, release, runner)
     return {"summary": report.summary(), "failed": report.failed, "blocked": report.blocked}
 

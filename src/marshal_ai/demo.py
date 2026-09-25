@@ -49,5 +49,5 @@ def seed_demo(rt: Runtime, vins: list[str] | None = None) -> None:
         rt.store.put(car.model_copy(update={"updated_at": now}))
         if rt.world is not None:
             rt.world.add(car.vin, copy.deepcopy(truth))
-        if spawn is not None and rt.settings.driving == "fake":
+        if spawn is not None and rt.settings.driving in ("fake", "metadrive"):
             spawn(car.vin, car.location)

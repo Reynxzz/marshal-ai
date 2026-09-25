@@ -1,3 +1,5 @@
+import os
+
 import pytest
 
 from marshal_ai.app import MarshalApp, set_app
@@ -5,7 +7,9 @@ from marshal_ai.config import Settings
 from marshal_ai.demo import seed_demo
 from marshal_ai.runtime import build_runtime, set_runtime
 
-OFFLINE = Settings(bus="memory", store="memory", driving="fake", llm="offline")
+# MARSHAL_TEST_DRIVING=metadrive runs the flow tests on MetaDrive instead of the fake plant
+DRIVING = os.getenv("MARSHAL_TEST_DRIVING", "fake")
+OFFLINE = Settings(bus="memory", store="memory", driving=DRIVING, llm="offline")
 
 
 @pytest.fixture
@@ -15,6 +19,9 @@ def app():
     set_runtime(rt)
     set_app(marshal)
     yield marshal
+    close = getattr(rt.driving, "close", None)
+    if close is not None:
+        close()
     set_app(None)
     set_runtime(None)
 

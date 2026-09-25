@@ -19,6 +19,14 @@ gcp = [
 carla = [
     "carla==0.9.15",
 ]
+# Laptop simulation: MetaDrive plant backend and Scenic test lab (MARSHAL_DRIVING=metadrive)
+metadrive = [
+    "metadrive-simulator==0.4.3",
+    "scenic==3.1.1",
+    "eclipse-sumo>=1.20",
+    "sumolib>=1.20",
+    "shapely>=2.0",
+]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
