@@ -119,7 +119,9 @@ class CarlaDrivingSystem:
         self.assist_options = list(assist_options) if assist_options else list(ASSIST_OPTIONS)
         self.auto_assist = auto_assist
         # Reusable capture cameras, keyed by pose; see capture()/close_cameras().
+        # pose key -> (camera, frame queue, callback); see capture()/close_cameras()
         self._cameras: dict[tuple, tuple] = {}
+        self.frame_timeout_s = 1.0            # how long to wait for one camera frame
         # Replaced by the runtime when MARSHAL_ARTIFACTS=gcs, so the gs:// URI a record
         # carries points at the actual photo behind the verdict.
         self.artifacts: Artifacts = NoArtifacts()
@@ -410,43 +412,50 @@ class CarlaDrivingSystem:
                 q.put(image)
 
             cam = self.world.spawn_actor(bp, transform)
-            cam.listen(receive)
-            entry = self._cameras[key] = (cam, frames)
+            entry = self._cameras[key] = (cam, frames, receive)
 
-        cam, frames = entry
+        cam, frames, receive = entry
         while not frames.empty():                 # discard anything queued
             try:
                 frames.get_nowait()
             except queue.Empty:
                 break
 
-        # Draining is not enough. Frames already in flight arrive after the drain and still
-        # show the previous world state, which made a dark lamp look lit because the frame
-        # was of the previous, healthy car. Skip a couple before trusting one.
-        skip = 2
-        image = None
-        if self.world.get_settings().synchronous_mode:
-            for _ in range(8 + skip):
-                self._tick_world()
-                try:
-                    candidate = frames.get(timeout=1.0)
-                except queue.Empty:
-                    continue
-                if skip > 0:
-                    skip -= 1
-                    continue
-                image = candidate
-                break
-        else:
-            for _ in range(skip + 1):
-                try:
-                    candidate = frames.get(timeout=6.0)
-                except queue.Empty:
+        # A pooled camera only streams while a frame is wanted. Left listening it produces
+        # every simulation frame at full resolution forever, and with the gate's four cameras
+        # that was enough to push the server into repeated
+        # "Invalid session: no stream available" and to drag simulated time behind real time.
+        cam.listen(receive)
+        try:
+            # Draining is not enough. Frames already in flight arrive after the drain and still
+            # show the previous world state, which made a dark lamp look lit because the frame
+            # was of the previous, healthy car. Skip a couple before trusting one.
+            skip = 2
+            image = None
+            if self.world.get_settings().synchronous_mode:
+                for _ in range(8 + skip):
+                    self._tick_world()
+                    try:
+                        candidate = frames.get(timeout=self.frame_timeout_s)
+                    except queue.Empty:
+                        continue
+                    if skip > 0:
+                        skip -= 1
+                        continue
+                    image = candidate
                     break
-                if skip > 0:
-                    skip -= 1
-                    continue
-                image = candidate
+            else:
+                for _ in range(skip + 1):
+                    try:
+                        candidate = frames.get(timeout=self.frame_timeout_s * 6)
+                    except queue.Empty:
+                        break
+                    if skip > 0:
+                        skip -= 1
+                        continue
+                    image = candidate
+        finally:
+            cam.stop()                            # idle cameras must not stream
         if image is None:
             raise RuntimeError("camera produced no frame after bounded warm-up")
         with tempfile.TemporaryDirectory() as tmp:
@@ -456,9 +465,9 @@ class CarlaDrivingSystem:
 
     def close_cameras(self) -> None:
         """Release the reusable capture cameras."""
-        for cam, _frames in self._cameras.values():
+        for cam, _frames, _receive in self._cameras.values():
             try:
-                cam.stop()
+                cam.stop()                        # a no-op if it is already idle
                 cam.destroy()
             except Exception:                     # already gone with the world
                 pass

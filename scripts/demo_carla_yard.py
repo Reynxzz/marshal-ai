@@ -49,6 +49,12 @@ def parser() -> argparse.ArgumentParser:
                          "is what makes the decision need a supervisor")
     ap.add_argument("--observe-s", type=float, default=150.0,
                     help="how long to let the controller run before the exception")
+    ap.add_argument("--with-gate", action=argparse.BooleanOptionalAction, default=False,
+                    help="let a released car's arrival start flow 3's gate inspection. Off by "
+                         "default: the CARLA 0.9.16 server segfaults (Signal 11) when a camera "
+                         "is used while the driving loop is active, which kills the cars "
+                         "mid-run. Use the process-per-phase pattern in run_carla_day2.sh "
+                         "instead of combining them here.")
     ap.add_argument("--output", default="/tmp/marshal-yard")
     return ap
 
@@ -82,14 +88,15 @@ async def run(args: argparse.Namespace) -> dict:
     if type(rt.llm).__name__ != "GeminiLLM":
         raise RuntimeError(f"expected GeminiLLM, got {type(rt.llm).__name__}")
 
-    # Scope: this demonstrates flow 1. When a car reaches the gate the app would start flow 3,
-    # whose four 1280x720 captures repeatedly took the CARLA server down mid-run (5 restarts,
-    # "Invalid session: no stream available"), which aborted the client and hid the yard result.
-    # Flow 3 is verified on its own against real gate cameras, so it is kept out of this run.
-    async def _gate_out_of_scope(vin, views=None, check_variant=True):
-        emit({"type": "yard.gate_skipped", "vin": vin,
-              "why": "flow 3 is verified separately; kept out of the flow 1 run"})
-    app.visual.inspect = _gate_out_of_scope
+    # Flow 3 is off here. Pooled cameras no longer stream while idle, which removed the
+    # "Invalid session: no stream available" floods, but the server still crashes with
+    # Signal 11 (SIGSEGV) when a camera is used while the driving loop runs: the client then
+    # times out on world.tick() and the cars die with the server. Day 2 works around this by
+    # giving each phase its own process, which is the pattern to use for a combined scene.
+    if not args.with_gate:
+        async def _gate_out_of_scope(vin, views=None, check_variant=True):
+            emit({"type": "yard.gate_skipped", "vin": vin, "why": "--no-with-gate"})
+        app.visual.inspect = _gate_out_of_scope
 
     vins = [f"VIN-Y{i + 1}" for i in range(args.cars)]
     emit({"type": "yard.start", "llm": type(rt.llm).__name__,
