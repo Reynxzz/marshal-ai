@@ -97,6 +97,8 @@ class CarlaDrivingSystem:
         self._task: asyncio.Task | None = None
         self._since_status = 0.0
         self.faults: dict[str, set[str]] = {}      # vin -> routine steps whose lamp stays dark
+        # Reusable capture cameras, keyed by pose; see capture()/close_cameras().
+        self._cameras: dict[tuple, tuple] = {}
 
     def transform(self, point: str):
         spec = self.map.points[point].carla
@@ -169,6 +171,7 @@ class CarlaDrivingSystem:
                 await self._task
             except asyncio.CancelledError:
                 pass
+        self.close_cameras()
         settings = self.world.get_settings()
         settings.synchronous_mode = False
         self.world.apply_settings(settings)
@@ -241,37 +244,84 @@ class CarlaDrivingSystem:
             v.step_left_s = nxt.duration_s
 
     def capture(self, transform, width: int = 640, height: int = 360) -> bytes:
-        """One RGB frame from a camera placed at a world transform (synchronous mode)."""
-        bp = self.world.get_blueprint_library().find("sensor.camera.rgb")
-        bp.set_attribute("image_size_x", str(width))
-        bp.set_attribute("image_size_y", str(height))
-        frames: queue.Queue = queue.Queue()
-        cam = self.world.spawn_actor(bp, transform)
-        try:
-            cam.listen(frames.put)
-            image = None
-            if self.world.get_settings().synchronous_mode:
-                for _ in range(5):
-                    self._tick_world()
+        """One RGB frame from a reusable camera at a world transform.
+
+        Spawning and destroying a sensor per frame is what produced repeated
+        "Invalid session: no stream available" errors and took the server down
+        mid-run, so cameras are keyed by pose and kept for the life of the
+        driving system. `close_cameras` releases them.
+        """
+        key = (round(transform.location.x, 2), round(transform.location.y, 2),
+               round(transform.location.z, 2), round(transform.rotation.yaw, 1), width, height)
+        entry = self._cameras.get(key)
+        if entry is None:
+            bp = self.world.get_blueprint_library().find("sensor.camera.rgb")
+            bp.set_attribute("image_size_x", str(width))
+            bp.set_attribute("image_size_y", str(height))
+            frames: queue.Queue = queue.Queue(maxsize=4)
+
+            def receive(image, q=frames) -> None:
+                if q.full():                      # keep only recent frames
                     try:
-                        image = frames.get(timeout=1.0)
-                        break
+                        q.get_nowait()
                     except queue.Empty:
-                        continue
-            else:
+                        pass
+                q.put(image)
+
+            cam = self.world.spawn_actor(bp, transform)
+            cam.listen(receive)
+            entry = self._cameras[key] = (cam, frames)
+
+        cam, frames = entry
+        while not frames.empty():                 # discard anything queued
+            try:
+                frames.get_nowait()
+            except queue.Empty:
+                break
+
+        # Draining is not enough. Frames already in flight arrive after the drain and still
+        # show the previous world state, which made a dark lamp look lit because the frame
+        # was of the previous, healthy car. Skip a couple before trusting one.
+        skip = 2
+        image = None
+        if self.world.get_settings().synchronous_mode:
+            for _ in range(8 + skip):
+                self._tick_world()
                 try:
-                    image = frames.get(timeout=5.0)
+                    candidate = frames.get(timeout=1.0)
                 except queue.Empty:
-                    pass
-            if image is None:
-                raise RuntimeError("camera produced no frame after bounded warm-up")
-            with tempfile.TemporaryDirectory() as tmp:
-                path = Path(tmp) / "frame.jpg"
-                image.save_to_disk(str(path))
-                return path.read_bytes()
-        finally:
-            cam.stop()
-            cam.destroy()
+                    continue
+                if skip > 0:
+                    skip -= 1
+                    continue
+                image = candidate
+                break
+        else:
+            for _ in range(skip + 1):
+                try:
+                    candidate = frames.get(timeout=6.0)
+                except queue.Empty:
+                    break
+                if skip > 0:
+                    skip -= 1
+                    continue
+                image = candidate
+        if image is None:
+            raise RuntimeError("camera produced no frame after bounded warm-up")
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "frame.jpg"
+            image.save_to_disk(str(path))
+            return path.read_bytes()
+
+    def close_cameras(self) -> None:
+        """Release the reusable capture cameras."""
+        for cam, _frames in self._cameras.values():
+            try:
+                cam.stop()
+                cam.destroy()
+            except Exception:                     # already gone with the world
+                pass
+        self._cameras.clear()
 
     def _status(self, v: _Vehicle) -> Status:
         loc = v.actor.get_location()
@@ -303,6 +353,10 @@ TRACK_CAMERAS = {
 }
 TRACK_CAMERA_DEFAULT = (-8.0, 3.0, 1.6, -20.0)
 
+# Gemini could not distinguish a lit headlight from a dark one at 640x360; the reverse lamp
+# was invisible at that size too. Evidence frames are captured larger than the viewer's.
+EVIDENCE_WIDTH, EVIDENCE_HEIGHT = 1280, 720
+
 
 def _offset(ds: CarlaDrivingSystem, point: str, forward: float, right: float, z: float, yaw: float):
     base = ds.transform(point)
@@ -323,7 +377,8 @@ class CarlaGateCamera:
         for view in GATE_VIEWS:
             if views is not None and view not in views:
                 continue
-            data = self.ds.capture(_offset(self.ds, self.point, *GATE_CAMERAS[view]))
+            data = self.ds.capture(_offset(self.ds, self.point, *GATE_CAMERAS[view]),
+                                   EVIDENCE_WIDTH, EVIDENCE_HEIGHT)
             out.append(Media(mime="image/jpeg", data=data, label=f"{view} camera",
                              uri=f"gs://marshal/gate/{vin}/{view}.jpg"))
         return out
@@ -337,6 +392,7 @@ class CarlaTrackCamera:
 
     def clip(self, vin: str, step: int, name: str) -> Media:
         placement = TRACK_CAMERAS.get(name, TRACK_CAMERA_DEFAULT)
-        data = self.ds.capture(_offset(self.ds, self.point, *placement))
+        data = self.ds.capture(_offset(self.ds, self.point, *placement),
+                               EVIDENCE_WIDTH, EVIDENCE_HEIGHT)
         return Media(mime="image/jpeg", data=data, label=f"track camera, step {step} {name}",
                      uri=f"gs://marshal/track/{vin}/step{step}_{name}.jpg")

@@ -37,6 +37,17 @@ SYSTEM = """You watch short test-track clips of finished cars. For each clip you
 result. Say whether it is clearly visible, with confidence, and what you actually see. Check every
 lamp named, e.g. a brake light test needs left, right and third brake lamps lit."""
 
+# Absolute judgement of a lamp does not work. Asked whether headlights were lit in a night
+# frame where they demonstrably were not, both gemini-2.5-flash and gemini-2.5-pro answered
+# "both headlights are lit" at confidence 1.0 - so a dark lamp passed and the check could
+# never catch the fault it exists for. Given a known-good reference frame of the same step to
+# compare against, the same model answered correctly at 0.99 both ways. End-of-line rigs
+# compare against a golden reference for the same reason.
+REFERENCE_SYSTEM = """You compare two frames of the same test-track step. The FIRST is a reference
+recorded from a car that passed this step. The SECOND is the car under test. Decide whether the
+expected result is present in the SECOND frame, judging by how it differs from the reference.
+Report what you actually see. Do not assume the car behaved correctly."""
+
 
 @dataclass
 class _Run:
@@ -51,6 +62,10 @@ class FunctionalChecker:
         self.app = app
         self.rt = app.rt
         self.runs: dict[str, _Run] = {}
+        # vin -> {step: Media}: kept so a demo can write out the frames a verdict used
+        self._last_clips: dict[str, dict[int, Media]] = {}
+        # step name -> frame from a car that passed it, used as the comparison reference
+        self.references: dict[str, Media] = {}
 
     async def start(self, vin: str, steps: list[int] | None = None) -> str:
         """Send the car through the routine and on to the report point."""
@@ -74,6 +89,7 @@ class FunctionalChecker:
         if run is None:
             return None
         items = await asyncio.gather(*(self._judge(run, s) for s in run.steps))
+        self._last_clips[run.vin] = dict(run.clips)
         return await self._record(run.vin, list(items))
 
     async def _judge(self, run: _Run, step: RoutineStep) -> ChecklistItem:
@@ -82,10 +98,32 @@ class FunctionalChecker:
         clip = run.clips.get(step.step)
         if clip is None:
             clip = self.rt.track_camera.clip(run.vin, step.step, step.name)
-        prompt = (f"Step {step.step}: {step.command}.\nExpected on camera: {step.expected_on_camera}.\n"
-                  f"Telemetry reported: {reported.telemetry if reported else 'nothing'}")
-        seen = await ask(self.rt, "track.step", prompt, StepSeen, [clip], SYSTEM)
+        # The camera is the independent source. Telemetry is deliberately NOT shown to the
+        # model: including it ("Telemetry reported: {'headlights': 'ON'}") led Gemini to
+        # confirm a lamp that was demonstrably dark in the frame, at confidence 1.0, so the
+        # check could never catch the disagreement it exists to catch.
+        reference = self.references.get(step.name)
+        if reference is not None:
+            # Both frames reach Gemini prefixed with their label, so they must be labelled
+            # differently: sent as two identical "[track camera]" images the model could not
+            # tell which was the reference and confirmed a dark lamp.
+            first = Media(mime=reference.mime, data=reference.data, uri=reference.uri,
+                          label=f"reference frame: a car that passed step {step.step}")
+            second = Media(mime=clip.mime, data=clip.data, uri=clip.uri,
+                           label="frame under test: the car being checked now")
+            prompt = (f"Step {step.step}: {step.command}.\n"
+                      f"Expected in the frame under test: {step.expected_on_camera}.")
+            seen = await ask(self.rt, "track.step", prompt, StepSeen,
+                             [first, second], REFERENCE_SYSTEM)
+        else:
+            prompt = (f"Step {step.step}: {step.command}.\n"
+                      f"Expected on camera: {step.expected_on_camera}.\n"
+                      f"Judge only what this frame shows. Do not assume the car behaved correctly.")
+            seen = await ask(self.rt, "track.step", prompt, StepSeen, [clip], SYSTEM)
         camera_ok = seen.seen if seen.confidence >= CAMERA_MIN_CONFIDENCE else None
+        if camera_ok and telemetry_ok and step.name not in self.references:
+            # A step both sources agree on becomes the reference the next car is compared to.
+            self.references[step.name] = clip
         return ChecklistItem(step=step.step, name=step.name, telemetry_ok=telemetry_ok,
                              camera_ok=camera_ok, camera_confidence=seen.confidence,
                              clip_uri=clip.uri)
