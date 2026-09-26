@@ -129,7 +129,54 @@ The replay emits one status per simulated second, advances progress at each name
 `mission.done` at `yard.Y1`, restores asynchronous world mode, and removes its vehicle. The browser
 viewer is fixed over the start lane, so the vehicle is visible as it departs.
 
+## Real Gemini via Vertex AI
+
+`GeminiLLM` uses `google-genai` with no explicit credentials, so it reads the environment. With a
+service account that means Vertex AI mode:
+
+```bash
+export GOOGLE_APPLICATION_CREDENTIALS=~/.config/marshal/sa-gemini-carla.json
+export GOOGLE_GENAI_USE_VERTEXAI=TRUE
+export GOOGLE_CLOUD_PROJECT=id-rd-ca-hanif-ali
+export GOOGLE_CLOUD_LOCATION=us-central1
+export MARSHAL_LLM=gemini          # "offline" uses the deterministic stand-ins
+```
+
+Keep the key outside the repository. `.gitignore` blocks `sa-*.json`, `*-sa.json` and
+`service-account*.json`, but the safest place is `~/.config/marshal/` at mode `600`.
+
+### Permissions actually required
+
+| Need | Role | Status on `rey-gemini-sa` |
+| --- | --- | --- |
+| Gemini text + vision | `roles/aiplatform.user` | granted, verified |
+| Pub/Sub bus (`MARSHAL_BUS=gcp`) | `roles/pubsub.admin` (or `editor` + `publisher` + `subscriber`) | granted, verified |
+| Firestore store (`MARSHAL_STORE=gcp`) | `roles/datastore.user` | **missing** |
+
+APIs `aiplatform`, `pubsub`, `firestore` and `datastore` are all enabled on the project.
+
+Two gotchas seen in practice. A freshly granted role can take a few minutes to propagate — Pub/Sub
+returned `IAM_PERMISSION_DENIED` at first and worked shortly after with no change. And Firestore
+needs a **database to exist**, which is separate from enabling the API and from IAM:
+
+```
+NotFound 404 The database (default) does not exist for project id-rd-ca-hanif-ali
+```
+
+Create it once (the location is permanent), then grant `roles/datastore.user`:
+
+```bash
+gcloud firestore databases create --location=asia-southeast2 --project=id-rd-ca-hanif-ali
+gcloud projects add-iam-policy-binding id-rd-ca-hanif-ali \
+  --member=serviceAccount:rey-gemini-sa@id-rd-ca-hanif-ali.iam.gserviceaccount.com \
+  --role=roles/datastore.user
+```
+
+No Cloud Storage or BigQuery role is needed yet: `gs://` URIs are recorded as strings and nothing
+in `src/` imports those clients.
+
 ## Test lab on real CARLA (day 3 checkpoint)
+
 
 The day-3 checkpoint from `marshal_flow_design.md` — *one generated scenario must run in CARLA and
 be judged pass or fail automatically* — runs end to end on the GPU host:
@@ -241,7 +288,24 @@ Four compiler defects were fixed to get there, all of which only appear against 
 4. The run budget was 120 simulated seconds while the `line_end → finishing` route alone needs 76;
    it is now 200.
 
-Not yet verified: real Gemini pixel judgement, physical reverse/brake/full-lock maneuvers, and
-Pub/Sub/Firestore backends. The compiled scenario script still uses proxy blueprints for forklifts
-and pallet stacks, and only walkers move on trigger. Parallel scenario execution needs one CARLA
-server per slot. 15 of 25 plant map points still lack CARLA transforms.
+Not yet verified: physical reverse/brake/full-lock maneuvers, and the Firestore store backend (the
+project has no Firestore database yet and the service account lacks `roles/datastore.user`). The
+compiled scenario script still uses proxy blueprints for forklifts and pallet stacks, and only
+walkers move on trigger. Parallel scenario execution needs one CARLA server per slot. 15 of 25 plant
+map points still lack CARLA transforms.
+
+**Real Gemini verified** on `id-rd-ca-hanif-ali` via Vertex AI (`gemini-2.5-flash`), replacing the
+offline stand-ins. All five demo stages ran end to end on the fake plant:
+
+- Flow 3 caught a wrong variant from pixels: *"colour: build sheet says white, car shows red (0.96)"*.
+- Flow 4 caught a dead lamp where telemetry and camera disagree: *"brake lights telemetry ON, camera
+  NOT lit -> FAIL"*.
+- Flow 5 routed both cars to bays (`production_control`, `rework.electrical`) for supervisor confirm.
+- Flow 2 ranked assistance options and recommended `wait_for_removal` at 86% with a worker 3 m away.
+- Flow 6 generated `SC-0142` and turned assistance case `AC-1` into `SC-0143`.
+- Flow 7 found a failure at night (`min_gap_to_person_m` 1.15 against a 1.5 limit) and explained it.
+- The release gate blocked `behavior-agent-1.0` on 1 failing test and passed `1.1`.
+
+Gemini also read a real CARLA frame of the corner collision correctly, returning
+`{"people_present": true, "person_in_lane": true, "risk": "high"}` — so multimodal judgement works on
+simulator imagery, not just the fake plant's synthetic views.
