@@ -135,12 +135,20 @@ class CarlaDrivingSystem:
 
     # plant side: a finished car rolls off the line
 
-    def spawn(self, vin: str, at: str = "line_end", colour: str | None = None) -> None:
+    def spawn(self, vin: str, at: str = "line_end", colour: str | None = None,
+              behind_m: float = 0.0) -> None:
+        """Put a car on the map. behind_m queues it that far back along the point's heading,
+        so several cars can wait at the line end without occupying the same pose."""
         bp = self.world.get_blueprint_library().find(self.vehicle_blueprint)
         if colour and bp.has_attribute("color"):
             bp.set_attribute("color", colour)            # "r,g,b"
         bp.set_attribute("role_name", vin)
-        actor = self.world.spawn_actor(bp, self.transform(at))
+        pose = self.transform(at)
+        if behind_m:
+            forward = pose.get_forward_vector()
+            pose = carla.Transform(
+                pose.location - forward * behind_m, pose.rotation)
+        actor = self.world.spawn_actor(bp, pose)
         try:
             # A freshly spawned actor can report the origin until the server publishes one frame.
             # BehaviorAgent reads the actor transform in its constructor, so synchronize first.
@@ -246,6 +254,19 @@ class CarlaDrivingSystem:
         if await self._check_blocked(v):
             return
         v.actor.apply_control(v.agent.run_step())
+
+    def position_xy(self, vin: str) -> tuple[float, float] | None:
+        """Where a car is right now, in the same frame as reference_xy."""
+        v = self.vehicles.get(vin)
+        if v is None:
+            return None
+        location = v.actor.get_location()
+        return float(location.x), float(location.y)
+
+    def reference_xy(self, point: str) -> tuple[float, float]:
+        """Where a named point is, in the same frame as Status.x/y: CARLA world coordinates."""
+        location = self.transform(point).location
+        return float(location.x), float(location.y)
 
     def store_artifact(self, uri: str, data: bytes) -> str:
         """Upload evidence and return the URI to record. Never raises."""
