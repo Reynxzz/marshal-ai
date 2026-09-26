@@ -23,6 +23,7 @@ import logging
 import queue
 import tempfile
 import threading
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -122,6 +123,8 @@ class CarlaDrivingSystem:
         # pose key -> (camera, frame queue, callback); see capture()/close_cameras()
         self._cameras: dict[tuple, tuple] = {}
         self.frame_timeout_s = 1.0            # how long to wait for one camera frame
+        self._simulated_s = 0.0               # see realtime_ratio()
+        self._sim_started_at: float | None = None
         # Replaced by the runtime when MARSHAL_ARTIFACTS=gcs, so the gs:// URI a record
         # carries points at the actual photo behind the verdict.
         self.artifacts: Artifacts = NoArtifacts()
@@ -210,15 +213,30 @@ class CarlaDrivingSystem:
         settings.synchronous_mode = False
         self.world.apply_settings(settings)
 
+    def _owns_ticks(self) -> bool:
+        """True when this call may tick the world itself.
+
+        In synchronous mode the world must have exactly one source of ticks. The driving loop
+        ticks once per frame; a capture that also ticked produced two concurrent sources, and
+        the server answered with "Waited for 10 seconds on IO" then Signal 11.
+
+        Note this alone does not make a capture work alongside a running loop: the loop is then
+        the only ticker, and it is blocked waiting for the capture, so no frame ever arrives.
+        Gate inspection has to run in a phase with no active driving loop.
+        """
+        return self.world.get_settings().synchronous_mode and self._task is None
+
     def _tick_world(self):
         with self._tick_lock:
             return self.world.tick()
 
     async def _run(self) -> None:
+        self._sim_started_at = time.monotonic()
         while True:
             for v in list(self.vehicles.values()):
                 await self._step(v)
             await asyncio.to_thread(self._tick_world)
+            self._simulated_s += self.fixed_delta_s
             self._since_status += self.fixed_delta_s
             if self._since_status >= 1.0:
                 self._since_status = 0.0
@@ -394,8 +412,7 @@ class CarlaDrivingSystem:
         mid-run, so cameras are keyed by pose and kept for the life of the
         driving system. `close_cameras` releases them.
         """
-        key = (round(transform.location.x, 2), round(transform.location.y, 2),
-               round(transform.location.z, 2), round(transform.rotation.yaw, 1), width, height)
+        key = self._camera_key(transform, width, height)
         entry = self._cameras.get(key)
         if entry is None:
             bp = self.world.get_blueprint_library().find("sensor.camera.rgb")
@@ -432,7 +449,7 @@ class CarlaDrivingSystem:
             # was of the previous, healthy car. Skip a couple before trusting one.
             skip = 2
             image = None
-            if self.world.get_settings().synchronous_mode:
+            if self._owns_ticks():
                 for _ in range(8 + skip):
                     self._tick_world()
                     try:
@@ -445,6 +462,7 @@ class CarlaDrivingSystem:
                     image = candidate
                     break
             else:
+                # the driving loop (or the server in async mode) produces the frames
                 for _ in range(skip + 1):
                     try:
                         candidate = frames.get(timeout=self.frame_timeout_s * 6)
@@ -462,6 +480,111 @@ class CarlaDrivingSystem:
             path = Path(tmp) / "frame.jpg"
             image.save_to_disk(str(path))
             return path.read_bytes()
+
+    def capture_moving(self, transform, width: int | None = None, height: int | None = None,
+                       settle_frames: int = 6) -> bytes:
+        """Capture from a single reusable camera that is moved to this pose.
+
+        Day 2 has always been stable using one camera moved between the gate views, so this
+        follows that pattern: one sensor for any number of poses, rather than four held at once.
+        More frames are skipped than in capture(), because after a move the frames already in
+        flight still show the previous pose.
+        """
+        width = EVIDENCE_WIDTH if width is None else width
+        height = EVIDENCE_HEIGHT if height is None else height
+        key = ("movable", width, height)
+        entry = self._cameras.get(key)
+        if entry is None:
+            bp = self.world.get_blueprint_library().find("sensor.camera.rgb")
+            bp.set_attribute("image_size_x", str(width))
+            bp.set_attribute("image_size_y", str(height))
+            frames: queue.Queue = queue.Queue(maxsize=8)
+
+            def receive(image, q=frames) -> None:
+                if q.full():
+                    try:
+                        q.get_nowait()
+                    except queue.Empty:
+                        pass
+                q.put(image)
+
+            entry = self._cameras[key] = (self.world.spawn_actor(bp, transform), frames, receive)
+        cam, frames, receive = entry
+
+        cam.set_transform(transform)
+        while not frames.empty():
+            try:
+                frames.get_nowait()
+            except queue.Empty:
+                break
+
+        cam.listen(receive)
+        try:
+            image = None
+            skip = settle_frames
+            own_ticks = self._owns_ticks()
+            for _ in range(settle_frames + 10):
+                if own_ticks:
+                    self._tick_world()
+                try:
+                    candidate = frames.get(timeout=self.frame_timeout_s)
+                except queue.Empty:
+                    continue
+                if skip > 0:
+                    skip -= 1
+                    continue
+                image = candidate
+                break
+        finally:
+            cam.stop()
+        if image is None:
+            raise RuntimeError("camera produced no frame after moving to the requested pose")
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "frame.jpg"
+            image.save_to_disk(str(path))
+            return path.read_bytes()
+
+    def prewarm_camera(self, transform, width: int | None = None,
+                       height: int | None = None, movable: bool = False) -> None:
+        """Create the sensor for this pose now, without taking a frame.
+
+        Day 2 is stable because every camera exists before `start()`; the app path created
+        them lazily on the first capture, which happens while the loop is ticking, and the
+        server segfaults there (Signal 11). Call this before `start()` for each pose a run
+        will use.
+        """
+        # resolved here rather than as defaults: EVIDENCE_* is defined below this class
+        width = EVIDENCE_WIDTH if width is None else width
+        height = EVIDENCE_HEIGHT if height is None else height
+        key = ("movable", width, height) if movable else self._camera_key(transform, width, height)
+        if key in self._cameras:
+            return
+        bp = self.world.get_blueprint_library().find("sensor.camera.rgb")
+        bp.set_attribute("image_size_x", str(width))
+        bp.set_attribute("image_size_y", str(height))
+        frames: queue.Queue = queue.Queue(maxsize=4)
+
+        def receive(image, q=frames) -> None:
+            if q.full():
+                try:
+                    q.get_nowait()
+                except queue.Empty:
+                    pass
+            q.put(image)
+
+        self._cameras[key] = (self.world.spawn_actor(bp, transform), frames, receive)
+
+    @staticmethod
+    def _camera_key(transform, width: int, height: int) -> tuple:
+        return (round(transform.location.x, 2), round(transform.location.y, 2),
+                round(transform.location.z, 2), round(transform.rotation.yaw, 1), width, height)
+
+    def realtime_ratio(self) -> float | None:
+        """Simulated seconds per real second. Below 1.0 means the box cannot keep up."""
+        if self._sim_started_at is None or not self._simulated_s:
+            return None
+        elapsed = time.monotonic() - self._sim_started_at
+        return round(self._simulated_s / elapsed, 2) if elapsed > 0 else None
 
     def close_cameras(self) -> None:
         """Release the reusable capture cameras."""
@@ -522,13 +645,19 @@ class CarlaGateCamera:
     def __init__(self, ds: CarlaDrivingSystem, point: str = "inspection_gate"):
         self.ds, self.point = ds, point
 
+    def prewarm(self, views: list[str] | None = None) -> None:
+        """Create the single movable gate sensor before the driving loop starts."""
+        first = next(iter(GATE_VIEWS if views is None else views))
+        self.ds.prewarm_camera(_offset(self.ds, self.point, *GATE_CAMERAS[first]),
+                               EVIDENCE_WIDTH, EVIDENCE_HEIGHT, movable=True)
+
     def capture(self, vin: str, views: list[str] | None = None) -> list[Media]:
         out = []
         for view in GATE_VIEWS:
             if views is not None and view not in views:
                 continue
-            data = self.ds.capture(_offset(self.ds, self.point, *GATE_CAMERAS[view]),
-                                   EVIDENCE_WIDTH, EVIDENCE_HEIGHT)
+            data = self.ds.capture_moving(_offset(self.ds, self.point, *GATE_CAMERAS[view]),
+                                          EVIDENCE_WIDTH, EVIDENCE_HEIGHT)
             uri = self.ds.store_artifact(f"gs://marshal/gate/{vin}/{view}.jpg", data)
             out.append(Media(mime="image/jpeg", data=data, label=f"{view} camera", uri=uri))
         return out
@@ -539,6 +668,12 @@ class CarlaTrackCamera:
 
     def __init__(self, ds: CarlaDrivingSystem, point: str = "test_track"):
         self.ds, self.point = ds, point
+
+    def prewarm(self) -> None:
+        """Create every per-step track sensor before the driving loop starts."""
+        for placement in list(TRACK_CAMERAS.values()) + [TRACK_CAMERA_DEFAULT]:
+            self.ds.prewarm_camera(_offset(self.ds, self.point, *placement),
+                                   EVIDENCE_WIDTH, EVIDENCE_HEIGHT)
 
     def clip(self, vin: str, step: int, name: str) -> Media:
         placement = TRACK_CAMERAS.get(name, TRACK_CAMERA_DEFAULT)

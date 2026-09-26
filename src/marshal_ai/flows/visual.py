@@ -92,6 +92,10 @@ class VisualInspector:
     async def inspect(self, vin: str, views: list[str] | None = None, check_variant: bool = True) -> InspectionResult:
         """Inspect a car at the gate. Re-inspection passes only the views that had findings."""
         car = self.rt.store.get(Car, vin)
+        # Deliberately inline. Capturing off-thread, concurrently with a running driving loop,
+        # segfaults the CARLA server; capturing inline blocks the loop so no ticks happen and
+        # no frame arrives. Neither works, so a gate inspection must run in a phase with no
+        # active driving loop - see the README and run_carla_day2.sh.
         images = self.rt.gate_camera.capture(vin, views)
         view_names = [m.label.split()[0] for m in images]
         jobs = [self._view(img, GATE_VIEWS[name]) for img, name in zip(images, view_names)]

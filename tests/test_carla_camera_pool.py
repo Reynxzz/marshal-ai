@@ -91,6 +91,7 @@ def _backend(world) -> CarlaDrivingSystem:
     backend.world = world
     backend._cameras = {}
     backend.frame_timeout_s = 0.01          # keep the no-frame case instant
+    backend._task = None                    # no driving loop: this backend owns the ticks
     return backend
 
 
@@ -138,6 +139,72 @@ def test_the_stream_is_stopped_even_when_no_frame_arrives():
         backend.capture(_pose(), 640, 360)       # nothing ever produces a frame
 
     assert log == ["spawn", "listen", "stop"], "a failed capture must not leave it streaming"
+
+
+def test_prewarm_creates_the_sensor_without_taking_a_frame():
+    """The server segfaults when a camera is created mid-tick, so runs create them up front."""
+    log: list[str] = []
+    world = _World(log)
+    backend = _backend(world)
+
+    backend.prewarm_camera(_pose(), 640, 360)
+
+    assert log == ["spawn"], "no stream should start until a frame is wanted"
+    assert world.cameras[0].listening is False
+    assert len(backend._cameras) == 1
+
+
+def test_a_capture_after_prewarm_reuses_that_sensor(monkeypatch):
+    log: list[str] = []
+    world = _World(log)
+    backend = _backend(world)
+    backend.prewarm_camera(_pose(), 640, 360)
+    monkeypatch.setattr(_Camera, "listen", stream_on_listen("a", "b", "c"))
+
+    backend.capture(_pose(), 640, 360)
+
+    assert log.count("spawn") == 1, "prewarm must not be undone by the first capture"
+    assert log == ["spawn", "listen", "stop"]
+
+
+def test_prewarm_is_idempotent():
+    backend = _backend(_World([]))
+
+    backend.prewarm_camera(_pose(), 640, 360)
+    backend.prewarm_camera(_pose(), 640, 360)
+
+    assert len(backend._cameras) == 1
+
+
+def test_the_realtime_ratio_reports_simulated_seconds_per_real_second():
+    backend = _backend(_World([]))
+    backend._simulated_s = 0.0
+    backend._sim_started_at = None
+
+    assert backend.realtime_ratio() is None, "nothing measured yet"
+
+    import time as _time
+    backend._sim_started_at = _time.monotonic() - 2.0
+    backend._simulated_s = 1.0
+
+    ratio = backend.realtime_ratio()
+    assert ratio is not None and 0.4 < ratio < 0.6, f"expected about 0.5, got {ratio}"
+
+
+def test_a_capture_does_not_tick_while_the_driving_loop_is_running(monkeypatch):
+    """Two tick sources in synchronous mode produced "Waited for 10 seconds on IO" then
+    Signal 11, so a capture waits for the loop's frames instead of ticking itself."""
+    log: list[str] = []
+    world = _World(log, synchronous=True)
+    backend = _backend(world)
+    backend._task = object()                 # a running driving loop
+    ticks = []
+    backend._tick_world = lambda: ticks.append(1)
+    monkeypatch.setattr(_Camera, "listen", stream_on_listen("a", "b", "c"))
+
+    backend.capture(_pose(), 640, 360)
+
+    assert ticks == [], "the driving loop is the only thing allowed to tick"
 
 
 def test_close_cameras_stops_and_destroys_every_camera(monkeypatch):

@@ -439,26 +439,35 @@ All 25 plant points now carry CARLA transforms; an approved re-plan had failed o
 A pooled capture camera used to be created once and left listening forever with no `sensor_tick`,
 producing every simulation frame at full resolution for the life of the run. With the gate's four
 1280×720 cameras that constant load filled the server log with
-`Invalid session: no stream available` and dragged simulated time behind real time — which is what
-broke the yard spacing rule's wall-clock fallback. Cameras now stream only while a frame is wanted,
-and the flow 1 run completes with **zero CARLA restarts** where it previously restarted the server
-several times.
+`Invalid session: no stream available`. Cameras now stream only while a frame is wanted, all gate
+views come from **one camera that is moved** between poses (the pattern Day 2 has always used), and a
+capture no longer ticks the world when the driving loop is already ticking it. The flow 1 run
+completes with **zero CARLA restarts** where it previously restarted the server several times.
 
-That helped but is not the cure. Running flow 3 in the same process as the driving loop still kills
-the server, and its own log names the cause:
+None of that makes a gate inspection work alongside a running driving loop. Four approaches were
+tried — idle-stream shutdown, pre-warming the sensor before `start()`, one moved camera instead of
+four, and running the capture off-thread — and the result is a hard pair of failure modes:
 
-```
-CarlaUE4: Signal 11 caught.
-CommonUnixCrashHandler: Signal=11
-```
+- **Capture inline**, blocking the loop: the loop is the only thing ticking the world, so no frame
+  ever arrives and the capture times out.
+- **Capture concurrently** with the loop: the server segfaults —
+  `Waited for 10 seconds on IO....Signal 11 caught.`
 
-The server segfaults when a camera is used while the driving loop is active; the client then times
-out on `world.tick()` and the cars die with it. This is a CARLA 0.9.16 server crash, so no
-client-side change fixes it. `--with-gate` is off by default in the yard demo for that reason.
+So the capture path is left inline and deliberately unused during driving: `--with-gate` is off in the
+yard demo. **A gate inspection must run in a phase with no active driving loop**, which is what
+`run_carla_day2.sh` does and why it has always been stable. Demo scene 1 (gate, then track, then
+report) should be orchestrated as separate phases rather than one process.
 
-The workaround that does work is the one `run_carla_day2.sh` already uses: **give each phase its own
-process**. Demo scene 1 (gate, then track, then report) should be orchestrated that way rather than
-run in a single process.
+### Correction: the host is not CPU-starved
+
+An earlier note here claimed simulated time ran *slower* than real time on a loaded server, and used
+that to explain why the spacing rule's wall-clock fallback misfired. That was wrong.
+`realtime_ratio()` now measures it: **10.31 simulated seconds per real second** with three cars. The
+box is not short of CPU, and no instance upgrade is indicated.
+
+The rule's bug stands, but the reason is simpler than stated: wall-clock time has no fixed
+relationship to distance travelled in a simulation that runs at 10× real time, in either direction.
+It is not a substitute for asking where the car is.
 
 Still open: parallel scenario execution needs one CARLA server per slot.
 

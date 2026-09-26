@@ -114,6 +114,12 @@ async def run(args: argparse.Namespace) -> dict:
 
     releases: list[dict] = []
     spacing_at_release: list[dict] = []
+    if args.with_gate:
+        # Create the gate sensors before the loop starts. Creating them on the first capture,
+        # which happens mid-tick, is where the server segfaults (Signal 11); day 2 is stable
+        # because every camera exists before start().
+        rt.gate_camera.prewarm()
+        emit({"type": "yard.gate_prewarmed", "cameras": len(rt.driving._cameras)})
     await rt.driving.start()
     try:
         for index, vin in enumerate(vins):
@@ -200,6 +206,8 @@ async def run(args: argparse.Namespace) -> dict:
             "proposals": pending,
             "approved": approved,
             "kpis": app.yard.kpis(),
+            # simulated seconds per real second; below 1.0 means the box cannot keep up
+            "realtime_ratio": rt.driving.realtime_ratio(),
         }
     finally:
         await rt.driving.stop()
@@ -236,6 +244,7 @@ def main(argv: list[str] | None = None) -> int:
     ok = (len(result["released"]) >= 1 and spacing_ok
           and "truck_delayed" in result["exceptions"]
           and proposed and bool(result["approved"]))
+    emit({"type": "yard.realtime_ratio", "ratio": result.get("realtime_ratio")})
     emit({"type": "yard.done", "released": result["released"],
           "rules_held_on_every_release": spacing_ok, "exceptions": result["exceptions"],
           "went_to_a_human": proposed, "approved": len(result["approved"]),

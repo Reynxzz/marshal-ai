@@ -73,8 +73,11 @@ class MarshalApp:
         car = self.rt.store.get(Car, event.vin)
         if car is not None and event.location == "inspection_gate" and car.state == CarState.INSPECTION_GATE:
             views, check_variant = self.router.views_for(event.vin)
+            # Inline on purpose: see VisualInspector.inspect. Deferring this so the driving
+            # loop could keep ticking only moved the capture into a thread that ran alongside
+            # the loop, which segfaults the server.
             await self.rt.bus.publish(Topic.GATE_IMAGES, {"vin": event.vin, "views": views,
-                                                          "check_variant": check_variant})
+                                                         "check_variant": check_variant})
         await self.yard.on_mission_done(event)
         await self.router.on_mission_done(event)
         await self.functional.on_mission_done(event)

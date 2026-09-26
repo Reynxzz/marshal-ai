@@ -22,7 +22,8 @@ def test_gate_camera_captures_requested_views_sequentially(monkeypatch):
         def __init__(self):
             self.stored = []
 
-        def capture(self, transform, width=None, height=None):
+        def capture_moving(self, transform, width=None, height=None):
+            # one camera, moved between poses: holding four at once crashed the server
             calls.append((transform, width, height))
             return f"image-{len(calls)}".encode()
 
@@ -39,7 +40,7 @@ def test_gate_camera_captures_requested_views_sequentially(monkeypatch):
         "front camera", "left camera", "right camera",
     ]
     # Evidence frames must be larger than the viewer's: Gemini could not tell a lit lamp
-    # from a dark one at 640x360.
+    # from a dark one at 640x360. All four views come from one moved camera.
     assert {(w, h) for _t, w, h in calls} == {(EVIDENCE_WIDTH, EVIDENCE_HEIGHT)}
     # the photo behind a verdict is stored, and the recorded URI is the stored one
     assert [uri for uri, _data in driving.stored] == [

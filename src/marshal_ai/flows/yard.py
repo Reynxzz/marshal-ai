@@ -89,10 +89,10 @@ class YardTraffic:
             if car.location == "inspection_gate":
                 continue                      # it has left the first segment
             # Ask the driving system where the car is. Relying on the status stream meant that
-            # before the first Status arrived the rule fell back to wall-clock time, and on a
-            # loaded CARLA server simulated time runs slower than real time: 18 real seconds
-            # passed while the car had travelled 16 m, so a second car was released into the
-            # same segment.
+            # before the first Status arrived the rule fell back to wall-clock time, which has
+            # no fixed relationship to simulated time: measured at 10.3x real time on this
+            # host, so an 18 second wall-clock wait is about 180 simulated seconds. Wall clock
+            # cannot stand in for distance travelled in either direction.
             here = live(car.vin) if live is not None else None
             if here is None:
                 status = self.rt.missions.last_status.get(car.vin)
