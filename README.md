@@ -312,10 +312,29 @@ with no failed checks reached the rework path and crashed on `tickets[0]`; propo
 before the router's own Gemini call had written the report; and confirming a rework after the car
 was cleaned up failed with `KeyError`, because dispatch drives the car to the bay.
 
-Not yet verified: flows 1 and 2 against real CARLA. `carla_backend` still notes that raising
-`assist.request` when BehaviorAgent blocks on an obstacle is unwired, so flow 2 has no real trigger.
-Parallel scenario execution needs one CARLA server per slot. Six plant points remain unpinned
-(`loading_bay`, `yard.Y4`–`Y8`).
+**Day 5 complete on real CARLA with real Gemini** (`scripts/run_carla_day5.sh`). Demo scene 3 runs
+end to end. `carla_backend` used to note that raising `assist.request` was unwired, so flow 2 only
+ever worked against the fake plant; the CARLA backend now raises it itself when the agent stalls
+mid-mission with something in front of it. A stall with nothing ahead is ignored, because
+BehaviorAgent also stops for its own reasons.
+
+```
+request  "unknown object in lane: an object (static.prop.box01) 2.3 m ahead"
+clip     519168 bytes of real forward view
+Gemini   "An object is 2.3 m ahead in the lane, and a person is walking on the
+          right side of the car."        people_or_moving_equipment=true
+ranking  wait_for_removal low / pass_left_3kmh medium / reroute_lane_c medium
+card     recommended wait_for_removal, confidence 1.0
+human    supervisor-ana chose it, the car was released, case sent to the test lab
+```
+
+The saved frame confirms the description: the box sits in front of the bonnet and the worker stands
+to the right. The rule that a person in the scene allows only a wait recommendation held without the
+code needing to override Gemini. The request carries real bytes because a `gs://` URI that does not
+exist cannot be read by Vertex AI — the same 403 that made flow 3 unusable on the fake plant.
+
+Not yet verified: flow 1 against real CARLA. Parallel scenario execution needs one CARLA server per
+slot. Six plant points remain unpinned (`loading_bay`, `yard.Y4`–`Y8`).
 
 **Real Gemini verified** on `id-rd-ca-hanif-ali` via Vertex AI (`gemini-2.5-flash`). Two things had
 to be corrected along the way, both worth knowing:
