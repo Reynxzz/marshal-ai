@@ -27,16 +27,16 @@ points:
   finishing_corner.p3: {zone: finishing_corner, x: 160, y: 15,  carla: {x: 190.45, y: -153.83, z: 0.50, yaw: -121.6}}
   finishing:           {zone: finishing,        x: 160, y: 40,  carla: {x: 177.72, y: -170.54, z: 0.50, yaw: -133.0}}
   lane_c:              {zone: finishing,        x: 130, y: 40,  carla: {x: 203.01, y: -73.89, z: 0.50, yaw: -90.7}}
-  buffer_zone_b:       {zone: buffer_zone_b,    x: 20,  y: 40,  carla: null}
-  rework.paint:        {zone: rework,           x: 100, y: -40, carla: null}
-  rework.body:         {zone: rework,           x: 115, y: -40, carla: null}
-  rework.electrical:   {zone: rework,           x: 130, y: -40, carla: null}
-  rework.mechanical:   {zone: rework,           x: 145, y: -40, carla: null}
-  production_control:  {zone: rework,           x: 160, y: -40, carla: null}
-  yard.entry:          {zone: yard,             x: 200, y: 40,  carla: null}
+  buffer_zone_b:       {zone: buffer_zone_b,    x: 20,  y: 40,  carla: {x: 207.07, y: -25.93, z: 0.50, yaw: -90.7}}
+  rework.paint:        {zone: rework,           x: 100, y: -40, carla: {x: 203.01, y: -73.89, z: 0.50, yaw: -90.7}}
+  rework.body:         {zone: rework,           x: 115, y: -40, carla: {x: 210.01, y: -73.97, z: 0.50, yaw: -90.7}}
+  rework.electrical:   {zone: rework,           x: 130, y: -40, carla: {x: 202.65, y: -101.93, z: 0.50, yaw: -92.1}}
+  rework.mechanical:   {zone: rework,           x: 145, y: -40, carla: {x: 209.64, y: -102.19, z: 0.50, yaw: -92.1}}
+  production_control:  {zone: rework,           x: 160, y: -40, carla: {x: 197.69, y: -129.89, z: 0.50, yaw: -108.0}}
+  yard.entry:          {zone: yard,             x: 200, y: 40,  carla: {x: 204.34, y: -132.05, z: 0.50, yaw: -108.0}}
   yard.Y1:             {zone: yard,             x: 210, y: 30,  carla: {x: 206.27, y: -93.92, z: 0.50, yaw: -90.7}}
-  yard.Y2:             {zone: yard,             x: 210, y: 36,  carla: null}
-  yard.Y3:             {zone: yard,             x: 210, y: 42,  carla: null}
+  yard.Y2:             {zone: yard,             x: 210, y: 36,  carla: {x: 185.26, y: -155.42, z: 0.50, yaw: -123.9}}
+  yard.Y3:             {zone: yard,             x: 210, y: 42,  carla: {x: 191.07, y: -159.32, z: 0.50, yaw: -123.9}}
   yard.Y4:             {zone: yard,             x: 210, y: 48,  carla: null}
   yard.Y5:             {zone: yard,             x: 220, y: 30,  carla: null}
   yard.Y6:             {zone: yard,             x: 220, y: 36,  carla: null}

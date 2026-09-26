@@ -26,7 +26,8 @@ from pathlib import Path
 
 from marshal_ai.app import MarshalApp
 from marshal_ai.config import Settings
-from marshal_ai.records import BuildSheet, Car, CarReport, CarState, InspectionResult
+from marshal_ai.records import (BuildSheet, Car, CarReport, CarState, InspectionResult,
+                                 Verdict)
 from marshal_ai.runtime import build_runtime
 
 SUPERVISOR = "supervisor-ana"
@@ -63,6 +64,13 @@ async def check_one(app: MarshalApp, vin: str, steps: list[int], fault: str | No
                      state=CarState.TEST_TRACK))
     rt.driving.faults[vin] = {fault} if fault else set()
 
+    # Flow 5 merges the visual and functional results, and merge_verdict returns REVIEW when
+    # either is missing. Day 4 is about the functional fault, so the gate result is recorded as
+    # a clean pass here (flow 3 on real gate cameras is covered separately). Without it even a
+    # healthy car reaches the rework path with nothing to repair.
+    rt.store.put(InspectionResult(vin=vin, kind="visual", verdict=Verdict.PASS,
+                                  created_at=rt.clock()))
+
     for actor in rt.driving.world.get_actors().filter("vehicle.*"):
         if actor.attributes.get("role_name") == vin:
             actor.destroy()
@@ -75,6 +83,15 @@ async def check_one(app: MarshalApp, vin: str, steps: list[int], fault: str | No
         if loop.time() > deadline:
             raise TimeoutError(f"{vin}: no functional result within {timeout}s")
         await asyncio.sleep(1.0)
+
+    # The functional result is stored before it is published, and flow 5's finalize makes its
+    # own Gemini call to draft the report, so reading proposals straight away finds nothing.
+    # Wait for the report the router writes.
+    report_deadline = loop.time() + 120.0
+    while rt.store.get(CarReport, vin) is None and loop.time() < report_deadline:
+        await asyncio.sleep(1.0)
+    if rt.store.get(CarReport, vin) is None:
+        emit({"type": "flow5.warning", "vin": vin, "error": "no CarReport within 120s"})
 
     result = rt.store.get(InspectionResult, f"{vin}:functional")
     # Keep the frames the verdict was based on, so a disputed call can be checked by eye.
@@ -93,6 +110,30 @@ async def check_one(app: MarshalApp, vin: str, steps: list[int], fault: str | No
     emit({"type": "flow4.result", "vin": vin, "fault": fault, "verdict": result.verdict.value,
           "checklist": items, "telemetry_camera_disagreements": len(disagreements)})
 
+    # flow 5: confirm the bay while the car is still in the driving system. Confirming after
+    # cleanup failed with KeyError because dispatch sends the car a mission to drive there.
+    confirmed = []
+    for proposal in rt.pending("rework"):
+        if proposal.payload.get("vin") != vin:
+            continue
+        try:
+            decision = await app.router.decide(proposal.proposal_id, True, SUPERVISOR)
+        except Exception as exc:
+            emit({"type": "flow5.confirm_failed", "vin": vin,
+                  "error": f"{type(exc).__name__}: {exc}"})
+            continue
+        confirmed.append(decision)
+        emit({"type": "flow5.confirmed", "vin": vin, "by": SUPERVISOR, "decision": decision})
+        # let the car actually drive to the bay
+        arrive = loop.time() + 180.0
+        while loop.time() < arrive:
+            car = rt.store.get(Car, vin)
+            if car is not None and car.location in {t.bay for t in
+                                                   rt.store.get(CarReport, vin).rework}:
+                emit({"type": "flow5.arrived", "vin": vin, "bay": car.location})
+                break
+            await asyncio.sleep(2.0)
+
     # Remove the car before the next one runs: a finished car left standing on the track
     # blocks the following car's route, which shows up as a mission that never completes.
     for actor in rt.driving.world.get_actors().filter("vehicle.*"):
@@ -100,7 +141,7 @@ async def check_one(app: MarshalApp, vin: str, steps: list[int], fault: str | No
             actor.destroy()
     rt.driving.vehicles.pop(vin, None)
     return {"vin": vin, "verdict": result.verdict.value, "checklist": items,
-            "disagreements": len(disagreements)}
+            "disagreements": len(disagreements), "confirmed": confirmed}
 
 
 async def run(args: argparse.Namespace) -> dict:
@@ -133,16 +174,20 @@ async def run(args: argparse.Namespace) -> dict:
     pending = [{"id": p.proposal_id, "kind": p.kind, "summary": p.summary}
                for p in rt.pending()]
     emit({"type": "flow5.pending", "proposals": pending})
-    for proposal in rt.pending("rework"):
-        decision = await app.router.decide(proposal.proposal_id, True, SUPERVISOR)
-        emit({"type": "flow5.confirmed", "by": SUPERVISOR, "decision": decision})
+    if rt.pending("rework"):
+        emit({"type": "flow5.unconfirmed",
+              "proposals": [p.proposal_id for p in rt.pending("rework")]})
 
     reports = {}
     for vin in (args.healthy_vin, args.faulty_vin):
         report = rt.store.get(CarReport, vin)
         if report is not None:
-            reports[vin] = {"verdict": report.verdict.value, "rework_bay": report.rework_bay,
-                            "summary": report.summary}
+            reports[vin] = {"verdict": report.verdict.value,
+                            "bays": [t.bay for t in report.rework],
+                            "failed_checks": [i.name for i in report.failed_checks],
+                            "summary": (report.summary or "")[:160]}
+            car = rt.store.get(Car, vin)
+            reports[vin]["car_location"] = car.location if car else None
     emit({"type": "flow5.reports", "reports": reports})
     out["reports"] = reports
     out["kpis"] = app.functional.kpis()
@@ -158,10 +203,18 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     healthy, faulty = out["healthy"], out["faulty"]
+    faulty_report = out["reports"].get(args.faulty_vin, {})
+    healthy_report = out["reports"].get(args.healthy_vin, {})
     ok = (healthy["verdict"] == "PASS" and faulty["verdict"] == "FAIL"
-          and faulty["disagreements"] >= 1)
+          and faulty["disagreements"] >= 1
+          and healthy_report.get("verdict") == "PASS"
+          and faulty_report.get("verdict") == "FAIL"
+          and any("electrical" in b for b in faulty_report.get("bays", [])))
     emit({"type": "day4.done", "healthy": healthy["verdict"], "faulty": faulty["verdict"],
           "faulty_disagreements": faulty["disagreements"],
+          "healthy_report": healthy_report.get("verdict"),
+          "faulty_report": faulty_report.get("verdict"),
+          "faulty_bays": faulty_report.get("bays"),
           "result": "success" if ok else "not demonstrated"})
     print(json.dumps(out, indent=2, sort_keys=True, default=str))
     return 0 if ok else 2
