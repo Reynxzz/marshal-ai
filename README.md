@@ -434,9 +434,33 @@ happens at about 16 m.
 All 25 plant points now carry CARLA transforms; an approved re-plan had failed on
 `yard.Y7 has no CARLA transform`.
 
-Still open: parallel scenario execution needs one CARLA server per slot. Arriving at the gate starts
-flow 3's four 1280×720 captures, which repeatedly took the server down mid-run, so the flow 1 demo
-keeps flow 3 out of scope; the two are verified separately.
+### Why flows cannot all share one process
+
+A pooled capture camera used to be created once and left listening forever with no `sensor_tick`,
+producing every simulation frame at full resolution for the life of the run. With the gate's four
+1280×720 cameras that constant load filled the server log with
+`Invalid session: no stream available` and dragged simulated time behind real time — which is what
+broke the yard spacing rule's wall-clock fallback. Cameras now stream only while a frame is wanted,
+and the flow 1 run completes with **zero CARLA restarts** where it previously restarted the server
+several times.
+
+That helped but is not the cure. Running flow 3 in the same process as the driving loop still kills
+the server, and its own log names the cause:
+
+```
+CarlaUE4: Signal 11 caught.
+CommonUnixCrashHandler: Signal=11
+```
+
+The server segfaults when a camera is used while the driving loop is active; the client then times
+out on `world.tick()` and the cars die with it. This is a CARLA 0.9.16 server crash, so no
+client-side change fixes it. `--with-gate` is off by default in the yard demo for that reason.
+
+The workaround that does work is the one `run_carla_day2.sh` already uses: **give each phase its own
+process**. Demo scene 1 (gate, then track, then report) should be orchestrated that way rather than
+run in a single process.
+
+Still open: parallel scenario execution needs one CARLA server per slot.
 
 **Real Gemini verified** on `id-rd-ca-hanif-ali` via Vertex AI (`gemini-2.5-flash`). Two things had
 to be corrected along the way, both worth knowing:
