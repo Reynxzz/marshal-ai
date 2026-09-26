@@ -288,11 +288,34 @@ Four compiler defects were fixed to get there, all of which only appear against 
 4. The run budget was 120 simulated seconds while the `line_end → finishing` route alone needs 76;
    it is now 200.
 
-Not yet verified: physical reverse/brake/full-lock maneuvers, and the Firestore store backend (the
-project has no Firestore database yet and the service account lacks `roles/datastore.user`). The
-compiled scenario script still uses proxy blueprints for forklifts and pallet stacks, and only
-walkers move on trigger. Parallel scenario execution needs one CARLA server per slot. 15 of 25 plant
-map points still lack CARLA transforms.
+**Day 4 complete on real CARLA with real Gemini** (`scripts/run_carla_day4.sh`). Demo scene 2 runs
+end to end: a healthy car passes, and a car whose headlight bit is held off while its telemetry
+reports healthy fails on the disagreement, is reported, and is driven to its bay.
+
+```
+VIN-OK    telemetry_ok=true  camera_ok=true   PASS   at report_point
+VIN-DARK  telemetry_ok=true  camera_ok=false  FAIL   at rework.electrical
+          bays=[rework.electrical]  failed_checks=[headlights]
+          summary (Gemini): "passed visual inspection but failed functional checks.
+                             The headlights are not working correctly."
+```
+
+Getting flow 4's camera half to work at all took four fixes, all invisible without real frames:
+telemetry was being shown to the camera judge (it confirmed a dark lamp at confidence 1.0);
+captures reused an in-flight frame of the *previous* car; 640×360 was too small to tell a lit lamp
+from a dark one; and absolute lamp judgement fails outright — both `gemini-2.5-flash` and
+`gemini-2.5-pro` insisted a dark headlight was lit until given a reference frame from a car that
+passed the same step, after which both answered correctly at 0.99.
+
+Flow 5 needed three more: `merge_verdict` returns REVIEW when either result is missing, so a car
+with no failed checks reached the rework path and crashed on `tickets[0]`; proposals were read
+before the router's own Gemini call had written the report; and confirming a rework after the car
+was cleaned up failed with `KeyError`, because dispatch drives the car to the bay.
+
+Not yet verified: flows 1 and 2 against real CARLA. `carla_backend` still notes that raising
+`assist.request` when BehaviorAgent blocks on an obstacle is unwired, so flow 2 has no real trigger.
+Parallel scenario execution needs one CARLA server per slot. Six plant points remain unpinned
+(`loading_bay`, `yard.Y4`–`Y8`).
 
 **Real Gemini verified** on `id-rd-ca-hanif-ali` via Vertex AI (`gemini-2.5-flash`). Two things had
 to be corrected along the way, both worth knowing:
