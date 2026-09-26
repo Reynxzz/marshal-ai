@@ -10,7 +10,8 @@ plain scene. During the run the program calls back here:
 
 Placement follows the local simulator: parked things stand beside the lane on the kerb side, a
 worker "behind" something stands just past its far end, and people cross the lane when ego is
-within the trigger distance. Actors that would overlap move on along the lane until they are clear. MetaDrive only has cars and pedestrians, so forklifts, pallet stacks
+within the trigger distance. Actors that would overlap move on along the lane until they are clear.
+A box stands in ego's lane; MetaDrive draws it as a parked car proxy too, but it is not tall. MetaDrive only has cars and pedestrians, so forklifts, pallet stacks
 and parked cars are parked car proxies; they block line of sight the same way.
 """
 
@@ -21,7 +22,7 @@ import math
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from shapely.geometry import Point
+from shapely.geometry import Point, Polygon
 
 from marshal_ai.driving.autopilot import (
     CAR_LENGTH_M, CAR_WIDTH_M, Autopilot, LanePath, Pose, Thing, box,
@@ -45,7 +46,7 @@ class Placed:
     x: float
     y: float
     yaw: float                                  # radians from +x
-    kind: str                                   # person | vehicle
+    kind: str                                   # person | vehicle | object
     moves: bool = False
     speed_ms: float = 0.0
     trigger_m: float | None = None
@@ -122,14 +123,15 @@ def layout(spec: ScenarioSpec, m: PlantMap | None = None) -> Layout:
         else:
             p = m.points[a.position or a.start]
             s = path.project(p.x, p.y)
-            lat = WORKER_LAT if person else KERB_LAT
+            lat = 0.0 if a.type == ActorType.BOX else WORKER_LAT if person else KERB_LAT
         s, x, y, yaw = clear_spot(s, lat, person)
         moves = a.state in ("moving", "crossing") or (person and (trigger is not None or a.start is not None
                                                                    and a.start.startswith("behind:")))
         speed = (a.walk_speed_ms or 1.3) if person else (a.speed_kmh or 5.0) / 3.6
         out.actors.append(Placed(
             i, a.type.value, x, y, yaw if not person else yaw + math.pi / 2,
-            "person" if person else "vehicle", moves, speed if moves else 0.0,
+            "person" if person else "object" if a.type == ActorType.BOX else "vehicle", moves,
+            speed if moves else 0.0,
             (trigger if trigger is not None else 8.0) if moves else None,
             cross_yaw=yaw + math.pi / 2 if moves else None, lateral0=lat, path_s=s))
     return out
@@ -156,7 +158,7 @@ def plant_yaw(scenic_heading_: float) -> float:
     return scenic_heading_ + math.pi / 2
 
 
-def footprint(obj) -> "Polygon":  # noqa: F821
+def footprint(obj) -> Polygon:
     x, y = float(obj.position[0]), float(obj.position[1])
     if getattr(obj, "marshalKind", "") == "person":
         return Point(x, y).buffer(PERSON_RADIUS_M)
@@ -295,7 +297,7 @@ class Monitor:
             if i < 0:
                 continue
             placed = self.lay.actors[i]
-            if placed.kind != "vehicle" or placed.moves:
+            if placed.kind == "person" or placed.moves:
                 continue
             actor = obj.metaDriveActor
             if i not in self._pins:

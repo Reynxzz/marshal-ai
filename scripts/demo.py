@@ -146,6 +146,9 @@ async def main(live: bool, sim: str, view: str | None, record: str | None) -> No
             app.generator.review(inc.scenario.id, True, ENGINEER)
             say(f"Assistance case {case.case_id} became {inc.scenario.id}; {ENGINEER} approves both into "
                 f"the library.")
+        else:
+            say(f"Assistance case {case.case_id} could not become a test after {inc.attempts} attempts; "
+                f"it goes to an engineer: {inc.errors}")
         result = await asyncio.to_thread(app.adversarial.search, gen.scenario.id)
         say(f"Adversarial search: {len(result.runs)} runs. {result.reasoning[-1]}")
         say(result.report())

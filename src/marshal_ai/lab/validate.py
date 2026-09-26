@@ -84,6 +84,8 @@ def validate_spec(raw: dict, plant_map: PlantMap) -> SpecCheck:
             errors.append(f"{where}: a worker stepping out needs walk_speed_ms")
         if actor.type != ActorType.WORKER and actor.walk_speed_ms is not None:
             errors.append(f"{where}: walk_speed_ms is only for workers")
+        if actor.type == ActorType.BOX and (actor.position is None or actor.state not in ("stationary", "parked")):
+            errors.append(f"{where}: a box is a stationary object with a position on the ego route")
 
     if plant_map.has_zone(spec.map_zone):
         route_zones = {plant_map.points[p].zone for p in route if plant_map.has_point(p)}
@@ -96,6 +98,9 @@ def validate_spec(raw: dict, plant_map: PlantMap) -> SpecCheck:
                 pass
         if spec.map_zone not in path_zones | touched_zones:
             errors.append(f"map_zone: ego never passes {spec.map_zone} and no actor is placed there")
+
+    if ActorType.BOX in present and "reached_goal" in spec.pass_criteria:
+        errors.append("pass_criteria: a box blocks the lane, so the car must stop; do not require reached_goal")
 
     uses_person_metric = any(c.metric in ("min_gap_to_person_m", "speed_near_person_kmh")
                              for c in spec.criteria())

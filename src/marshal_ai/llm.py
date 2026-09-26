@@ -51,9 +51,12 @@ class LLMError(RuntimeError):
 class GeminiLLM:
     """google-genai client; reads Vertex AI or API key settings from the environment."""
 
-    def __init__(self, model: str, temperature: float = 0.2):
+    def __init__(self, model: str, temperature: float = 0.0, seed: int | None = 7):
+        # temperature 0 and a fixed seed: the same plant situation gets (nearly) the same answer,
+        # so demos and release decisions are repeatable
         self.model = model
         self.temperature = temperature
+        self.seed = seed
         self._client = None
 
     @property
@@ -79,6 +82,7 @@ class GeminiLLM:
         parts.append(types.Part.from_text(text=prompt))
         config = types.GenerateContentConfig(
             temperature=self.temperature,
+            seed=self.seed,
             response_mime_type="application/json",
             response_schema=schema,
             system_instruction=system or None,

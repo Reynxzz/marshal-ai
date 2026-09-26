@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 from marshal_ai.driving import MissionDone, MissionGo, TrackStep
 from marshal_ai.driving.routines import TELEMETRY_CHECKS, RoutineStep, routine_steps
 from marshal_ai.events import Topic
-from marshal_ai.flows.base import ask, update_car
+from marshal_ai.flows.base import ask_or, update_car
 from marshal_ai.records import CarState, ChecklistItem, InspectionResult, Verdict
 
 if TYPE_CHECKING:
@@ -77,7 +77,10 @@ class FunctionalChecker:
         clip = self.rt.track_camera.clip(run.vin, step.step, step.name)
         prompt = (f"Step {step.step}: {step.command}.\nExpected on camera: {step.expected_on_camera}.\n"
                   f"Telemetry reported: {reported.telemetry if reported else 'nothing'}")
-        seen = await ask(self.rt, "track.step", prompt, StepSeen, [clip], SYSTEM)
+        # no answer: the step is not confirmed on camera, so it fails and a supervisor confirms or clears it
+        seen, _ = await ask_or(self.rt, "track.step", prompt, StepSeen,
+                               StepSeen(seen=False, confidence=0.0, observation="not judged: model unavailable"),
+                               [clip], SYSTEM)
         camera_ok = seen.seen if seen.confidence >= CAMERA_MIN_CONFIDENCE else None
         return ChecklistItem(step=step.step, name=step.name, telemetry_ok=telemetry_ok,
                              camera_ok=camera_ok, camera_confidence=seen.confidence,

@@ -21,7 +21,7 @@ TIMEOUT_S = 120.0
 CAR_HALF_LEN = 2.4
 CAR_HALF_WID = 1.0
 RADIUS = {ActorType.WORKER: 0.3, ActorType.FORKLIFT: 1.0, ActorType.CAR: 1.0,
-          ActorType.PARKED_CAR: 1.0, ActorType.PALLET_STACK: 0.6}
+          ActorType.PARKED_CAR: 1.0, ActorType.PALLET_STACK: 0.6, ActorType.BOX: 0.5}
 TALL = {ActorType.FORKLIFT, ActorType.PALLET_STACK}
 HIDE_LATERAL = {ActorType.FORKLIFT: 1.8, ActorType.PALLET_STACK: 1.8, ActorType.PARKED_CAR: 2.2}
 ROADSIDE_LAT = 3.5          # parked objects stand beside the lane
@@ -136,7 +136,7 @@ def simulate(spec: ScenarioSpec, plant_map: PlantMap, driver: DriverProfile = Dr
         else:
             point = plant_map.points[a.position or a.start]
             s0 = path.project(point.x, point.y)
-            lat0 = ROADSIDE_LAT if a.type != ActorType.WORKER else WORKER_START_LAT
+            lat0 = {ActorType.WORKER: WORKER_START_LAT, ActorType.BOX: 0.0}.get(a.type, ROADSIDE_LAT)
             mv = _Mover(i, a.type, s0, lat0, radius, person)
         moves = a.state in ("moving", "crossing") or (person and (trigger is not None or mv.occluder))
         if a.type == ActorType.CAR and a.state == "braking":
@@ -199,10 +199,14 @@ def simulate(spec: ScenarioSpec, plant_map: PlantMap, driver: DriverProfile = Dr
             corridor = CAR_HALF_WID + mv.radius + 0.5
             if mv.type == ActorType.CAR and abs(mv.lat) < corridor:
                 stop_dist = ego_v ** 2 / (2 * decel)
-                if ds - 2 * CAR_HALF_LEN < stop_dist + 2.0 and mv.v_s < ego_v + 0.1:
+                if ds - 2 * CAR_HALF_LEN < stop_dist + 2.5 and mv.v_s < ego_v + 0.1:
                     hazard = True
             elif not mv.static and ds > 0 and (abs(mv.lat) < corridor or (mv.v_lat < 0 and mv.lat > 0)):
                 hazard = True
+            elif mv.static and ds > 0 and abs(mv.lat) < corridor:
+                # something standing in the lane: stop short of it and wait
+                if ds - CAR_HALF_LEN - mv.radius < ego_v ** 2 / (2 * decel) + 2.0:
+                    hazard = True
             elif mv.person and ds > 0 and dist <= driver.near_person_distance_m:
                 cap = min(cap, driver.near_person_speed_kmh / 3.6)
             if hazard and mv.index not in braking_for:

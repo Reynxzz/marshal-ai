@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 
 from marshal_ai.driving import AssistChoose, AssistRequest
 from marshal_ai.events import Topic
-from marshal_ai.flows.base import ask, log
+from marshal_ai.flows.base import ask_or, log
 from marshal_ai.llm import Media
 from marshal_ai.records import AssistanceCase, Car
 
@@ -96,8 +96,11 @@ class AssistanceDesk:
                   f"Driving system says: {request.reason}\n"
                   f"Offered options: {request.options}\n"
                   f"Car state: {car.state.value if car else 'unknown'}")
-        assessment = await ask(self.rt, "assist.assess", prompt, AssistAssessment,
-                               media=self.clip(request), system=SYSTEM)
+        # no answer: assume people are near, so only a wait option can be recommended; a person decides
+        assessment, _ = await ask_or(self.rt, "assist.assess", prompt, AssistAssessment, AssistAssessment(
+            situation=f"{request.reason} (not assessed: model unavailable; watch the clip)",
+            people_or_moving_equipment=True, ranking=[], recommended=None, confidence=0.0),
+            media=self.clip(request), system=SYSTEM)
         assessment, notes = enforce_rules(assessment, request.options)
         case = AssistanceCase(
             case_id=request.case_id, vin=request.vin, location=request.location or "",

@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Literal
 from pydantic import BaseModel, Field
 
 from marshal_ai.lab.judge import judge
+from marshal_ai.lab.reference import unfair_reasons
 from marshal_ai.lab.runner import Runner, run_batch, to_test_run
 from marshal_ai.lab.spec import ScenarioSpec
 from marshal_ai.llm import to_prompt_json
@@ -72,7 +73,9 @@ class FailureExplanation(BaseModel):
 SEARCH_SYSTEM = """You search for situations where a driverless plant car behaves unsafely. You get the
 passing base case, the parameters you may vary with their ranges, and every run so far with its
 metrics. Propose the next batch of variations that move toward failure (smaller gaps, contact, fast
-near people). Change few parameters at a time so failures stay explainable. Give your reasoning."""
+near people). Change few parameters at a time so failures stay explainable. Only situations a careful
+driver could survive count: variations that even a careful reference driver fails are skipped and
+listed as unavoidable, so do not propose more of them. Give your reasoning."""
 
 REPORT_SYSTEM = """You explain a simulation test failure to driving-system engineers in plain
 language: what happened, how it differs from the passing case, the likely cause, and a concrete fix."""
@@ -161,15 +164,18 @@ class SearchResult:
     explanation: FailureExplanation | None = None
     reasoning: list[str] = field(default_factory=list)
     regression_id: str | None = None
+    unavoidable: list[dict] = field(default_factory=list)   # skipped: even a careful driver fails them
 
     @property
     def robust(self) -> bool:
         return self.failure is None
 
     def report(self) -> str:
+        skipped = (f" {len(self.unavoidable)} proposed variations were skipped as unavoidable "
+                   "(a careful driver fails them too)." if self.unavoidable else "")
         if self.minimal is None:
             return (f"{self.scenario_id}: no failure in {len(self.runs)} runs; "
-                    "robust within the tested ranges.")
+                    "robust within the tested ranges." + skipped)
         m = self.minimal
         metrics = ", ".join(f"{k} {v}" for k, v in m.run.metrics.items())
         text = (f"{m.spec.id} fails ({'; '.join(m.run.failed_criteria)}). Changes from the passing case: "
@@ -177,7 +183,7 @@ class SearchResult:
         if self.explanation:
             text += (f" {self.explanation.summary} Likely cause: {self.explanation.likely_cause}. "
                      f"Suggested fix: {self.explanation.suggested_fix}")
-        return text
+        return text + skipped
 
 
 class AdversarialTester:
@@ -193,12 +199,22 @@ class AdversarialTester:
                  "margins": judge(r.spec, r.run.metrics).margins if r.run.metrics else {}}
                 for r in runs[-24:]]
 
-    def _propose(self, base_spec: ScenarioSpec, base: dict, runs: list[SearchRun], n: int) -> tuple[list[dict], str]:
+    def _fair(self, base_spec: ScenarioSpec, changes: dict, result: "SearchResult") -> bool:
+        """Code, not the model, decides whether a variation is a fair test (see lab/reference.py)."""
+        why = unfair_reasons(apply_variation(base_spec, changes, f"{base_spec.id}-v0"), self.rt.map)
+        if why:
+            result.unavoidable.append({"changes": changes, "why": why[0]})
+        return not why
+
+    def _propose(self, base_spec: ScenarioSpec, base: dict, runs: list[SearchRun], n: int,
+                 result: "SearchResult") -> tuple[list[dict], str]:
+        skipped = [{"changes": u["changes"], "unavoidable": u["why"]} for u in result.unavoidable[-12:]]
         prompt = (f"Passing base case: {to_prompt_json(base_spec)}\nBase parameters: {base}\n"
                   f"You may vary: ranges {RANGES}, choices {CHOICES}. Only worker parameters apply "
                   f"when the scenario has a worker.\nRuns so far: {to_prompt_json(self._history(base, runs))}\n"
-                  f"Propose {n} new variations.")
-        seen = [r.changes for r in runs]
+                  + (f"Skipped as unavoidable: {to_prompt_json(skipped)}\n" if skipped else "")
+                  + f"Propose {n} new variations.")
+        seen = [r.changes for r in runs] + [u["changes"] for u in result.unavoidable]
         try:
             batch = self.rt.llm.generate("adversarial.propose", prompt, VariationBatch, None, SEARCH_SYSTEM)
             proposals = [clamp(v.changes()) for v in batch.variations]
@@ -206,9 +222,12 @@ class AdversarialTester:
         except Exception as e:          # search keeps going on random samples if the model fails
             proposals, reasoning = [], f"model unavailable ({e}); random sampling"
         proposals = [p for p in proposals if p and p not in seen]
-        while len(proposals) < n:       # top up with random samples near the edge
+        proposals = [p for p in proposals if self._fair(base_spec, p, result)]
+        tries = 0
+        while len(proposals) < n and tries < 400:   # top up with random samples near the edge
+            tries += 1
             p = self._random_changes(base)
-            if p not in seen and p not in proposals:
+            if p and p not in seen and p not in proposals and self._fair(base_spec, p, result):
                 proposals.append(p)
         return proposals[:n], reasoning
 
@@ -243,7 +262,7 @@ class AdversarialTester:
             if len(result.runs) >= self.budget:
                 break
             trial = {k: v for k, v in current.changes.items() if k != key}
-            if not trial:
+            if not trial or not self._fair(base_spec, trial, result):
                 continue
             [r] = self._run(base_spec, [trial], len(result.runs))
             result.runs.append(r)
@@ -262,8 +281,10 @@ class AdversarialTester:
         result.runs.append(base_run)
         while len(result.runs) < self.budget and result.failure is None:
             n = min(self.batch, self.budget - len(result.runs))
-            proposals, reasoning = self._propose(base_spec, base, result.runs, n)
+            proposals, reasoning = self._propose(base_spec, base, result.runs, n, result)
             result.reasoning.append(reasoning)
+            if not proposals:
+                break                   # nothing fair left to try
             runs = self._run(base_spec, proposals, len(result.runs))
             result.runs.extend(runs)
             failures = [r for r in runs if not r.run.passed]

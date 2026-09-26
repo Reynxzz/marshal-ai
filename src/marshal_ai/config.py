@@ -4,6 +4,22 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+# Local settings and credentials (git-ignored); real environment variables win.
+load_dotenv(Path(__file__).resolve().parents[2] / ".env", override=False)
+
+# Verify TLS against the operating system's trust store instead of Python's bundled one, so
+# networks that inspect HTTPS with a company root certificate (trusted by the OS) work too.
+# MARSHAL_SYSTEM_CERTS=0 turns this off.
+if os.getenv("MARSHAL_SYSTEM_CERTS", "1") != "0":
+    try:
+        import truststore
+        truststore.inject_into_ssl()
+    except ImportError:
+        pass
 
 
 @dataclass(frozen=True)

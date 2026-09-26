@@ -25,6 +25,19 @@ async def ask(rt: "Runtime", task: str, prompt: str, schema: type[T],
     return await asyncio.to_thread(rt.llm.generate, task, prompt, schema, media, system)
 
 
+async def ask_or(rt: "Runtime", task: str, prompt: str, schema: type[T], fallback: T,
+                 media: list[Media] | None = None, system: str = "") -> tuple[T, bool]:
+    """Like ask(), but a failed call (network, quota, bad output) returns the flow's safe fallback.
+
+    Every fallback leaves the decision to a person; returns (answer, answered_by_model).
+    """
+    try:
+        return await ask(rt, task, prompt, schema, media, system), True
+    except Exception as e:             # the plant must keep running when the model is unreachable
+        log.warning("%s: model unavailable, using the safe fallback (%s: %s)", task, type(e).__name__, str(e)[:200])
+        return fallback, False
+
+
 def update_car(rt: "Runtime", vin: str, **changes) -> Car:
     car = rt.store.get(Car, vin)
     if car is None:

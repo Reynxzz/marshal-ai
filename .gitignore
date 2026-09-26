@@ -7,3 +7,8 @@ __pycache__/
 dist/
 runs/
 *.snet
+
+# service account keys: never commit
+sa-*.json
+*-sa.json
+credentials/

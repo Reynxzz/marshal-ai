@@ -237,7 +237,14 @@ class YardTraffic:
         prompt = (f"Exception: {kind}\nDetails: {to_prompt_json(details)}\n"
                   f"Plant state: {to_prompt_json(self.state_for_prompt())}\n"
                   "Return a plan.")
-        plan = await ask(self.rt, "yard.exception", prompt, YardPlan, system=SYSTEM)
+        try:
+            plan = await ask(self.rt, "yard.exception", prompt, YardPlan, system=SYSTEM)
+        except Exception as e:          # no plan: nothing moves, the supervisor handles it
+            decision = {"kind": kind, "status": "needs_supervisor",
+                        "errors": [f"model unavailable: {type(e).__name__}"]}
+            self.decisions.append(decision)
+            log.warning("yard: no plan for %s, model unavailable (%s)", kind, e)
+            return decision
         errors = self.check_plan(plan)
         if errors:
             decision = {"kind": kind, "status": "rejected_plan", "errors": errors, "plan": plan.model_dump()}

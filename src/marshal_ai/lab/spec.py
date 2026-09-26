@@ -33,6 +33,7 @@ class ActorType(str, Enum):
     PARKED_CAR = "parked_car"
     PALLET_STACK = "pallet_stack"
     CAR = "car"                      # a second moving car, e.g. braking ahead of ego
+    BOX = "box"                      # an unknown object in ego's lane: the car must stop before it
 
 
 OCCLUDERS = {ActorType.FORKLIFT, ActorType.PARKED_CAR, ActorType.PALLET_STACK}

@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from marshal_ai.lab.compiler import compile_spec
+from marshal_ai.lab.reference import unfair_reasons
 from marshal_ai.lab.runner import Runner
 from marshal_ai.lab.spec import FLAG_CRITERIA, METRICS, ActorType, ScenarioSpec, TimeOfDay, Weather
 from marshal_ai.lab.validate import validate_spec
@@ -41,7 +42,10 @@ SYSTEM = """You turn plain-language plant situations into scenario specs for sim
 driverless car system. Output one JSON object only, never code. Use only the named map points, zones,
 actor types, times of day, weather and pass criteria you are given. Plant speed limit is 10 km/h.
 A worker who steps out from behind something uses "start": "behind:<actor type>" and needs
-walk_speed_ms and a trigger. Always include pass criteria that capture what safe means here."""
+walk_speed_ms and a trigger. An unknown object blocking the lane (a dropped box, debris) is a "box"
+actor with a position on the ego route; the car must stop before it, so do not require reached_goal.
+Always include pass criteria that capture what safe means here, and that a careful driver could meet:
+the car has to drive its route, so never limit its overall speed to near zero."""
 
 
 @dataclass
@@ -106,6 +110,9 @@ class ScenarioGenerator:
                 errors = check.errors
                 continue
             spec = check.spec
+            errors = unfair_reasons(spec, self.rt.map)      # criteria no careful driver could meet
+            if errors:
+                continue
             code = self.runner.compile(spec) if hasattr(self.runner, "compile") else compile_spec(spec, self.rt.map)
             dry = self.runner.run(spec)
             errors = self._dry_run_errors(spec, dry)
@@ -131,7 +138,8 @@ class ScenarioGenerator:
             if a.trigger is not None and i not in dry.triggered:
                 errors.append(f"actors.{i}: trigger at {a.trigger.ego_distance_m} m never fired in the dry run; "
                               "place the actor on or next to the ego route")
-        if not dry.metrics.get("reached_goal") and "reached_goal" not in spec.pass_criteria \
+        blocked = any(a.type == ActorType.BOX for a in spec.actors)     # the car is meant to stop
+        if not blocked and not dry.metrics.get("reached_goal") and "reached_goal" not in spec.pass_criteria \
                 and dry.metrics.get("no_contact"):
             errors.append("dry run: ego never reached the end of its route; shorten the route")
         return errors

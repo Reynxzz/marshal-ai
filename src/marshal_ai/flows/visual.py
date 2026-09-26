@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 
 from marshal_ai.events import Topic
 from marshal_ai.fakeworld import GATE_VIEWS
-from marshal_ai.flows.base import ask, update_car
+from marshal_ai.flows.base import ask_or, update_car
 from marshal_ai.llm import Media
 from marshal_ai.records import Car, CarState, InspectionResult, Verdict, ZoneFinding
 
@@ -83,11 +83,17 @@ class VisualInspector:
 
     async def _view(self, image: Media, zones: list[str]) -> ViewAssessment:
         prompt = f"Zones visible in this image: {zones}. Report defects in these zones only."
-        return await ask(self.rt, "visual.defects", prompt, ViewAssessment, [image], DEFECT_SYSTEM)
+        # no answer: nothing is known to be clear, so the verdict becomes REVIEW for a person
+        view, _ = await ask_or(self.rt, "visual.defects", prompt, ViewAssessment,
+                               ViewAssessment(findings=[], clear_confidence=0.0), [image], DEFECT_SYSTEM)
+        return view
 
     async def _variant(self, car: Car, images: list[Media]) -> VariantAssessment:
         prompt = f"Build sheet: {car.build_sheet.model_dump_json()}\nCompare the car in these images with it."
-        return await ask(self.rt, "visual.variant", prompt, VariantAssessment, images, VARIANT_SYSTEM)
+        variant, _ = await ask_or(self.rt, "visual.variant", prompt, VariantAssessment,
+                                  VariantAssessment(observed_colour="not checked", mismatches=[], confidence=0.0),
+                                  images, VARIANT_SYSTEM)
+        return variant
 
     async def inspect(self, vin: str, views: list[str] | None = None, check_variant: bool = True) -> InspectionResult:
         """Inspect a car at the gate. Re-inspection passes only the views that had findings."""

@@ -174,7 +174,8 @@ def scenario_spec(call: LLMCall) -> dict:
     tod = "night" if "night" in text else "dusk" if ("dusk" in text or "evening" in text) else "noon"
     weather = "rain" if "rain" in text else "fog" if "fog" in text else "clear"
     occluder = next((o for k, o in [("forklift", "forklift"), ("pallet", "pallet_stack"),
-                                    ("parked car", "parked_car"), ("box", "pallet_stack")] if k in text), None)
+                                    ("parked car", "parked_car")] if k in text), None)
+    blocked = any(k in text for k in ("box", "debris", "object in lane"))
     zone_point = "finishing_corner.p3"
     if "line end" in text or "line_end" in text:
         zone_point = "inspection_gate"
@@ -185,6 +186,14 @@ def scenario_spec(call: LLMCall) -> dict:
     route_end = "finishing" if zone_point != "finishing" else "yard.entry"
     actors = []
     person = any(w in text for w in ("worker", "person", "pedestrian", "people"))
+    if blocked:                        # an object in the lane: the car must stop and wait beside a worker
+        zone_point, zone = "finishing_corner.p2", "finishing_corner"
+        actors = [{"type": "box", "state": "stationary", "position": zone_point}]
+        if person:
+            actors.append({"type": "worker", "state": "stationary", "position": zone_point})
+        return {"map_zone": zone, "time_of_day": tod, "weather": weather, "description": text[:200],
+                "ego": {"route": "line_end->finishing", "speed_kmh": 8}, "actors": actors,
+                "pass_criteria": ["no_contact"] + (["min_gap_to_person_m >= 1.5"] if person else [])}
     if occluder:
         actors.append({"type": occluder, "state": "parked", "position": zone_point})
     if person:

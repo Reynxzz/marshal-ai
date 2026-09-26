@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 
 from marshal_ai.driving import MissionDone, MissionGo
 from marshal_ai.fakeworld import GATE_VIEWS
-from marshal_ai.flows.base import ask, log, update_car
+from marshal_ai.flows.base import ask_or, log, update_car
 from marshal_ai.llm import to_prompt_json
 from marshal_ai.records import (
     Car, CarReport, CarState, ChecklistItem, InspectionResult, ReworkTicket, Verdict,
@@ -179,7 +179,11 @@ class ReportRouter:
                   f"Visual result: {to_prompt_json(visual) if visual else 'none'}\n"
                   f"Functional result: {to_prompt_json(functional) if functional else 'none'}\n"
                   f"Rework bays: {to_prompt_json(BAYS)}")
-        draft = await ask(self.rt, "report.write", prompt, ReportDraft, system=SYSTEM)
+        fallback = ReportDraft(
+            summary=f"{vin} failed inspection: " + "; ".join(f"{s.bay}: {s.reason}" for s in required)
+                    + ". (Written without Gemini: model unavailable.)",
+            steps=required)
+        draft, _ = await ask_or(self.rt, "report.write", prompt, ReportDraft, fallback, system=SYSTEM)
         steps = complete_plan(draft.steps, required)
         report.summary = draft.summary
         self.rt.store.put(report)
