@@ -95,6 +95,8 @@ def build_runtime(s: Settings = default_settings, llm: LLM | None = None,
     if s.driving == "carla":
         driving_kwargs.setdefault("host", s.carla_host)
         driving_kwargs.setdefault("port", s.carla_port)
+        driving_kwargs.setdefault("timeout_s", s.carla_timeout_s)
+        driving_kwargs.setdefault("expected_version", s.carla_version)
     driving = make_driving_system(s.driving, plant_map, **driving_kwargs)
     if llm is None:
         if s.llm == "offline":

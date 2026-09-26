@@ -16,6 +16,10 @@ class Settings:
     gcp_project: str | None = field(default_factory=lambda: os.getenv("GOOGLE_CLOUD_PROJECT"))
     carla_host: str = field(default_factory=lambda: os.getenv("CARLA_HOST", "localhost"))
     carla_port: int = field(default_factory=lambda: int(os.getenv("CARLA_PORT", "2000")))
+    carla_timeout_s: float = field(
+        default_factory=lambda: float(os.getenv("CARLA_TIMEOUT_S", "20"))
+    )
+    carla_version: str = field(default_factory=lambda: os.getenv("CARLA_VERSION", "0.9.16"))
 
 
 settings = Settings()

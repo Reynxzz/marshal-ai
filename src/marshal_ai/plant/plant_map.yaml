@@ -18,15 +18,15 @@ zones:
   yard:              {description: Outbound yard, slots grouped by truck}
 
 points:
-  line_end:            {zone: line_end,         x: 0,   y: 0,   carla: null}
-  inspection_gate:     {zone: inspection_gate,  x: 40,  y: 0,   carla: null}
-  test_track:          {zone: test_track,       x: 90,  y: 0,   carla: null}
-  report_point:        {zone: test_track,       x: 130, y: 0,   carla: null}
-  finishing_corner.p1: {zone: finishing_corner, x: 150, y: 10,  carla: null}
-  finishing_corner.p2: {zone: finishing_corner, x: 155, y: 20,  carla: null}
-  finishing_corner.p3: {zone: finishing_corner, x: 160, y: 15,  carla: null}
-  finishing:           {zone: finishing,        x: 160, y: 40,  carla: null}
-  lane_c:              {zone: finishing,        x: 130, y: 40,  carla: null}
+  line_end:            {zone: line_end,         x: 0,   y: 0,   carla: {x: 207.27, y: -13.93, z: 0.30, yaw: -90.7}}
+  inspection_gate:     {zone: inspection_gate,  x: 40,  y: 0,   carla: {x: 206.97, y: -33.93, z: 0.50, yaw: -90.7}}
+  test_track:          {zone: test_track,       x: 90,  y: 0,   carla: {x: 206.74, y: -53.93, z: 0.50, yaw: -90.7}}
+  report_point:        {zone: test_track,       x: 130, y: 0,   carla: {x: 206.51, y: -73.93, z: 0.50, yaw: -90.7}}
+  finishing_corner.p1: {zone: finishing_corner, x: 150, y: 10,  carla: {x: 204.93, y: -114.62, z: 0.50, yaw: -98.9}}
+  finishing_corner.p2: {zone: finishing_corner, x: 155, y: 20,  carla: {x: 199.64, y: -134.95, z: 0.50, yaw: -110.3}}
+  finishing_corner.p3: {zone: finishing_corner, x: 160, y: 15,  carla: {x: 190.45, y: -153.83, z: 0.50, yaw: -121.6}}
+  finishing:           {zone: finishing,        x: 160, y: 40,  carla: {x: 177.72, y: -170.54, z: 0.50, yaw: -133.0}}
+  lane_c:              {zone: finishing,        x: 130, y: 40,  carla: {x: 203.01, y: -73.89, z: 0.50, yaw: -90.7}}
   buffer_zone_b:       {zone: buffer_zone_b,    x: 20,  y: 40,  carla: null}
   rework.paint:        {zone: rework,           x: 100, y: -40, carla: null}
   rework.body:         {zone: rework,           x: 115, y: -40, carla: null}
@@ -34,7 +34,7 @@ points:
   rework.mechanical:   {zone: rework,           x: 145, y: -40, carla: null}
   production_control:  {zone: rework,           x: 160, y: -40, carla: null}
   yard.entry:          {zone: yard,             x: 200, y: 40,  carla: null}
-  yard.Y1:             {zone: yard,             x: 210, y: 30,  carla: null}
+  yard.Y1:             {zone: yard,             x: 210, y: 30,  carla: {x: 206.27, y: -93.92, z: 0.50, yaw: -90.7}}
   yard.Y2:             {zone: yard,             x: 210, y: 36,  carla: null}
   yard.Y3:             {zone: yard,             x: 210, y: 42,  carla: null}
   yard.Y4:             {zone: yard,             x: 210, y: 48,  carla: null}

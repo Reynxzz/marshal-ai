@@ -20,9 +20,11 @@ import asyncio
 import logging
 import queue
 import tempfile
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from marshal_ai.carla_connection import connect_carla
 from marshal_ai.driving.api import EventHandler, emit
 from marshal_ai.driving.messages import (
     AssistChoose, Command, MissionDone, MissionGo, MissionHold, MissionResume, Status, TrackStep,
@@ -36,9 +38,12 @@ log = logging.getLogger(__name__)
 
 try:
     import carla
-    from agents.navigation.behavior_agent import BehaviorAgent
-except ImportError:  # local dev machine without CARLA
+except ImportError:  # local development without the compiled CARLA client
     carla = None
+
+try:
+    from agents.navigation.behavior_agent import BehaviorAgent
+except ImportError:  # bundled under CARLA_ROOT/PythonAPI/carla, not in the PyPI client wheel
     BehaviorAgent = None
 
 
@@ -66,19 +71,27 @@ STEP_LIGHTS = {
 class CarlaDrivingSystem:
     def __init__(self, plant_map: PlantMap, host: str = "localhost", port: int = 2000,
                  fixed_delta_s: float = 0.05, behavior: str = "cautious",
-                 vehicle_blueprint: str = "vehicle.lincoln.mkz_2020"):
+                 vehicle_blueprint: str = "vehicle.lincoln.mkz_2020",
+                 timeout_s: float = 20.0, expected_version: str = "0.9.16"):
         if carla is None:
             raise RuntimeError(
-                "CARLA client not available. Install marshal-ai[carla] on the VM and put "
-                "$CARLA_ROOT/PythonAPI/carla on PYTHONPATH, or use MARSHAL_DRIVING=fake."
+                "CARLA client not available. Install the 0.9.16 wheel bundled with the server "
+                "package, or use MARSHAL_DRIVING=fake."
+            )
+        if BehaviorAgent is None:
+            raise RuntimeError(
+                "CARLA BehaviorAgent not available. Add $CARLA_ROOT/PythonAPI/carla to "
+                "PYTHONPATH before using MARSHAL_DRIVING=carla."
             )
         self.map = plant_map
         self.fixed_delta_s = fixed_delta_s
         self.behavior = behavior
         self.vehicle_blueprint = vehicle_blueprint
-        self.client = carla.Client(host, port)
-        self.client.set_timeout(10.0)
+        self.client, self.server_info = connect_carla(
+            host, port, timeout_s, expected_version, client_factory=carla.Client
+        )
         self.world = self.client.get_world()
+        self._tick_lock = threading.Lock()
         self.vehicles: dict[str, _Vehicle] = {}
         self._handlers: list[EventHandler] = []
         self._task: asyncio.Task | None = None
@@ -102,7 +115,17 @@ class CarlaDrivingSystem:
             bp.set_attribute("color", colour)            # "r,g,b"
         bp.set_attribute("role_name", vin)
         actor = self.world.spawn_actor(bp, self.transform(at))
-        agent = BehaviorAgent(actor, behavior=self.behavior)
+        try:
+            # A freshly spawned actor can report the origin until the server publishes one frame.
+            # BehaviorAgent reads the actor transform in its constructor, so synchronize first.
+            if self.world.get_settings().synchronous_mode:
+                self._tick_world()
+            else:
+                self.world.wait_for_tick(seconds=10.0)
+            agent = BehaviorAgent(actor, behavior=self.behavior)
+        except Exception:
+            actor.destroy()
+            raise
         self.vehicles[vin] = _Vehicle(vin=vin, actor=actor, agent=agent, location=at)
 
     # DrivingSystem
@@ -150,11 +173,15 @@ class CarlaDrivingSystem:
         settings.synchronous_mode = False
         self.world.apply_settings(settings)
 
+    def _tick_world(self):
+        with self._tick_lock:
+            return self.world.tick()
+
     async def _run(self) -> None:
         while True:
             for v in list(self.vehicles.values()):
                 await self._step(v)
-            await asyncio.to_thread(self.world.tick)
+            await asyncio.to_thread(self._tick_world)
             self._since_status += self.fixed_delta_s
             if self._since_status >= 1.0:
                 self._since_status = 0.0
@@ -213,7 +240,7 @@ class CarlaDrivingSystem:
         if nxt is not None:
             v.step_left_s = nxt.duration_s
 
-    def capture(self, transform, width: int = 1280, height: int = 720) -> bytes:
+    def capture(self, transform, width: int = 640, height: int = 360) -> bytes:
         """One RGB frame from a camera placed at a world transform (synchronous mode)."""
         bp = self.world.get_blueprint_library().find("sensor.camera.rgb")
         bp.set_attribute("image_size_x", str(width))
@@ -222,8 +249,22 @@ class CarlaDrivingSystem:
         cam = self.world.spawn_actor(bp, transform)
         try:
             cam.listen(frames.put)
-            self.world.tick()
-            image = frames.get(timeout=5.0)
+            image = None
+            if self.world.get_settings().synchronous_mode:
+                for _ in range(5):
+                    self._tick_world()
+                    try:
+                        image = frames.get(timeout=1.0)
+                        break
+                    except queue.Empty:
+                        continue
+            else:
+                try:
+                    image = frames.get(timeout=5.0)
+                except queue.Empty:
+                    pass
+            if image is None:
+                raise RuntimeError("camera produced no frame after bounded warm-up")
             with tempfile.TemporaryDirectory() as tmp:
                 path = Path(tmp) / "frame.jpg"
                 image.save_to_disk(str(path))

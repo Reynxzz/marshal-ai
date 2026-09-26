@@ -17,6 +17,7 @@ from marshal_ai.driving import MissionDone, MissionGo, TrackStep
 from marshal_ai.driving.routines import TELEMETRY_CHECKS, RoutineStep, routine_steps
 from marshal_ai.events import Topic
 from marshal_ai.flows.base import ask, update_car
+from marshal_ai.llm import Media
 from marshal_ai.records import CarState, ChecklistItem, InspectionResult, Verdict
 
 if TYPE_CHECKING:
@@ -42,6 +43,7 @@ class _Run:
     vin: str
     steps: list[RoutineStep]
     reported: dict[int, TrackStep] = field(default_factory=dict)
+    clips: dict[int, Media] = field(default_factory=dict)
 
 
 class FunctionalChecker:
@@ -63,6 +65,9 @@ class FunctionalChecker:
         run = self.runs.get(event.mission_id)
         if run is not None:
             run.reported[event.step] = event
+            run.clips[event.step] = self.rt.track_camera.clip(
+                run.vin, event.step, event.name
+            )
 
     async def on_mission_done(self, event: MissionDone) -> InspectionResult | None:
         run = self.runs.pop(event.mission_id, None)
@@ -74,7 +79,9 @@ class FunctionalChecker:
     async def _judge(self, run: _Run, step: RoutineStep) -> ChecklistItem:
         reported = run.reported.get(step.step)
         telemetry_ok = bool(reported and TELEMETRY_CHECKS[step.name](reported.telemetry))
-        clip = self.rt.track_camera.clip(run.vin, step.step, step.name)
+        clip = run.clips.get(step.step)
+        if clip is None:
+            clip = self.rt.track_camera.clip(run.vin, step.step, step.name)
         prompt = (f"Step {step.step}: {step.command}.\nExpected on camera: {step.expected_on_camera}.\n"
                   f"Telemetry reported: {reported.telemetry if reported else 'nothing'}")
         seen = await ask(self.rt, "track.step", prompt, StepSeen, [clip], SYSTEM)

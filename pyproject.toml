@@ -17,7 +17,7 @@ gcp = [
 ]
 # The CARLA client matches the server version on the GPU VM; install it there only.
 carla = [
-    "carla==0.9.15",
+    "carla==0.9.16",
 ]
 dev = [
     "pytest>=8.0",
