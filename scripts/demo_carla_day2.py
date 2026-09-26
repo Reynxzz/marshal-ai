@@ -18,6 +18,24 @@ from marshal_ai.fakeworld import GATE_VIEWS
 from marshal_ai.plant import load_plant_map
 
 LIGHT_STEPS = [1, 2, 3, 4]
+# What a still frame can actually confirm, measured with gemini-2.5-flash over repeated runs on
+# 1280x720 night frames:
+#   headlights (front view)  reliable  - "clearly visible and emitting light", conf 0.99-1.0
+#   reverse    (rear view)   reliable  - only became visible after raising resolution from 640x360
+#   brake      (rear view)   ambiguous - the mkz_2020 rear light bar reads as a running light or
+#                                        "design element" in some runs, so it flips between runs
+#   indicators (rear view)   not confirmable from a still: a blinker is lit for part of its cycle,
+#                                        which is why the design asks for a 3 s clip
+# Note CARLA's camera auto-exposure hides the brightness a lamp adds (measured deltas of 0.3-0.8
+# on a 0-255 mean, and front LowBeam measured *darker* than lights-off), so brightness heuristics
+# cannot substitute for the model's judgement here.
+CAMERA_CONFIRMABLE = {"headlights", "reverse"}
+CAMERA_AMBIGUOUS = {"brake_lights"}
+CAMERA_NEEDS_CLIP = {"indicators"}
+
+STEP_VIEW = {"headlights": "front", "indicators": "rear",
+             "brake_lights": "rear", "reverse": "rear"}
+
 EXPECTED_LIGHT = {
     "headlights": "LowBeam",
     "indicators": "LeftBlinker",
@@ -36,11 +54,12 @@ class _FixedEvidenceCamera:
         self._sequence = 0
         self._condition = threading.Condition()
 
-    def start(self, transform) -> None:
+    def start(self, transform, width: int = 640, height: int = 360, fov: float = 90.0) -> None:
         world = self.driving.world
         blueprint = world.get_blueprint_library().find("sensor.camera.rgb")
-        blueprint.set_attribute("image_size_x", "640")
-        blueprint.set_attribute("image_size_y", "360")
+        blueprint.set_attribute("image_size_x", str(width))
+        blueprint.set_attribute("image_size_y", str(height))
+        blueprint.set_attribute("fov", str(fov))
         self.actor = world.spawn_actor(blueprint, transform)
 
         def receive(image) -> None:
@@ -92,6 +111,15 @@ def parser() -> argparse.ArgumentParser:
     ap.add_argument("--vin", default="VIN-DAY2")
     ap.add_argument("--output", type=Path, default=Path("/tmp/marshal-day2"))
     ap.add_argument("--timeout", type=float, default=180.0)
+    ap.add_argument("--evidence-width", type=int, default=1280)
+    ap.add_argument("--evidence-height", type=int, default=720)
+    ap.add_argument("--evidence-fov", type=float, default=90.0,
+                    help="90 keeps the whole car framed. Narrowing it to 50 filled the frame "
+                         "with the car's door instead of its rear, so detail comes from "
+                         "--evidence-width/height instead.")
+    ap.add_argument("--sun-altitude", type=float, default=-8.0,
+                    help="sun angle during the lighting phase. Lamps do not read at noon; "
+                         "a low or negative sun is what makes the camera check meaningful.")
     return ap
 
 
@@ -204,7 +232,11 @@ async def run_track(args: argparse.Namespace) -> dict:
     args.output.mkdir(parents=True, exist_ok=True)
     driving = _new_driving(args)
     missions = MissionClient(driving, load_plant_map(), InMemoryBus())
-    camera = _FixedEvidenceCamera(driving)
+    # A single rear three-quarter view cannot see front headlights, and in bright noon the
+    # lamps do not read at all: Gemini refused to confirm every step from those frames while
+    # telemetry said the bits were on. Two cameras are created once (moving one mid-phase is
+    # what destabilised CARLA), and the sun is dropped so the lamps are actually visible.
+    cameras = {"front": _FixedEvidenceCamera(driving), "rear": _FixedEvidenceCamera(driving)}
     done = asyncio.Event()
     statuses: list[Status] = []
     artifacts: dict[int, dict] = {}
@@ -215,13 +247,18 @@ async def run_track(args: argparse.Namespace) -> dict:
             statuses.append(event)
         elif isinstance(event, TrackStep):
             path = args.output / f"track_step{event.step}_{event.name}.jpg"
-            size = camera.save_latest(path)
+            # One still per step. Steady lamps (headlights, brake, reverse) are confirmed
+            # from this; an indicator is not, because a blinker is only lit for part of its
+            # cycle and a single frame often lands on the off phase. The design calls for a
+            # 3 s clip for exactly this reason - see CAMERA_CONFIRMABLE.
+            size = cameras[STEP_VIEW.get(event.name, "rear")].save_latest(path)
             state = driving.vehicles[event.vin].actor.get_light_state()
             bit_name = EXPECTED_LIGHT[event.name]
             bit = getattr(carla.VehicleLightState, bit_name)
             artifacts[event.step] = {
                 "name": event.name,
                 "image": path.name,
+                "view": STEP_VIEW.get(event.name, "rear"),
                 "bytes": size,
                 "telemetry": event.telemetry,
                 "telemetry_ok": TELEMETRY_CHECKS[event.name](event.telemetry),
@@ -237,7 +274,13 @@ async def run_track(args: argparse.Namespace) -> dict:
 
     missions.on_event(on_event)
     try:
-        camera.start(_offset(driving, "test_track", -8.0, 3.0, 1.6, -20.0))
+        weather = driving.world.get_weather()
+        weather.sun_altitude_angle = args.sun_altitude
+        driving.world.set_weather(weather)
+        cameras["rear"].start(_offset(driving, "test_track", -8.0, 2.5, 1.3, -12.0),
+                              args.evidence_width, args.evidence_height, args.evidence_fov)
+        cameras["front"].start(_offset(driving, "test_track", 8.0, 0.0, 1.3, 180.0),
+                               args.evidence_width, args.evidence_height, args.evidence_fov)
         driving.spawn(args.vin, at="inspection_gate", colour="0,80,200")
         await driving.start()
         started = True
@@ -253,7 +296,8 @@ async def run_track(args: argparse.Namespace) -> dict:
     finally:
         if started:
             await driving.stop()
-        camera.stop()
+        for _cam in cameras.values():
+            _cam.stop()
         _destroy_vehicles(driving)
 
     missing = [step for step in LIGHT_STEPS if step not in artifacts]

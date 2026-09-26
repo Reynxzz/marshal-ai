@@ -291,6 +291,18 @@ class CarlaDrivingSystem:
 GATE_CAMERAS = {"front": (7.0, 0.0, 1.5, 180.0), "rear": (-7.0, 0.0, 1.5, 0.0),
                 "left": (0.0, -5.0, 1.2, 90.0), "right": (0.0, 5.0, 1.2, -90.0)}
 
+# A single rear three-quarter view cannot see front headlights at all, and Gemini
+# correctly refused to confirm them from it. Each checklist step gets the view that
+# shows the lamp it is about: front for headlights, rear for brake and reverse, a
+# rear quarter for indicators (one repeater plus the tail cluster).
+TRACK_CAMERAS = {
+    "headlights": (8.0, 0.0, 1.3, 180.0),
+    "indicators": (-7.0, 3.5, 1.3, -15.0),
+    "brake_lights": (-8.0, 0.0, 1.2, 0.0),
+    "reverse": (-8.0, 0.0, 1.2, 0.0),
+}
+TRACK_CAMERA_DEFAULT = (-8.0, 3.0, 1.6, -20.0)
+
 
 def _offset(ds: CarlaDrivingSystem, point: str, forward: float, right: float, z: float, yaw: float):
     base = ds.transform(point)
@@ -318,12 +330,13 @@ class CarlaGateCamera:
 
 
 class CarlaTrackCamera:
-    """A rear three-quarter camera at the test track; one frame per step (lights are steady)."""
+    """One frame per checklist step, from the view that can actually see that lamp."""
 
     def __init__(self, ds: CarlaDrivingSystem, point: str = "test_track"):
         self.ds, self.point = ds, point
 
     def clip(self, vin: str, step: int, name: str) -> Media:
-        data = self.ds.capture(_offset(self.ds, self.point, -8.0, 3.0, 1.6, -20.0))
+        placement = TRACK_CAMERAS.get(name, TRACK_CAMERA_DEFAULT)
+        data = self.ds.capture(_offset(self.ds, self.point, *placement))
         return Media(mime="image/jpeg", data=data, label=f"track camera, step {step} {name}",
                      uri=f"gs://marshal/track/{vin}/step{step}_{name}.jpg")

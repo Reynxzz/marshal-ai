@@ -294,18 +294,46 @@ compiled scenario script still uses proxy blueprints for forklifts and pallet st
 walkers move on trigger. Parallel scenario execution needs one CARLA server per slot. 15 of 25 plant
 map points still lack CARLA transforms.
 
-**Real Gemini verified** on `id-rd-ca-hanif-ali` via Vertex AI (`gemini-2.5-flash`), replacing the
-offline stand-ins. All five demo stages ran end to end on the fake plant:
+**Real Gemini verified** on `id-rd-ca-hanif-ali` via Vertex AI (`gemini-2.5-flash`). Two things had
+to be corrected along the way, both worth knowing:
 
-- Flow 3 caught a wrong variant from pixels: *"colour: build sheet says white, car shows red (0.96)"*.
-- Flow 4 caught a dead lamp where telemetry and camera disagree: *"brake lights telemetry ON, camera
-  NOT lit -> FAIL"*.
-- Flow 5 routed both cars to bays (`production_control`, `rework.electrical`) for supervisor confirm.
-- Flow 2 ranked assistance options and recommended `wait_for_removal` at 86% with a worker 3 m away.
-- Flow 6 generated `SC-0142` and turned assistance case `AC-1` into `SC-0143`.
-- Flow 7 found a failure at night (`min_gap_to_person_m` 1.15 against a 1.5 limit) and explained it.
-- The release gate blocked `behavior-agent-1.0` on 1 failing test and passed `1.1`.
+1. `scripts/demo.py` **ignores `MARSHAL_LLM`**. It hardcodes `llm="offline"` and only uses Gemini
+   with `--live`, and even then routes `visual.`, `track.` and `assist.` back to the stand-ins. An
+   earlier claim that all seven flows ran on Gemini was wrong: those verdicts came from stand-ins.
+2. The **fake plant cannot use real Gemini for vision at all**. `FakeGateCamera` emits
+   `gs://marshal/...` URIs with no bytes (`Media.truth` is explicitly never sent to Gemini), so
+   Vertex AI tries to fetch a bucket that does not exist:
+   `403 ... does not have storage.objects.get access to .../buckets/marshal/objects/gate/...`.
+   Flows 3 and 4 need **real CARLA frames**, which `CarlaGateCamera`/`CarlaTrackCamera` do supply
+   as bytes.
+
+Verified on real CARLA frames:
+
+- **Flow 3** genuinely judges pixels. Against a build sheet saying `colour=black`, Gemini read the
+  four real gate views and returned `observed_colour: "blue"` with a colour mismatch at confidence
+  1.0, and reported no invented defects (`findings: []`).
+- **Flow 4** needed three fixes before the camera half meant anything. It originally passed on
+  telemetry alone while Gemini refused to confirm **any** of the four steps:
+  - a single rear three-quarter view cannot see front headlights, so each step now uses the view
+    that shows its lamp (`TRACK_CAMERAS`, and front/rear evidence cameras created once);
+  - at noon the lamps do not read at all, so the lighting phase drops the sun
+    (`--sun-altitude`, default −8);
+  - reverse lamps are a few pixels at 640×360, so evidence frames are now 1280×720
+    (`--evidence-width/height`).
+
+  After those, headlights and reverse are reliably confirmed from pixels, brake lights are
+  ambiguous (the `mkz_2020` rear light bar reads as a running light in some runs) and indicators
+  cannot be confirmed from a still at all, because a blinker is only lit for part of its cycle.
+  `demo_carla_day2.py` records this as `CAMERA_CONFIRMABLE` / `CAMERA_AMBIGUOUS` /
+  `CAMERA_NEEDS_CLIP`.
+
+  Narrowing the field of view to 50° to gain detail was a regression: it filled the frame with the
+  car's door instead of its rear, and Gemini correctly reported the rear was not visible. Detail
+  comes from resolution, not field of view. CARLA's camera auto-exposure also hides the brightness
+  a lamp adds (measured deltas of 0.3–0.8 on a 0–255 mean, with front `LowBeam` measuring *darker*
+  than lights-off), so a brightness heuristic cannot replace the model's judgement.
+
+- **Flow 6** generated a valid spec from plain language in one attempt with real Gemini.
 
 Gemini also read a real CARLA frame of the corner collision correctly, returning
-`{"people_present": true, "person_in_lane": true, "risk": "high"}` — so multimodal judgement works on
-simulator imagery, not just the fake plant's synthetic views.
+`{"people_present": true, "person_in_lane": true, "risk": "high"}`.
