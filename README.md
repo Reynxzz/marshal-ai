@@ -409,8 +409,34 @@ to the right. The rule that a person in the scene allows only a wait recommendat
 code needing to override Gemini. The request carries real bytes because a `gs://` URI that does not
 exist cannot be read by Vertex AI — the same 403 that made flow 3 unusable on the fake plant.
 
-Not yet verified: flow 1 against real CARLA. Parallel scenario execution needs one CARLA server per
-slot. Six plant points remain unpinned (`loading_bay`, `yard.Y4`–`Y8`).
+**Flow 1 complete on real CARLA** (`scripts/run_carla_yard.sh`). Cars queue at the line end and are
+released under the controller's own rules; a truck delayed 40 minutes goes to Gemini, which proposes
+a re-plan, and because it moves several cars it waits for a supervisor before anything is sent.
+
+Running it against a real server showed the release spacing rule had never fired there, for two
+reasons the fake backend hides:
+
+- It compared `Status.x/y` against `rt.map.points["line_end"]`. The plant map holds abstract
+  coordinates (line_end is 0,0) while a real backend reports world coordinates (207.27,-13.93), so
+  for a car standing still at the line end it computed 207.7 m, always read "clear", and released a
+  second car 16 m behind the first. The fake backend reports plant coordinates, so both sides agreed
+  there and every test passed. The backend now owns its frame (`reference_xy`).
+- It only had a position once a `Status` had arrived, and otherwise fell back to wall-clock time. On
+  a loaded CARLA server simulated time runs slower than real time: 18 real seconds passed while the
+  car had moved 16 m. The rule now asks the driving system directly (`position_xy`), then the last
+  `Status`, then time.
+
+Geometry worth knowing: `inspection_gate` is 20 m from `line_end` on Town05 while `MIN_SPACING_M` is
+25, so a car can never be 25 m out while still in the first segment — leaving it by reaching the gate
+is the normal way it clears, and BehaviorAgent finishes within a few metres of its target, so that
+happens at about 16 m.
+
+All 25 plant points now carry CARLA transforms; an approved re-plan had failed on
+`yard.Y7 has no CARLA transform`.
+
+Still open: parallel scenario execution needs one CARLA server per slot. Arriving at the gate starts
+flow 3's four 1280×720 captures, which repeatedly took the server down mid-run, so the flow 1 demo
+keeps flow 3 out of scope; the two are verified separately.
 
 **Real Gemini verified** on `id-rd-ca-hanif-ali` via Vertex AI (`gemini-2.5-flash`). Two things had
 to be corrected along the way, both worth knowing:
