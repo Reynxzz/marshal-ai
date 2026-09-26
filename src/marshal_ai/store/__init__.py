@@ -25,6 +25,11 @@ COLLECTIONS: dict[type[BaseModel], tuple[str, str]] = {
 }
 
 
+def record_key(record: BaseModel) -> str:
+    """The record's own id, matching the live copy's key (InspectionResult is vin:kind)."""
+    return _key(record)[1]
+
+
 def _key(record: BaseModel) -> tuple[str, str]:
     collection, field = COLLECTIONS[type(record)]
     key = getattr(record, field)

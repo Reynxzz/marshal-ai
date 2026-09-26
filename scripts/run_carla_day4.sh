@@ -21,6 +21,8 @@ export GOOGLE_CLOUD_PROJECT="${GOOGLE_CLOUD_PROJECT:-id-rd-ca-hanif-ali}"
 export GOOGLE_CLOUD_LOCATION="${GOOGLE_CLOUD_LOCATION:-us-central1}"
 # store the photos behind the verdicts, so the gs:// URIs in records resolve
 export MARSHAL_ARTIFACTS="${MARSHAL_ARTIFACTS:-gcs}"
+# and keep the trail of state changes behind them
+export MARSHAL_HISTORY="${MARSHAL_HISTORY:-bq}"
 
 test -f "$GOOGLE_APPLICATION_CREDENTIALS" || {
   echo "no Gemini credentials at $GOOGLE_APPLICATION_CREDENTIALS" >&2; exit 1; }

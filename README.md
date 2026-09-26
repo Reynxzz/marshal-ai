@@ -209,6 +209,48 @@ any `camera_ok` decision.
 
 No BigQuery yet: nothing in `src/` imports that client, so record history is still the live store.
 
+## Record history (BigQuery)
+
+The live store keeps one current copy per record. History makes a verdict auditable after the car
+has shipped.
+
+```bash
+export MARSHAL_HISTORY=bq               # "none" (default) keeps only the live copy
+```
+
+Dataset `marshal`, table `record_history` in `asia-southeast2`, partitioned on `recorded_at` and
+clustered on `kind, key` so a shift or VIN query stays cheap. `run_carla_day4.sh` and
+`run_carla_day5.sh` default to `bq`.
+
+Two deliberate choices, both worth knowing:
+
+- **It appends on every `put`, by wrapping the store.** `store/__init__.py` says history is written
+  "by the pipelines that produce them, not through this store", but nothing did, and a car's record
+  is updated many times — released, inspected, reported, reworked, re-inspected. Per-pipeline calls
+  only capture the moments someone remembered to add one, so most of the trail would be lost.
+- **One table holds every kind**, rather than six mirrors of the pydantic models that would drift
+  from them. `kind` and `key` cover VIN lookups, `recorded_at` covers shifts, and `payload` is
+  queryable with JSON functions. The column is not called `at`, because that is a reserved keyword
+  in BigQuery SQL and every query would need backticks.
+
+Appends are best-effort, like artifact uploads, and retried briefly: a freshly created table answers
+404 to streaming inserts for a few seconds. Losing history must never change a verdict.
+
+Verified end to end — four state changes written and read back in order:
+
+```
+Car        state=line_end
+Car        state=inspection_gate
+Car        state=test_track
+CarReport  verdict=FAIL
+```
+
+```sql
+SELECT recorded_at, kind, JSON_VALUE(payload, '$.verdict') AS verdict
+FROM `id-rd-ca-hanif-ali.marshal.record_history`
+WHERE key = 'VIN-DARK' ORDER BY recorded_at
+```
+
 ## Test lab on real CARLA (day 3 checkpoint)
 
 

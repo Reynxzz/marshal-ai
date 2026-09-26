@@ -13,6 +13,7 @@ from marshal_ai.cameras import GateCamera, TrackCamera
 from marshal_ai.config import Settings, settings as default_settings
 from marshal_ai.driving import DrivingSystem, MissionClient, make_driving_system
 from marshal_ai.events import EventBus, make_bus
+from marshal_ai.history import History, NoHistory, WithHistory, make_history
 from marshal_ai.fakeworld import FakeGateCamera, FakeTrackCamera, FakeWorld
 from marshal_ai.llm import LLM, GeminiLLM
 from marshal_ai.plant import PlantMap, load_plant_map
@@ -58,6 +59,7 @@ class Runtime:
     gate_camera: GateCamera
     track_camera: TrackCamera
     artifacts: Artifacts
+    history: History
     plant: PlantState = field(default_factory=PlantState)
     world: FakeWorld | None = None            # simulation ground truth (fake backend only)
     clock: Callable[[], datetime] = now
@@ -94,6 +96,9 @@ def build_runtime(s: Settings = default_settings, llm: LLM | None = None,
     plant_map = load_plant_map()
     bus = make_bus(s.bus, s.gcp_project)
     store = make_store(s.store, s.gcp_project)
+    history = make_history(s.history, s.gcp_project)
+    if not isinstance(history, NoHistory):
+        store = WithHistory(store, history)      # every put also becomes a history row
     if s.driving == "carla":
         driving_kwargs.setdefault("host", s.carla_host)
         driving_kwargs.setdefault("port", s.carla_port)
@@ -117,7 +122,7 @@ def build_runtime(s: Settings = default_settings, llm: LLM | None = None,
         world = world or FakeWorld()
         gate, track = FakeGateCamera(world), FakeTrackCamera(world)
     return Runtime(s, plant_map, bus, store, driving, MissionClient(driving, plant_map, bus),
-                   llm, gate, track, artifacts, world=world,
+                   llm, gate, track, artifacts, history, world=world,
                    clock=SimClock() if s.driving == "fake" else now)
 
 
