@@ -11,7 +11,9 @@ destinations. The agent's own collision and hazard stops are never overridden.
 Test track routines switch the car's real lights, so the track camera sees them. A car
 in `faults` reports a lamp ON in telemetry while leaving it dark, the "dead bulb" case.
 
-Not wired yet: raising assist.request when BehaviorAgent blocks on an obstacle.
+Flow 2's trigger: when BehaviorAgent stops short of its destination and something is in
+front of the car, the driving system raises assist.request with a real forward frame and
+waits for a human, exactly as the fake backend does.
 """
 
 from __future__ import annotations
@@ -27,7 +29,7 @@ from pathlib import Path
 from marshal_ai.carla_connection import connect_carla
 from marshal_ai.driving.api import EventHandler, emit
 from marshal_ai.driving.messages import (
-    AssistChoose, Command, MissionDone, MissionGo, MissionHold, MissionResume, Status, TrackStep,
+    AssistChoose, AssistRequest, Command, MissionDone, MissionGo, MissionHold, MissionResume, Status, TrackStep,
 )
 from marshal_ai.driving.routines import RoutineStep, routine_steps
 from marshal_ai.fakeworld import GATE_VIEWS
@@ -61,7 +63,13 @@ class _Vehicle:
     routine_queue: list[RoutineStep] = field(default_factory=list)
     routine_done: bool = False
     step_left_s: float = 0.0
+    stalled_s: float = 0.0                 # how long the agent has been stopped mid-mission
+    assists_raised: int = 0
 
+
+# The options the driving system offers when it stops. The desk may only choose among these;
+# it never invents a path. "wait" first so a rule-bound desk always has a safe choice.
+ASSIST_OPTIONS = ["wait_for_removal", "pass_left_3kmh", "reroute_lane_c"]
 
 STEP_LIGHTS = {
     "headlights": "LowBeam", "indicators": "LeftBlinker", "brake_lights": "Brake", "reverse": "Reverse",
@@ -72,7 +80,10 @@ class CarlaDrivingSystem:
     def __init__(self, plant_map: PlantMap, host: str = "localhost", port: int = 2000,
                  fixed_delta_s: float = 0.05, behavior: str = "cautious",
                  vehicle_blueprint: str = "vehicle.lincoln.mkz_2020",
-                 timeout_s: float = 20.0, expected_version: str = "0.9.16"):
+                 timeout_s: float = 20.0, expected_version: str = "0.9.16",
+                 auto_assist: bool = True, blocked_after_s: float = 5.0,
+                 blocked_speed_kmh: float = 0.6, obstacle_range_m: float = 14.0,
+                 assist_options: list[str] | None = None):
         if carla is None:
             raise RuntimeError(
                 "CARLA client not available. Install the 0.9.16 wheel bundled with the server "
@@ -97,6 +108,15 @@ class CarlaDrivingSystem:
         self._task: asyncio.Task | None = None
         self._since_status = 0.0
         self.faults: dict[str, set[str]] = {}      # vin -> routine steps whose lamp stays dark
+        # case_id -> forward frame taken when the car stopped, so the desk can show Gemini real
+        # pixels. AssistRequest only carries a URI, and Vertex AI cannot read a gs:// path that
+        # does not exist, which is how flow 3 first failed.
+        self.assist_clips: dict[str, bytes] = {}
+        self.blocked_after_s = blocked_after_s
+        self.blocked_speed_kmh = blocked_speed_kmh
+        self.obstacle_range_m = obstacle_range_m
+        self.assist_options = list(assist_options) if assist_options else list(ASSIST_OPTIONS)
+        self.auto_assist = auto_assist
         # Reusable capture cameras, keyed by pose; see capture()/close_cameras().
         self._cameras: dict[tuple, tuple] = {}
 
@@ -219,7 +239,97 @@ class CarlaDrivingSystem:
                     mission_id=mission.mission_id, vin=v.vin, location=v.location,
                 ))
                 return
+        if await self._check_blocked(v):
+            return
         v.actor.apply_control(v.agent.run_step())
+
+    # ---------- flow 2: the driving system asks for help ----------
+
+    def _obstacle_ahead(self, v: _Vehicle):
+        """Nearest vehicle, walker or prop in front of the car, within obstacle_range_m."""
+        here = v.actor.get_transform()
+        forward = here.get_forward_vector()
+        origin = here.location
+        best, best_d = None, self.obstacle_range_m
+        for actor in self.world.get_actors():
+            if actor.id == v.actor.id:
+                continue
+            if not actor.type_id.startswith(("vehicle.", "walker.", "static.prop")):
+                continue
+            offset = actor.get_location() - origin
+            ahead = offset.x * forward.x + offset.y * forward.y
+            if ahead <= 0:                      # behind the car
+                continue
+            lateral = abs(offset.x * -forward.y + offset.y * forward.x)
+            if lateral > 3.0:                   # not in this lane
+                continue
+            distance = origin.distance(actor.get_location())
+            if distance < best_d:
+                best, best_d = actor, distance
+        return best, best_d
+
+    def assist_clip(self, v: _Vehicle) -> bytes | None:
+        """A forward view from behind the stopped car, showing what it is looking at."""
+        here = v.actor.get_transform()
+        forward, right = here.get_forward_vector(), here.get_right_vector()
+        location = here.location + forward * -7.0 + right * 1.2
+        location.z += 3.0
+        pose = carla.Transform(location, carla.Rotation(yaw=here.rotation.yaw, pitch=-10.0))
+        try:
+            return self.capture(pose, EVIDENCE_WIDTH, EVIDENCE_HEIGHT)
+        except Exception:                       # a missing frame must not block the request
+            return None
+
+    async def raise_assist(self, vin: str, case_id: str, reason: str, options: list[str],
+                           clip_uri: str | None = None) -> None:
+        """Make a car stop and ask for help, as the real driving system would."""
+        v = self.vehicles[vin]
+        v.assist_case = case_id
+        v.assists_raised += 1
+        v.actor.apply_control(carla.VehicleControl(throttle=0.0, brake=1.0))
+        clip = self.assist_clip(v)
+        if clip is not None:
+            self.assist_clips[case_id] = clip
+        await emit(self._handlers, AssistRequest(
+            case_id=case_id, vin=vin, location=v.location, reason=reason, options=options,
+            clip_uri=clip_uri or f"gs://marshal/assist/{case_id}.jpg",
+        ))
+
+    def assist_media(self, case_id: str) -> Media | None:
+        """The frame captured when the car stopped, for the desk to show Gemini."""
+        data = self.assist_clips.get(case_id)
+        if data is None:
+            return None
+        return Media(mime="image/jpeg", data=data, label="forward view at the stop",
+                     uri=f"gs://marshal/assist/{case_id}.jpg")
+
+    async def _check_blocked(self, v: _Vehicle) -> bool:
+        """Raise assist.request once the agent has stalled mid-mission behind something."""
+        if not self.auto_assist or v.assist_case or v.routine_queue:
+            return False
+        velocity = v.actor.get_velocity()
+        speed_kmh = 3.6 * (velocity.x ** 2 + velocity.y ** 2 + velocity.z ** 2) ** 0.5
+        if speed_kmh > self.blocked_speed_kmh:
+            v.stalled_s = 0.0
+            return False
+        v.stalled_s += self.fixed_delta_s
+        if v.stalled_s < self.blocked_after_s:
+            return False
+        obstacle, distance = self._obstacle_ahead(v)
+        if obstacle is None:
+            v.stalled_s = 0.0                   # stopped for its own reasons, not an obstacle
+            return False
+        kind = obstacle.type_id.split(".")[0]
+        what = {"walker": "a person", "vehicle": "a vehicle", "static": "an object"}.get(
+            kind, "an object")
+        case_id = f"AC-{v.vin}-{v.assists_raised + 1}"
+        await self.raise_assist(
+            v.vin, case_id,
+            f"unknown object in lane: {what} ({obstacle.type_id}) {distance:.1f} m ahead",
+            self.assist_options,
+        )
+        v.stalled_s = 0.0
+        return True
 
     def _set_lights(self, v: _Vehicle, step: RoutineStep | None) -> None:
         state = carla.VehicleLightState.NONE

@@ -84,6 +84,14 @@ class AssistanceDesk:
         self.rt = app.rt
 
     def clip(self, request: AssistRequest) -> list[Media]:
+        # A real backend can hand over the frame it captured when the car stopped. Without
+        # bytes the media is only a gs:// URI, and Vertex AI cannot read a path that does not
+        # exist - the 403 that made flow 3 unusable on the fake plant.
+        supplier = getattr(self.rt.driving, "assist_media", None)
+        if supplier is not None:
+            media = supplier(request.case_id)
+            if media is not None:
+                return [media]
         truth = self.rt.world.scenes.get(request.case_id) if self.rt.world else None
         if request.clip_uri is None and truth is None:
             return []
