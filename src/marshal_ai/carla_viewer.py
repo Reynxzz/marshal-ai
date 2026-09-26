@@ -179,8 +179,23 @@ def parser() -> argparse.ArgumentParser:
     ap.add_argument("--fps", type=float, default=2.0)
     ap.add_argument("--jpeg-quality", type=int, default=60)
     ap.add_argument("--spawn-index", type=int, default=0)
+    ap.add_argument("--camera-at", default=None, metavar="X,Y,Z,YAW",
+                    help="look from an explicit pose instead of a spawn point, e.g. "
+                         "'199.64,-134.95,0.5,-110.3'. Town05 has no spawn points along "
+                         "some plant routes, so named map points need this.")
     ap.add_argument("--camera-height", type=float, default=8.0)
     return ap
+
+
+def _pose_from_arg(carla: Any, text: str) -> Any:
+    parts = text.split(",")
+    if len(parts) != 4:
+        raise SystemExit("--camera-at needs exactly X,Y,Z,YAW")
+    try:
+        x, y, z, yaw = (float(p) for p in parts)
+    except ValueError:
+        raise SystemExit(f"--camera-at must be four numbers, got {text!r}")
+    return carla.Transform(carla.Location(x=x, y=y, z=z), carla.Rotation(yaw=yaw))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -197,10 +212,17 @@ def main(argv: list[str] | None = None) -> int:
     client.set_timeout(20.0)
     world = client.get_world()
     spawns = world.get_map().get_spawn_points()
-    if not spawns:
-        raise SystemExit("the current CARLA map has no vehicle spawn points")
-    if not 0 <= args.spawn_index < len(spawns):
-        raise SystemExit(f"spawn-index must be between 0 and {len(spawns) - 1}")
+    if args.camera_at is None:
+        if not spawns:
+            raise SystemExit("the current CARLA map has no vehicle spawn points")
+        if not 0 <= args.spawn_index < len(spawns):
+            raise SystemExit(
+                f"spawn-index must be between 0 and {len(spawns) - 1}. If this is lower than "
+                f"expected the server is probably on the wrong map ({world.get_map().name}); "
+                f"load the right one and restart rather than lowering the index.")
+        pose = spawns[args.spawn_index]
+    else:
+        pose = _pose_from_arg(carla, args.camera_at)
 
     blueprint = world.get_blueprint_library().find("sensor.camera.rgb")
     blueprint.set_attribute("image_size_x", str(args.width))
@@ -209,7 +231,7 @@ def main(argv: list[str] | None = None) -> int:
     blueprint.set_attribute("fov", "90")
     camera = world.spawn_actor(
         blueprint,
-        _camera_transform(carla, spawns[args.spawn_index], args.camera_height),
+        _camera_transform(carla, pose, args.camera_height),
     )
 
     frames = FrameBuffer()
@@ -220,7 +242,7 @@ def main(argv: list[str] | None = None) -> int:
         "width": args.width,
         "height": args.height,
         "fps": args.fps,
-        "spawn_index": args.spawn_index,
+        "spawn_index": args.spawn_index if args.camera_at is None else args.camera_at,
     }
     server = ViewerServer((args.bind, args.http_port), frames, metadata)
     stop = threading.Event()

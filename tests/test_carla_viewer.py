@@ -1,9 +1,44 @@
 import threading
 import time
+from types import SimpleNamespace
 
 import pytest
 
-from marshal_ai.carla_viewer import FrameBuffer, parser
+from marshal_ai.carla_viewer import FrameBuffer, _pose_from_arg, parser
+
+
+class _FakeCarla:
+    """Just enough of the carla module to check pose parsing without the client."""
+
+    @staticmethod
+    def Location(x, y, z):
+        return SimpleNamespace(x=x, y=y, z=z)
+
+    @staticmethod
+    def Rotation(yaw):
+        return SimpleNamespace(yaw=yaw)
+
+    @staticmethod
+    def Transform(location, rotation):
+        return SimpleNamespace(location=location, rotation=rotation)
+
+
+def test_camera_at_accepts_an_explicit_plant_pose():
+    """Town05 has no spawn point near some plant routes, so poses must be given directly."""
+    pose = _pose_from_arg(_FakeCarla, "193.5,-151.0,0.5,-118.0")
+
+    assert (pose.location.x, pose.location.y, pose.location.z) == (193.5, -151.0, 0.5)
+    assert pose.rotation.yaw == -118.0
+
+
+@pytest.mark.parametrize("text", ["1,2,3", "1,2,3,4,5", "a,b,c,d", ""])
+def test_camera_at_rejects_malformed_poses(text):
+    with pytest.raises(SystemExit):
+        _pose_from_arg(_FakeCarla, text)
+
+
+def test_camera_at_defaults_to_none_so_spawn_index_is_used():
+    assert parser().parse_args([]).camera_at is None
 
 
 def test_frame_buffer_keeps_only_latest_frame():
