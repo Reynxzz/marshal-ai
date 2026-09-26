@@ -175,6 +175,40 @@ gcloud projects add-iam-policy-binding id-rd-ca-hanif-ali \
 No Cloud Storage or BigQuery role is needed yet: `gs://` URIs are recorded as strings and nothing
 in `src/` imports those clients.
 
+## Evidence storage (Cloud Storage)
+
+Every record already carried a `gs://` URI — a gate view, a track frame, the forward view at an
+assist stop — but nothing was uploaded, so the design's promise that "every verdict can be traced
+back to a photo" did not hold and those URIs pointed at nothing.
+
+```bash
+export MARSHAL_ARTIFACTS=gcs            # "none" (default) keeps the URI as a label
+# export MARSHAL_BUCKET=...             # defaults to marshal-artifacts-$GOOGLE_CLOUD_PROJECT
+```
+
+Bucket `marshal-artifacts-id-rd-ca-hanif-ali` exists in `asia-southeast2`, with uniform
+bucket-level access and **public access prevention enforced** — these are internal plant photos.
+`run_carla_day4.sh` and `run_carla_day5.sh` default to `gcs`.
+
+Records use a `gs://marshal/...` convention that predates the bucket, and bucket names are globally
+unique, so the uploader keeps the object path and rewrites the bucket. Uploads are best-effort by
+design: a storage outage logs a warning and the URI is still recorded, because a failed upload must
+never change a verdict.
+
+Verified on the host after day 4 and day 5:
+
+```
+gs://marshal-artifacts-…/assist/AC-VIN-STUCK-1.jpg        567296 bytes  image/jpeg
+gs://marshal-artifacts-…/track/VIN-OK/step1_headlights.jpg   481280 bytes
+gs://marshal-artifacts-…/track/VIN-DARK/step1_headlights.jpg 489472 bytes
+```
+
+Downloading the two track frames shows exactly what the verdicts claim: `VIN-OK` casts light pools
+on the road, `VIN-DARK` casts none. That is the audit trail — a supervisor can pull the frame behind
+any `camera_ok` decision.
+
+No BigQuery yet: nothing in `src/` imports that client, so record history is still the live store.
+
 ## Test lab on real CARLA (day 3 checkpoint)
 
 

@@ -26,6 +26,7 @@ import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from marshal_ai.artifacts import Artifacts, NoArtifacts
 from marshal_ai.carla_connection import connect_carla
 from marshal_ai.driving.api import EventHandler, emit
 from marshal_ai.driving.messages import (
@@ -119,6 +120,9 @@ class CarlaDrivingSystem:
         self.auto_assist = auto_assist
         # Reusable capture cameras, keyed by pose; see capture()/close_cameras().
         self._cameras: dict[tuple, tuple] = {}
+        # Replaced by the runtime when MARSHAL_ARTIFACTS=gcs, so the gs:// URI a record
+        # carries points at the actual photo behind the verdict.
+        self.artifacts: Artifacts = NoArtifacts()
 
     def transform(self, point: str):
         spec = self.map.points[point].carla
@@ -243,6 +247,10 @@ class CarlaDrivingSystem:
             return
         v.actor.apply_control(v.agent.run_step())
 
+    def store_artifact(self, uri: str, data: bytes) -> str:
+        """Upload evidence and return the URI to record. Never raises."""
+        return self.artifacts.put(uri, data, "image/jpeg")
+
     # ---------- flow 2: the driving system asks for help ----------
 
     def _obstacle_ahead(self, v: _Vehicle):
@@ -288,11 +296,13 @@ class CarlaDrivingSystem:
         v.assists_raised += 1
         v.actor.apply_control(carla.VehicleControl(throttle=0.0, brake=1.0))
         clip = self.assist_clip(v)
+        uri = clip_uri or f"gs://marshal/assist/{case_id}.jpg"
         if clip is not None:
             self.assist_clips[case_id] = clip
+            uri = self.store_artifact(uri, clip)
         await emit(self._handlers, AssistRequest(
             case_id=case_id, vin=vin, location=v.location, reason=reason, options=options,
-            clip_uri=clip_uri or f"gs://marshal/assist/{case_id}.jpg",
+            clip_uri=uri,
         ))
 
     def assist_media(self, case_id: str) -> Media | None:
@@ -301,7 +311,7 @@ class CarlaDrivingSystem:
         if data is None:
             return None
         return Media(mime="image/jpeg", data=data, label="forward view at the stop",
-                     uri=f"gs://marshal/assist/{case_id}.jpg")
+                     uri=f"gs://marshal/assist/{case_id}.jpg")  # recorded URI is on the request
 
     async def _check_blocked(self, v: _Vehicle) -> bool:
         """Raise assist.request once the agent has stalled mid-mission behind something."""
@@ -489,8 +499,8 @@ class CarlaGateCamera:
                 continue
             data = self.ds.capture(_offset(self.ds, self.point, *GATE_CAMERAS[view]),
                                    EVIDENCE_WIDTH, EVIDENCE_HEIGHT)
-            out.append(Media(mime="image/jpeg", data=data, label=f"{view} camera",
-                             uri=f"gs://marshal/gate/{vin}/{view}.jpg"))
+            uri = self.ds.store_artifact(f"gs://marshal/gate/{vin}/{view}.jpg", data)
+            out.append(Media(mime="image/jpeg", data=data, label=f"{view} camera", uri=uri))
         return out
 
 
@@ -504,5 +514,6 @@ class CarlaTrackCamera:
         placement = TRACK_CAMERAS.get(name, TRACK_CAMERA_DEFAULT)
         data = self.ds.capture(_offset(self.ds, self.point, *placement),
                                EVIDENCE_WIDTH, EVIDENCE_HEIGHT)
+        uri = self.ds.store_artifact(f"gs://marshal/track/{vin}/step{step}_{name}.jpg", data)
         return Media(mime="image/jpeg", data=data, label=f"track camera, step {step} {name}",
-                     uri=f"gs://marshal/track/{vin}/step{step}_{name}.jpg")
+                     uri=uri)

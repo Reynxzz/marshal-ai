@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Callable
 
+from marshal_ai.artifacts import Artifacts, make_artifacts
 from marshal_ai.cameras import GateCamera, TrackCamera
 from marshal_ai.config import Settings, settings as default_settings
 from marshal_ai.driving import DrivingSystem, MissionClient, make_driving_system
@@ -56,6 +57,7 @@ class Runtime:
     llm: LLM
     gate_camera: GateCamera
     track_camera: TrackCamera
+    artifacts: Artifacts
     plant: PlantState = field(default_factory=PlantState)
     world: FakeWorld | None = None            # simulation ground truth (fake backend only)
     clock: Callable[[], datetime] = now
@@ -98,6 +100,10 @@ def build_runtime(s: Settings = default_settings, llm: LLM | None = None,
         driving_kwargs.setdefault("timeout_s", s.carla_timeout_s)
         driving_kwargs.setdefault("expected_version", s.carla_version)
     driving = make_driving_system(s.driving, plant_map, **driving_kwargs)
+    artifacts = make_artifacts(s.artifacts, s.gcp_project, s.bucket)
+    # The CARLA backend is what holds real pixels, so it does the uploading.
+    if hasattr(driving, "artifacts"):
+        driving.artifacts = artifacts
     if llm is None:
         if s.llm == "offline":
             from marshal_ai.offline import offline_llm
@@ -111,7 +117,7 @@ def build_runtime(s: Settings = default_settings, llm: LLM | None = None,
         world = world or FakeWorld()
         gate, track = FakeGateCamera(world), FakeTrackCamera(world)
     return Runtime(s, plant_map, bus, store, driving, MissionClient(driving, plant_map, bus),
-                   llm, gate, track, world=world,
+                   llm, gate, track, artifacts, world=world,
                    clock=SimClock() if s.driving == "fake" else now)
 
 

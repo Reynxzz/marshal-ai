@@ -19,12 +19,20 @@ def test_gate_camera_captures_requested_views_sequentially(monkeypatch):
     calls = []
 
     class Driving:
+        def __init__(self):
+            self.stored = []
+
         def capture(self, transform, width=None, height=None):
             calls.append((transform, width, height))
             return f"image-{len(calls)}".encode()
 
+        def store_artifact(self, uri, data):
+            self.stored.append((uri, data))
+            return uri.replace("gs://marshal/", "gs://marshal-artifacts/")
+
     monkeypatch.setattr("marshal_ai.driving.carla_backend._offset", lambda ds, point, *offset: offset)
-    media = CarlaGateCamera(Driving()).capture("VIN-1", ["front", "left", "right"])
+    driving = Driving()
+    media = CarlaGateCamera(driving).capture("VIN-1", ["front", "left", "right"])
 
     assert len(calls) == 3
     assert [item.label for item in media] == [
@@ -33,6 +41,12 @@ def test_gate_camera_captures_requested_views_sequentially(monkeypatch):
     # Evidence frames must be larger than the viewer's: Gemini could not tell a lit lamp
     # from a dark one at 640x360.
     assert {(w, h) for _t, w, h in calls} == {(EVIDENCE_WIDTH, EVIDENCE_HEIGHT)}
+    # the photo behind a verdict is stored, and the recorded URI is the stored one
+    assert [uri for uri, _data in driving.stored] == [
+        "gs://marshal/gate/VIN-1/front.jpg", "gs://marshal/gate/VIN-1/left.jpg",
+        "gs://marshal/gate/VIN-1/right.jpg",
+    ]
+    assert all(m.uri.startswith("gs://marshal-artifacts/") for m in media)
     assert [item.data for item in media] == [b"image-1", b"image-2", b"image-3"]
 
 

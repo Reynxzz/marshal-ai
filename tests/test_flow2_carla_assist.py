@@ -43,6 +43,7 @@ class _Backend:
         self.assist_options = list(ASSIST_OPTIONS)
         self.auto_assist = True
         self.assist_clips: dict[str, bytes] = {}
+        self.stored: list[tuple[str, bytes]] = []
         self.events: list = []
         self._handlers = [self.events.append]
         self._obstacle = (obstacle, distance)
@@ -59,6 +60,10 @@ class _Backend:
 
     def assist_clip(self, v):
         return b"forward-frame"
+
+    def store_artifact(self, uri, data):
+        self.stored.append((uri, data))
+        return uri.replace("gs://marshal/", "gs://marshal-artifacts/")
 
 
 def _vehicle(backend):
@@ -101,6 +106,9 @@ def test_a_car_blocked_by_a_person_asks_after_the_grace_period():
     assert request.options == ASSIST_OPTIONS
     assert "a person" in request.reason and "3.4 m" in request.reason
     assert v.assist_case == request.case_id, "the car must stay stopped until a human answers"
+    # the frame is stored and the request carries the stored URI, not the placeholder
+    assert backend.stored == [(f"gs://marshal/assist/{request.case_id}.jpg", b"forward-frame")]
+    assert request.clip_uri == f"gs://marshal-artifacts/assist/{request.case_id}.jpg"
 
 
 def test_the_captured_frame_is_offered_to_the_desk_as_bytes():

@@ -13,6 +13,9 @@ class Settings:
     store: str = field(default_factory=lambda: os.getenv("MARSHAL_STORE", "memory"))
     driving: str = field(default_factory=lambda: os.getenv("MARSHAL_DRIVING", "fake"))
     llm: str = field(default_factory=lambda: os.getenv("MARSHAL_LLM", "gemini"))   # or "offline"
+    # "none" keeps gs:// URIs as labels; "gcs" uploads the photo behind each verdict
+    artifacts: str = field(default_factory=lambda: os.getenv("MARSHAL_ARTIFACTS", "none"))
+    bucket: str | None = field(default_factory=lambda: os.getenv("MARSHAL_BUCKET"))
     gcp_project: str | None = field(default_factory=lambda: os.getenv("GOOGLE_CLOUD_PROJECT"))
     carla_host: str = field(default_factory=lambda: os.getenv("CARLA_HOST", "localhost"))
     carla_port: int = field(default_factory=lambda: int(os.getenv("CARLA_PORT", "2000")))
