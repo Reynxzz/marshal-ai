@@ -67,6 +67,8 @@ class _Vehicle:
     step_left_s: float = 0.0
     stalled_s: float = 0.0                 # how long the agent has been stopped mid-mission
     assists_raised: int = 0
+    onboard: object | None = None          # forward camera on the car; see assist_clip()
+    onboard_frames: object | None = None   # queue.Queue of its frames
 
 
 # The options the driving system offers when it stops. The desk may only choose among these;
@@ -140,6 +142,42 @@ class CarlaDrivingSystem:
 
     # plant side: a finished car rolls off the line
 
+    def _attach_onboard(self, v: "_Vehicle") -> None:
+        """Give the car a forward camera that streams for as long as it exists.
+
+        The assist frame used to be taken by spawning a camera behind the car at the moment it
+        stopped. That cannot work: the stop is detected inside the driving loop, so the loop is
+        blocked in the call that is waiting for a frame only the loop could produce, and it failed
+        every time with "camera produced no frame after bounded warm-up". The failure was
+        swallowed, and the request went out carrying a gs:// URI nothing had been uploaded to,
+        which surfaced later as a 403 from Vertex AI trying to read it.
+
+        A camera on the car needs no pose chosen at the stop and no waiting: wherever it stops,
+        the newest frame already delivered is the forward view from that car.
+        """
+        try:
+            bp = self.world.get_blueprint_library().find("sensor.camera.rgb")
+            bp.set_attribute("image_size_x", str(EVIDENCE_WIDTH))
+            bp.set_attribute("image_size_y", str(EVIDENCE_HEIGHT))
+            frames: queue.Queue = queue.Queue(maxsize=4)
+
+            def receive(image, q=frames) -> None:
+                if q.full():
+                    try:
+                        q.get_nowait()
+                    except queue.Empty:
+                        pass
+                q.put(image)
+
+            pose = carla.Transform(carla.Location(x=-6.0, z=3.0), carla.Rotation(pitch=-12.0))
+            cam = self.world.spawn_actor(bp, pose, attach_to=v.actor)
+            cam.listen(receive)
+            v.onboard, v.onboard_frames = cam, frames
+        except Exception as exc:
+            # The camera is evidence, not part of driving. A car with no camera still has to be
+            # able to leave the line; what it loses is the frame behind an assistance request.
+            log.warning("no onboard camera for %s: %s: %s", v.vin, type(exc).__name__, exc)
+
     def spawn(self, vin: str, at: str = "line_end", colour: str | None = None,
               behind_m: float = 0.0) -> None:
         """Put a car on the map. behind_m queues it that far back along the point's heading,
@@ -165,7 +203,8 @@ class CarlaDrivingSystem:
         except Exception:
             actor.destroy()
             raise
-        self.vehicles[vin] = _Vehicle(vin=vin, actor=actor, agent=agent, location=at)
+        v = self.vehicles[vin] = _Vehicle(vin=vin, actor=actor, agent=agent, location=at)
+        self._attach_onboard(v)
 
     # DrivingSystem
 
@@ -318,15 +357,14 @@ class CarlaDrivingSystem:
         return best, best_d
 
     def assist_clip(self, v: _Vehicle) -> bytes | None:
-        """A forward view from behind the stopped car, showing what it is looking at."""
-        here = v.actor.get_transform()
-        forward, right = here.get_forward_vector(), here.get_right_vector()
-        location = here.location + forward * -7.0 + right * 1.2
-        location.z += 3.0
-        pose = carla.Transform(location, carla.Rotation(yaw=here.rotation.yaw, pitch=-10.0))
+        """The newest forward view from the camera on the car."""
+        if v.onboard_frames is None:
+            return None
         try:
-            return self.capture(pose, EVIDENCE_WIDTH, EVIDENCE_HEIGHT)
-        except Exception:                       # a missing frame must not block the request
+            return self._latest_frame(v.onboard_frames)
+        except Exception as exc:                # a missing frame must not block the request
+            log.warning("assist clip capture failed for %s: %s: %s",
+                        v.vin, type(exc).__name__, exc)
             return None
 
     async def raise_assist(self, vin: str, case_id: str, reason: str, options: list[str],
@@ -631,6 +669,17 @@ class CarlaDrivingSystem:
             except Exception:                     # already gone with the world
                 pass
         self._cameras.clear()
+        # The cars' own cameras too. They are attached, so the server drops them with the car,
+        # but releasing them here keeps "sensor object went out of the scope but the sensor is
+        # still alive" out of the logs and makes cleanup one thing rather than two.
+        for v in self.vehicles.values():
+            if v.onboard is not None:
+                try:
+                    v.onboard.stop()
+                    v.onboard.destroy()
+                except Exception as exc:
+                    log.warning("could not release the onboard camera for %s: %s", v.vin, exc)
+                v.onboard, v.onboard_frames = None, None
 
     def _status(self, v: _Vehicle) -> Status:
         loc = v.actor.get_location()

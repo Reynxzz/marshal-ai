@@ -7,6 +7,8 @@ Every resolved case is sent to the test lab.
 
 from __future__ import annotations
 
+import logging
+
 from datetime import timedelta
 from typing import TYPE_CHECKING, Literal
 
@@ -22,6 +24,9 @@ if TYPE_CHECKING:
     from marshal_ai.app import MarshalApp
 
 ESCALATE_AFTER = timedelta(seconds=60)
+
+
+log = logging.getLogger(__name__)
 
 
 class RankedOption(BaseModel):
@@ -93,10 +98,15 @@ class AssistanceDesk:
             if media is not None:
                 return [media]
         truth = self.rt.world.scenes.get(request.case_id) if self.rt.world else None
-        if request.clip_uri is None and truth is None:
-            return []
-        return [Media(mime="video/mp4", uri=request.clip_uri, label="10 s clip before the stop",
-                      truth=truth)]
+        if truth is not None:                   # the fake plant describes the scene in words
+            return [Media(mime="video/mp4", uri=request.clip_uri,
+                          label="10 s clip before the stop", truth=truth)]
+        # No bytes and nothing describing the scene. The URI on the request is the name the clip
+        # would have had, not a file that exists, and sending it as readable media got a 403
+        # from Vertex AI. The desk decides from the text of the request instead.
+        if request.clip_uri is not None:
+            log.info("assist %s: deciding without a clip; none was captured", request.case_id)
+        return []
 
     async def on_request(self, request: AssistRequest) -> AssistanceCase:
         car = self.rt.store.get(Car, request.vin)

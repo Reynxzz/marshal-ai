@@ -90,6 +90,7 @@ def _backend(world) -> CarlaDrivingSystem:
     backend._cameras = {}
     backend.frame_timeout_s = 0.05
     backend._task = None                    # no driving loop: this backend owns the ticks
+    backend.vehicles = {}                   # cleanup also releases the cars' own cameras
     return backend
 
 
