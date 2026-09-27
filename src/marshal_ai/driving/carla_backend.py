@@ -482,67 +482,69 @@ class CarlaDrivingSystem:
             return path.read_bytes()
 
     def capture_moving(self, transform, width: int | None = None, height: int | None = None,
-                       settle_frames: int = 6) -> bytes:
-        """Capture from a single reusable camera that is moved to this pose.
+                       settle_frames: int = 4) -> bytes:
+        """Capture from a single camera that is moved to this pose.
 
-        Day 2 has always been stable using one camera moved between the gate views, so this
-        follows that pattern: one sensor for any number of poses, rather than four held at once.
-        More frames are skipped than in capture(), because after a move the frames already in
-        flight still show the previous pose.
+        This follows day 2's gate phase exactly, because that is the only camera pattern that has
+        never crashed the server: one sensor, subscribed once and left subscribed, moved between
+        poses, and each capture reads a fresh frame rather than driving the sensor.
+
+        Cycling listen()/stop() per view - which capture() does, and which is fine for a sensor
+        used once - wedged the server here: it logged "attempting to unsubscribe from stream but
+        sensor wasn't listening" and the next destroy timed out. Four cameras streaming at once
+        was the original problem; one is what day 2 has always done.
         """
         width = EVIDENCE_WIDTH if width is None else width
         height = EVIDENCE_HEIGHT if height is None else height
         key = ("movable", width, height)
         entry = self._cameras.get(key)
         if entry is None:
-            bp = self.world.get_blueprint_library().find("sensor.camera.rgb")
-            bp.set_attribute("image_size_x", str(width))
-            bp.set_attribute("image_size_y", str(height))
-            frames: queue.Queue = queue.Queue(maxsize=8)
-
-            def receive(image, q=frames) -> None:
-                if q.full():
-                    try:
-                        q.get_nowait()
-                    except queue.Empty:
-                        pass
-                q.put(image)
-
-            entry = self._cameras[key] = (self.world.spawn_actor(bp, transform), frames, receive)
-        cam, frames, receive = entry
+            entry = self._make_movable(key, transform, width, height)
+        cam, frames, _receive = entry
 
         cam.set_transform(transform)
-        while not frames.empty():
+        # Frames already in flight show the previous pose, so wait for several fresh ones and
+        # keep the last.
+        image = None
+        deadline = time.monotonic() + max(2.0, self.frame_timeout_s * (settle_frames + 4))
+        seen = 0
+        while time.monotonic() < deadline:
+            if self._owns_ticks():
+                self._tick_world()
             try:
-                frames.get_nowait()
+                candidate = frames.get(timeout=self.frame_timeout_s)
             except queue.Empty:
+                continue
+            seen += 1
+            image = candidate
+            if seen > settle_frames:
                 break
-
-        cam.listen(receive)
-        try:
-            image = None
-            skip = settle_frames
-            own_ticks = self._owns_ticks()
-            for _ in range(settle_frames + 10):
-                if own_ticks:
-                    self._tick_world()
-                try:
-                    candidate = frames.get(timeout=self.frame_timeout_s)
-                except queue.Empty:
-                    continue
-                if skip > 0:
-                    skip -= 1
-                    continue
-                image = candidate
-                break
-        finally:
-            cam.stop()
         if image is None:
             raise RuntimeError("camera produced no frame after moving to the requested pose")
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "frame.jpg"
             image.save_to_disk(str(path))
             return path.read_bytes()
+
+    def _make_movable(self, key, transform, width: int, height: int):
+        """Create the movable camera and subscribe it once, for the life of the run."""
+        bp = self.world.get_blueprint_library().find("sensor.camera.rgb")
+        bp.set_attribute("image_size_x", str(width))
+        bp.set_attribute("image_size_y", str(height))
+        frames: queue.Queue = queue.Queue(maxsize=8)
+
+        def receive(image, q=frames) -> None:
+            if q.full():
+                try:
+                    q.get_nowait()
+                except queue.Empty:
+                    pass
+            q.put(image)
+
+        cam = self.world.spawn_actor(bp, transform)
+        cam.listen(receive)                   # subscribed once; never stopped mid-run
+        entry = self._cameras[key] = (cam, frames, receive)
+        return entry
 
     def prewarm_camera(self, transform, width: int | None = None,
                        height: int | None = None, movable: bool = False) -> None:
@@ -556,7 +558,12 @@ class CarlaDrivingSystem:
         # resolved here rather than as defaults: EVIDENCE_* is defined below this class
         width = EVIDENCE_WIDTH if width is None else width
         height = EVIDENCE_HEIGHT if height is None else height
-        key = ("movable", width, height) if movable else self._camera_key(transform, width, height)
+        if movable:
+            key = ("movable", width, height)
+            if key not in self._cameras:
+                self._make_movable(key, transform, width, height)
+            return
+        key = self._camera_key(transform, width, height)
         if key in self._cameras:
             return
         bp = self.world.get_blueprint_library().find("sensor.camera.rgb")

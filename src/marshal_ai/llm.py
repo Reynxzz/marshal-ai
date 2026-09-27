@@ -9,6 +9,7 @@ tasks to one and the rest to the other, e.g. fake perception with real Gemini re
 from __future__ import annotations
 
 import json
+import threading
 import logging
 from dataclasses import dataclass, field
 from typing import Any, Callable, Protocol, TypeVar
@@ -54,14 +55,22 @@ class GeminiLLM:
     def __init__(self, model: str, temperature: float = 0.2):
         self.model = model
         self.temperature = temperature
-        self._client = None
+        self._local = threading.local()
 
     @property
     def client(self):
-        if self._client is None:
+        """One client per thread.
+
+        `ask` runs each call with asyncio.to_thread, and flow 3 issues five at once (four views
+        plus the variant check). Sharing a single google-genai client across those threads ended
+        with "Cannot send a request, as the client has been closed" - its underlying httpx client
+        is not safe to share that way. A client per thread costs little and removes the race.
+        """
+        client = getattr(self._local, "client", None)
+        if client is None:
             from google import genai
-            self._client = genai.Client()
-        return self._client
+            client = self._local.client = genai.Client()
+        return client
 
     def generate(self, task, prompt, schema=None, media=None, system=""):
         from google.genai import types

@@ -89,18 +89,30 @@ class VisualInspector:
         prompt = f"Build sheet: {car.build_sheet.model_dump_json()}\nCompare the car in these images with it."
         return await ask(self.rt, "visual.variant", prompt, VariantAssessment, images, VARIANT_SYSTEM)
 
-    async def inspect(self, vin: str, views: list[str] | None = None, check_variant: bool = True) -> InspectionResult:
-        """Inspect a car at the gate. Re-inspection passes only the views that had findings."""
+    async def inspect(self, vin: str, views: list[str] | None = None, check_variant: bool = True,
+                      images: list[Media] | None = None) -> InspectionResult:
+        """Inspect a car at the gate. Re-inspection passes only the views that had findings.
+
+        `images` lets a caller supply frames it captured itself. Capture and judgement are
+        separable, and on CARLA they have to be: the gate camera path in this backend crashes
+        the server, while the capture in scripts/demo_carla_day2.py does not. A caller that
+        already holds frames should pass them rather than have this take them again.
+        """
         car = self.rt.store.get(Car, vin)
-        # Deliberately inline. Capturing off-thread, concurrently with a running driving loop,
-        # segfaults the CARLA server; capturing inline blocks the loop so no ticks happen and
-        # no frame arrives. Neither works, so a gate inspection must run in a phase with no
-        # active driving loop - see the README and run_carla_day2.sh.
-        images = self.rt.gate_camera.capture(vin, views)
+        supplied = images is not None
+        if images is None:
+            # Deliberately inline. Capturing off-thread, concurrently with a running driving
+            # loop, segfaults the CARLA server; capturing inline blocks the loop so no ticks
+            # happen and no frame arrives. On CARLA, pass `images` instead.
+            images = self.rt.gate_camera.capture(vin, views)
         view_names = [m.label.split()[0] for m in images]
         jobs = [self._view(img, GATE_VIEWS[name]) for img, name in zip(images, view_names)]
         if check_variant:
-            jobs.append(self._variant(car, self.rt.gate_camera.capture(vin)))
+            # The build sheet is about the whole car, so the variant check wants every view even
+            # when a re-inspection only re-shoots the zones that had findings. A caller that
+            # supplied frames gets them reused: going back to the camera is what it was avoiding.
+            variant_images = images if supplied else self.rt.gate_camera.capture(vin)
+            jobs.append(self._variant(car, variant_images))
         results = await asyncio.gather(*jobs)
         view_results: list[ViewAssessment] = results[:len(images)]
         variant: VariantAssessment | None = results[len(images)] if check_variant else None
