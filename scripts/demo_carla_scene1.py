@@ -23,8 +23,11 @@ car does not.
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 import asyncio
 import json
+import logging
+import time
 
 from marshal_ai.app import MarshalApp
 from marshal_ai.config import Settings
@@ -38,6 +41,11 @@ PHASES = ("release", "gate", "track", "report")
 # clean-report narrative. Flow 3 does catch a mismatch: with the sheet set to black it reported
 # "colour: build sheet says black, car shows blue (1.00)" and failed the car, which is scene 2.
 CAR_COLOUR = "0,80,200"
+# The build sheet has to describe the car CARLA actually spawns, which is a lincoln.mkz_2020 -
+# it has a glass roof. With the options left empty, flow 3 read "no sunroof listed" as "no
+# sunroof fitted" and failed the car at confidence 1.0: "sunroof: build sheet says not present,
+# car shows present". The model was right and the paperwork was wrong.
+CAR_OPTIONS = ("sunroof",)
 
 
 def parser() -> argparse.ArgumentParser:
@@ -48,6 +56,10 @@ def parser() -> argparse.ArgumentParser:
     ap.add_argument("--host", default="localhost")
     ap.add_argument("--port", type=int, default=2000)
     ap.add_argument("--truck", default="T-1")
+    ap.add_argument("--frame-dir", type=Path, default=Path("/tmp/marshal-scene1"),
+                    help="where the track evidence frames are written")
+    ap.add_argument("--sun-altitude", type=float, default=-8.0,
+                    help="sun angle for the track phase; lamps do not read at noon")
     ap.add_argument("--timeout", type=float, default=300.0)
     return ap
 
@@ -109,7 +121,7 @@ async def phase_release(rt, app, args) -> dict:
     only_this_flow(app)
     rt.store.put(Car(vin=args.vin, state=CarState.LINE_END, location="line_end",
                      build_sheet=BuildSheet(model="sedan", colour="blue",
-                                            truck_id=args.truck)))
+                                            options=list(CAR_OPTIONS), truck_id=args.truck)))
     respawn(rt, args.vin, "line_end")
     await rt.driving.start()
     try:
@@ -137,7 +149,6 @@ def _day2_module():
     that works rather than a reimplementation of it.
     """
     import importlib.util
-    from pathlib import Path
 
     path = Path(__file__).with_name("demo_carla_day2.py")
     spec = importlib.util.spec_from_file_location("demo_carla_day2", path)
@@ -154,7 +165,6 @@ _HELD: list = []
 
 def capture_gate_views(rt, vin: str) -> list:
     """Four gate views, using day 2's camera, returned as Media with real bytes."""
-    from pathlib import Path
     from tempfile import TemporaryDirectory
 
     from marshal_ai.driving.carla_backend import GATE_VIEWS
@@ -182,6 +192,7 @@ def capture_gate_views(rt, vin: str) -> list:
 async def phase_gate(rt, app, args) -> dict:
     """Flow 3. Cameras and no driving loop, which is the only combination that works."""
     only_this_flow(app, gate=True)
+    drop_stale(rt, (InspectionResult, f"{args.vin}:visual"))
     respawn(rt, args.vin, "inspection_gate")
     try:
         images = capture_gate_views(rt, args.vin)
@@ -200,10 +211,68 @@ async def phase_gate(rt, app, args) -> dict:
         pass
 
 
+def drop_stale(rt, *records) -> None:
+    """Delete the records this phase is about to produce.
+
+    Each phase waits for its own result to appear. A result left in Firestore by an earlier run
+    satisfies that wait instantly, so the phase reported a verdict it had not produced: the track
+    phase returned a FAIL whose evidence frame was from the previous run, and no frame was taken
+    at all. Waiting for something to exist is only safe if it does not exist yet.
+    """
+    for model, key in records:
+        if rt.store.get(model, key) is not None:
+            rt.store.delete(model, key)
+            emit({"type": "scene1.dropped_stale", "record": model.__name__, "key": key})
+
+
+def set_sun(rt, altitude: float, attempts: int = 10) -> None:
+    """Set the sun angle and confirm it, retrying until the server agrees.
+
+    A lit headlight does not read against bright noon, so the camera check called a healthy car
+    faulty while its telemetry said the lights were on. Day 2 drops the sun for the same reason.
+    This is the lighting the check needs, not a way to make it pass: a lamp that cannot be seen
+    cannot be confirmed either way.
+
+    The first version asked once and echoed the value it had asked for. Straight after a map
+    load the server silently keeps its own weather - the read-back said 45 degrees while the
+    frames came back in daylight - so the value is read back and the request repeated.
+    """
+    for attempt in range(attempts):
+        weather = rt.driving.world.get_weather()
+        weather.sun_altitude_angle = altitude
+        rt.driving.world.set_weather(weather)
+        time.sleep(0.5)
+        applied = rt.driving.world.get_weather().sun_altitude_angle
+        if abs(applied - altitude) <= 0.5:
+            emit({"type": "scene1.track_lighting", "sun_altitude": applied,
+                  "attempts": attempt + 1})
+            return
+    raise RuntimeError(f"sun altitude did not apply after {attempts} attempts: "
+                       f"asked {altitude}, server reports {applied}")
+
+
 async def phase_track(rt, app, args) -> dict:
     """Flow 4. Cameras created before the loop starts, as Day 2 does."""
     only_this_flow(app)
+    # A lit headlight does not read against bright noon, so the camera check called a healthy
+    # car faulty while its telemetry said the lights were on. Day 2 drops the sun for the same
+    # reason. This is the lighting the check needs, not a trick to make it pass: a lamp that
+    # cannot be seen cannot be confirmed either way.
+    drop_stale(rt, (InspectionResult, f"{args.vin}:functional"), (CarReport, args.vin))
+    set_sun(rt, args.sun_altitude)
     rt.track_camera.prewarm()
+
+    # Report every frame this phase takes. A camera check that disagrees with telemetry is only
+    # believable if it is clear which frame was judged and when it was taken.
+    inner = rt.track_camera.clip
+
+    def clip(vin: str, step: int, name: str):
+        media = inner(vin, step, name)
+        emit({"type": "scene1.clip_taken", "step": step, "name": name,
+              "bytes": len(media.data or b""), "driving": rt.driving._task is not None})
+        return media
+    rt.track_camera.clip = clip
+
     respawn(rt, args.vin, "test_track")
     await rt.driving.start()
     try:
@@ -214,8 +283,26 @@ async def phase_track(rt, app, args) -> dict:
         items = [{"name": i.name, "telemetry_ok": i.telemetry_ok, "camera_ok": i.camera_ok,
                   "passed": i.passed} for i in result.checklist]
         emit({"type": "scene1.track", "vin": args.vin, "verdict": result.verdict.value,
-              "checklist": items})
-        return {"verdict": result.verdict.value, "checklist": items,
+              "checklist": [{"name": i.name, "telemetry_ok": i.telemetry_ok,
+                             "camera_ok": i.camera_ok, "passed": i.passed,
+                             "camera_confidence": round(i.camera_confidence or 0, 2),
+                             "clip_uri": i.clip_uri}
+                            for i in result.checklist]})
+        # Keep the frames the verdict was based on. A camera check that disagrees with telemetry
+        # is only worth acting on if the frame can be looked at.
+        clips = getattr(app.functional, "_last_clips", {}).get(args.vin, {})
+        emit({"type": "scene1.clips", "steps": sorted(clips),
+              "bytes": {k: len(v.data or b"") for k, v in clips.items()}})
+        for step_no, media in clips.items():
+            out = args.frame_dir / f"{args.vin}_step{step_no}.jpg"
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_bytes(media.data or b"")
+            emit({"type": "scene1.frame_saved", "step": step_no, "path": str(out),
+                  "bytes": len(media.data or b"")})
+        return {"verdict": result.verdict.value,
+                "checklist": [{"name": i.name, "telemetry_ok": i.telemetry_ok,
+                               "camera_ok": i.camera_ok, "passed": i.passed}
+                              for i in result.checklist],
                 "realtime_ratio": rt.driving.realtime_ratio()}
     finally:
         await rt.driving.stop()
@@ -224,6 +311,7 @@ async def phase_track(rt, app, args) -> dict:
 
 async def phase_report(rt, app, args) -> dict:
     """Flow 5. Merge both results, then drive the car to its slot."""
+    drop_stale(rt, (CarReport, args.vin))
     visual = rt.store.get(InspectionResult, f"{args.vin}:visual")
     functional = rt.store.get(InspectionResult, f"{args.vin}:functional")
     if visual is None or functional is None:
@@ -274,6 +362,9 @@ async def run(args) -> dict:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # The flows explain themselves through the log - a REVIEW with no findings only makes sense
+    # alongside the confidences behind it - so a run that is being watched should show them.
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     args = parser().parse_args(argv)
     try:
         out = asyncio.run(run(args))

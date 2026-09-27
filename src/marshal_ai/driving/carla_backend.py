@@ -413,67 +413,65 @@ class CarlaDrivingSystem:
         driving system. `close_cameras` releases them.
         """
         key = self._camera_key(transform, width, height)
-        entry = self._cameras.get(key)
-        if entry is None:
-            bp = self.world.get_blueprint_library().find("sensor.camera.rgb")
-            bp.set_attribute("image_size_x", str(width))
-            bp.set_attribute("image_size_y", str(height))
-            frames: queue.Queue = queue.Queue(maxsize=4)
-
-            def receive(image, q=frames) -> None:
-                if q.full():                      # keep only recent frames
-                    try:
-                        q.get_nowait()
-                    except queue.Empty:
-                        pass
-                q.put(image)
-
-            cam = self.world.spawn_actor(bp, transform)
-            entry = self._cameras[key] = (cam, frames, receive)
-
+        entry = self._cameras.get(key) or self._make_camera(key, transform, width, height)
         cam, frames, receive = entry
+        if not self._owns_ticks():
+            # The driving loop is ticking, and this call is on the loop's own thread: track
+            # evidence is taken from inside the handler the loop is waiting on. Waiting for a
+            # newly delivered frame therefore deadlocks - the only thing that could produce one
+            # is the loop, which is blocked here - and that is what "camera produced no frame
+            # after bounded warm-up" was. So take the freshest frame the camera has already
+            # delivered, which is what day 2's save_latest does and why day 2 never hung.
+            #
+            # The cost is honest: that frame is up to a few ticks old, so it cannot be used to
+            # tell a lamp that just changed from one that did not. Flow 4 does not rely on it
+            # for that - it compares against a reference frame - and a step that needs an exact
+            # moment needs a clip, which is still open.
+            return self._latest_frame(frames)
         while not frames.empty():                 # discard anything queued
             try:
                 frames.get_nowait()
             except queue.Empty:
                 break
 
-        # A pooled camera only streams while a frame is wanted. Left listening it produces
-        # every simulation frame at full resolution forever, and with the gate's four cameras
-        # that was enough to push the server into repeated
-        # "Invalid session: no stream available" and to drag simulated time behind real time.
-        cam.listen(receive)
-        try:
-            # Draining is not enough. Frames already in flight arrive after the drain and still
-            # show the previous world state, which made a dark lamp look lit because the frame
-            # was of the previous, healthy car. Skip a couple before trusting one.
-            skip = 2
-            image = None
-            if self._owns_ticks():
-                for _ in range(8 + skip):
-                    self._tick_world()
-                    try:
-                        candidate = frames.get(timeout=self.frame_timeout_s)
-                    except queue.Empty:
-                        continue
-                    if skip > 0:
-                        skip -= 1
-                        continue
-                    image = candidate
+        # Cameras stay subscribed. Stopping an idle camera and restarting it per capture was an
+        # attempt to spare the server, but it cannot work while the driving loop is running: the
+        # loop is the only ticker, a camera that subscribes mid-capture has no tick of its own to
+        # wait for, and the capture failed with "camera produced no frame after bounded warm-up".
+        # It also wedged the gate: cycling the subscription logged "attempting to unsubscribe
+        # from stream but sensor wasn't listening" and the next destroy timed out.
+        #
+        # What actually overloaded the server was four gate cameras streaming at full resolution
+        # at once. The gate no longer uses this path - it moves a single camera - so what streams
+        # here is the track's pair, which is the configuration day 2 has always run.
+        # Draining is not enough. Frames already in flight arrive after the drain and still
+        # show the previous world state, which made a dark lamp look lit because the frame
+        # was of the previous, healthy car. Skip a couple before trusting one.
+        skip = 2
+        image = None
+        if self._owns_ticks():
+            for _ in range(8 + skip):
+                self._tick_world()
+                try:
+                    candidate = frames.get(timeout=self.frame_timeout_s)
+                except queue.Empty:
+                    continue
+                if skip > 0:
+                    skip -= 1
+                    continue
+                image = candidate
+                break
+        else:
+            # the driving loop (or the server in async mode) produces the frames
+            for _ in range(skip + 1):
+                try:
+                    candidate = frames.get(timeout=self.frame_timeout_s * 6)
+                except queue.Empty:
                     break
-            else:
-                # the driving loop (or the server in async mode) produces the frames
-                for _ in range(skip + 1):
-                    try:
-                        candidate = frames.get(timeout=self.frame_timeout_s * 6)
-                    except queue.Empty:
-                        break
-                    if skip > 0:
-                        skip -= 1
-                        continue
-                    image = candidate
-        finally:
-            cam.stop()                            # idle cameras must not stream
+                if skip > 0:
+                    skip -= 1
+                    continue
+                image = candidate
         if image is None:
             raise RuntimeError("camera produced no frame after bounded warm-up")
         with tempfile.TemporaryDirectory() as tmp:
@@ -526,6 +524,51 @@ class CarlaDrivingSystem:
             image.save_to_disk(str(path))
             return path.read_bytes()
 
+    def _latest_frame(self, frames: "queue.Queue") -> bytes:
+        """The newest frame already delivered, waiting only if none has been."""
+        image = None
+        while True:                               # drain to the newest
+            try:
+                image = frames.get_nowait()
+            except queue.Empty:
+                break
+        if image is None:                         # nothing delivered yet: give it a moment
+            try:
+                image = frames.get(timeout=self.frame_timeout_s * 6)
+            except queue.Empty:
+                raise RuntimeError("camera produced no frame after bounded warm-up") from None
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "frame.jpg"
+            image.save_to_disk(str(path))
+            return path.read_bytes()
+
+    def _make_camera(self, key, transform, width: int, height: int):
+        """Spawn a fixed camera and subscribe it, for the life of the driving system.
+
+        prewarm_camera used to spawn without subscribing while capture() spawned and subscribed,
+        because each built the sensor itself. A prewarmed camera was therefore silent, so the
+        track phase - which prewarms before starting the loop, exactly as it is meant to - got
+        "camera produced no frame after bounded warm-up". One creation path, so the two cannot
+        drift apart again.
+        """
+        bp = self.world.get_blueprint_library().find("sensor.camera.rgb")
+        bp.set_attribute("image_size_x", str(width))
+        bp.set_attribute("image_size_y", str(height))
+        frames: queue.Queue = queue.Queue(maxsize=4)
+
+        def receive(image, q=frames) -> None:
+            if q.full():                          # keep only recent frames
+                try:
+                    q.get_nowait()
+                except queue.Empty:
+                    pass
+            q.put(image)
+
+        cam = self.world.spawn_actor(bp, transform)
+        cam.listen(receive)
+        entry = self._cameras[key] = (cam, frames, receive)
+        return entry
+
     def _make_movable(self, key, transform, width: int, height: int):
         """Create the movable camera and subscribe it once, for the life of the run."""
         bp = self.world.get_blueprint_library().find("sensor.camera.rgb")
@@ -564,22 +607,8 @@ class CarlaDrivingSystem:
                 self._make_movable(key, transform, width, height)
             return
         key = self._camera_key(transform, width, height)
-        if key in self._cameras:
-            return
-        bp = self.world.get_blueprint_library().find("sensor.camera.rgb")
-        bp.set_attribute("image_size_x", str(width))
-        bp.set_attribute("image_size_y", str(height))
-        frames: queue.Queue = queue.Queue(maxsize=4)
-
-        def receive(image, q=frames) -> None:
-            if q.full():
-                try:
-                    q.get_nowait()
-                except queue.Empty:
-                    pass
-            q.put(image)
-
-        self._cameras[key] = (self.world.spawn_actor(bp, transform), frames, receive)
+        if key not in self._cameras:
+            self._make_camera(key, transform, width, height)
 
     @staticmethod
     def _camera_key(transform, width: int, height: int) -> tuple:
@@ -625,13 +654,21 @@ GATE_CAMERAS = {"front": (7.0, 0.0, 1.5, 180.0), "rear": (-7.0, 0.0, 1.5, 0.0),
 # correctly refused to confirm them from it. Each checklist step gets the view that
 # shows the lamp it is about: front for headlights, rear for brake and reverse, a
 # rear quarter for indicators (one repeater plus the tail cluster).
-TRACK_CAMERAS = {
-    "headlights": (8.0, 0.0, 1.3, 180.0),
-    "indicators": (-7.0, 3.5, 1.3, -15.0),
-    "brake_lights": (-8.0, 0.0, 1.2, 0.0),
-    "reverse": (-8.0, 0.0, 1.2, 0.0),
+# Two fixed views, front and rear, and each step is judged from whichever can see its lamp.
+# A camera per step meant four 1280x720 sensors streaming at once, which is what overloaded the
+# server, and gave nothing extra: these are the poses day 2 has always used.
+TRACK_VIEWS = {
+    "front": (8.0, 0.0, 1.3, 180.0),
+    "rear": (-8.0, 0.0, 1.2, 0.0),
 }
-TRACK_CAMERA_DEFAULT = (-8.0, 3.0, 1.6, -20.0)
+TRACK_CAMERAS = {
+    "headlights": TRACK_VIEWS["front"],
+    "indicators": TRACK_VIEWS["rear"],
+    "brake_lights": TRACK_VIEWS["rear"],
+    "reverse": TRACK_VIEWS["rear"],
+}
+# Anything without a named view is judged from the rear, so no third sensor streams.
+TRACK_CAMERA_DEFAULT = TRACK_VIEWS["rear"]
 
 # Gemini could not distinguish a lit headlight from a dark one at 640x360; the reverse lamp
 # was invisible at that size too. Evidence frames are captured larger than the viewer's.

@@ -6,6 +6,8 @@ car with its build sheet. Confidence decides pass, human review or fail.
 
 from __future__ import annotations
 
+import logging
+
 import asyncio
 from typing import TYPE_CHECKING
 
@@ -15,12 +17,15 @@ from marshal_ai.events import Topic
 from marshal_ai.fakeworld import GATE_VIEWS
 from marshal_ai.flows.base import ask, update_car
 from marshal_ai.llm import Media
-from marshal_ai.records import Car, CarState, InspectionResult, Verdict, ZoneFinding
+from marshal_ai.records import (BuildSheet, Car, CarState, InspectionResult, Verdict,
+                                 ZoneFinding)
 
 if TYPE_CHECKING:
     from marshal_ai.app import MarshalApp
 
 PASS_CONFIDENCE = 0.9
+log = logging.getLogger(__name__)
+
 REVIEW_CONFIDENCE = 0.6
 BODY_ZONES = [z for zones in GATE_VIEWS.values() for z in zones]
 ZONE_VIEW = {z: view for view, zones in GATE_VIEWS.items() for z in zones}
@@ -55,8 +60,18 @@ DEFECT_SYSTEM = """You inspect finished cars at a drive-through gate. For the zo
 image, report every paint or body defect (scratch, dent, panel gap, missing part) with its zone,
 type, approximate size and your confidence. Report nothing you cannot see."""
 
-VARIANT_SYSTEM = """You check that a finished car matches its build sheet: colour, model, trim and
-fitted options (e.g. roof rails, rear badge). Report each mismatch with expected, observed and confidence."""
+VARIANT_SYSTEM = """You check that a finished car matches its build sheet. Report a mismatch only for
+a field the build sheet actually states: its colour, model, trim, or one of the options it lists.
+
+The options list says what this car is built with. It is not a complete description of the car, so do
+not treat something you can see but that is not listed as a mismatch - if the sheet does not mention
+a sunroof, a badge or a spoiler, that is not a claim the car has none. Report each mismatch with the
+build sheet's value as expected, what you see as observed, and your confidence."""
+
+
+def declared_items(sheet: BuildSheet) -> set[str]:
+    """The build sheet fields a mismatch may be reported against."""
+    return {"colour", "model", "trim"} | {o.strip().lower() for o in sheet.options}
 
 
 def mismatch_text(m: Mismatch) -> str:
@@ -65,13 +80,20 @@ def mismatch_text(m: Mismatch) -> str:
 
 def visual_verdict(findings: list[Finding | ZoneFinding], mismatches: list[Mismatch],
                    clear_confidences: list[float], variant_confidence: float = 1.0) -> Verdict:
-    """Fail on anything over 0.9, review on anything 0.6 to 0.9 or any uncertain all-clear, else pass."""
+    """Fail on anything over 0.9, review on anything 0.6 to 0.9 or any uncertain all-clear, else pass.
+
+    An all-clear counts as confident at the bar, not only above it. Requiring more than 0.9 made
+    PASS practically unreachable: on real gate frames a clean car scored [0.9, 0.95, 0.9, 0.9] and
+    still went to review, because 0.9 is the value the model returns most often. A gate that sends
+    every car to a human is not a gate. The bar itself is unchanged - anything below 0.9 is still
+    too uncertain to clear a car on.
+    """
     scores = [f.confidence for f in findings] + [m.confidence for m in mismatches]
     if any(c > PASS_CONFIDENCE for c in scores):
         return Verdict.FAIL
     if any(c >= REVIEW_CONFIDENCE for c in scores):
         return Verdict.REVIEW
-    if any(c <= PASS_CONFIDENCE for c in clear_confidences) or variant_confidence <= PASS_CONFIDENCE:
+    if any(c < PASS_CONFIDENCE for c in clear_confidences) or variant_confidence < PASS_CONFIDENCE:
         return Verdict.REVIEW
     return Verdict.PASS
 
@@ -86,8 +108,24 @@ class VisualInspector:
         return await ask(self.rt, "visual.defects", prompt, ViewAssessment, [image], DEFECT_SYSTEM)
 
     async def _variant(self, car: Car, images: list[Media]) -> VariantAssessment:
-        prompt = f"Build sheet: {car.build_sheet.model_dump_json()}\nCompare the car in these images with it."
-        return await ask(self.rt, "visual.variant", prompt, VariantAssessment, images, VARIANT_SYSTEM)
+        declared = declared_items(car.build_sheet)
+        prompt = (f"Build sheet: {car.build_sheet.model_dump_json()}\n"
+                  f"The only fields it states are: {', '.join(sorted(declared))}.\n"
+                  "Compare the car in these images with it.")
+        seen = await ask(self.rt, "visual.variant", prompt, VariantAssessment, images,
+                         VARIANT_SYSTEM)
+        # Drop anything the build sheet never claimed. Left open, this check failed a healthy car
+        # twice over, each time on a different invention: "sunroof: build sheet says not present,
+        # car shows present" and "rear_badge: build sheet says none, car shows TESLA" - the latter
+        # at confidence 1.00, on a Lincoln. An option the sheet omits is not an option it forbids,
+        # so a mismatch has to name something the sheet actually states.
+        kept, dropped = [], []
+        for m in seen.mismatches:
+            (kept if m.item.strip().lower() in declared else dropped).append(m)
+        if dropped:
+            log.info("visual: %s ignoring mismatches on undeclared items %s", car.vin,
+                     [d.item for d in dropped])
+        return seen.model_copy(update={"mismatches": kept})
 
     async def inspect(self, vin: str, views: list[str] | None = None, check_variant: bool = True,
                       images: list[Media] | None = None) -> InspectionResult:
@@ -127,8 +165,14 @@ class VisualInspector:
                 findings.append(ZoneFinding(zone=f.zone, type=f.type, size_cm=f.size_cm,
                                             confidence=f.confidence, image=img.uri))
         mismatches = [m for m in (variant.mismatches if variant else []) if m.confidence >= REVIEW_CONFIDENCE]
-        verdict = visual_verdict(kept, mismatches, [v.clear_confidence for v in view_results],
+        clear_confidences = [v.clear_confidence for v in view_results]
+        verdict = visual_verdict(kept, mismatches, clear_confidences,
                                  variant.confidence if variant else 1.0)
+        # A REVIEW with no findings is otherwise unexplainable: it comes from an all-clear the
+        # model was not confident enough about, not from anything it saw.
+        log.info("visual: %s -> %s (clear confidences %s, variant %s)", vin, verdict.value,
+                 [round(c, 2) for c in clear_confidences],
+                 round(variant.confidence, 2) if variant else None)
         result = InspectionResult(vin=vin, kind="visual", verdict=verdict, findings=findings,
                                   build_sheet_mismatches=[mismatch_text(m) for m in mismatches],
                                   created_at=self.rt.clock())

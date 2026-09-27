@@ -186,6 +186,13 @@ class YardTraffic:
                        mission_id=None, yard_at=car.yard_at or self.rt.clock())
         elif event.location == "buffer_zone_b":
             update_car(self.rt, event.vin, location=event.location, mission_id=None)
+        elif event.location == "inspection_gate":
+            # Arrival at the gate was previously recorded by the visual inspector, when the
+            # inspection finished. Until then a car standing at the gate still reported
+            # location "line_end", which is simply not where it is - and anything waiting for
+            # the arrival rather than for the verdict waited forever. Where the car is and what
+            # has been decided about it are different facts, so the arrival is recorded here.
+            update_car(self.rt, event.vin, location=event.location, mission_id=None)
 
     def ship(self, truck_id: str) -> list[str]:
         """Load a truck. Only cars in the yard with a PASS report and no hold are loaded."""
