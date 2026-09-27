@@ -56,6 +56,8 @@ def parser() -> argparse.ArgumentParser:
     ap.add_argument("--host", default="localhost")
     ap.add_argument("--port", type=int, default=2000)
     ap.add_argument("--truck", default="T-1")
+    ap.add_argument("--steps", default="1",
+                    help="R-12 steps to run, comma separated, or 'all'")
     ap.add_argument("--frame-dir", type=Path, default=Path("/tmp/marshal-scene1"),
                     help="where the track evidence frames are written")
     ap.add_argument("--sun-altitude", type=float, default=-8.0,
@@ -276,7 +278,7 @@ async def phase_track(rt, app, args) -> dict:
     respawn(rt, args.vin, "test_track")
     await rt.driving.start()
     try:
-        await app.functional.start(args.vin, [1])
+        await app.functional.start(args.vin, args.steps)
         result = await wait_for(
             lambda: rt.store.get(InspectionResult, f"{args.vin}:functional"),
             args.timeout, "the functional result")
@@ -361,11 +363,17 @@ async def run(args) -> dict:
     return await RUNNERS[args.phase](rt, app, args)
 
 
+def parse_steps(value: str) -> list[int] | None:
+    """'all' runs the whole routine; a list runs only those steps."""
+    return None if value.strip().lower() == "all" else [int(x) for x in value.split(",")]
+
+
 def main(argv: list[str] | None = None) -> int:
     # The flows explain themselves through the log - a REVIEW with no findings only makes sense
     # alongside the confidences behind it - so a run that is being watched should show them.
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     args = parser().parse_args(argv)
+    args.steps = parse_steps(args.steps)
     try:
         out = asyncio.run(run(args))
     except Exception as exc:

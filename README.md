@@ -492,6 +492,43 @@ failure was swallowed, the request went out carrying a `gs://` name nothing had 
 it surfaced as a **403 from Vertex AI** trying to read it. Media with no bytes is no longer presented
 as a clip.
 
+## Flow 4 on the whole R-12 routine, and what a still cannot show
+
+All six steps were run against real CARLA for the first time. Three failed on a healthy car:
+
+| Step | Camera | Why |
+| --- | --- | --- |
+| 1 headlights | confirmed | a lit lamp is a state a frame holds |
+| 2 indicators | **cannot be judged** | a blinker is lit for only part of its cycle |
+| 3 brake_lights | confirmed | all three lamps read on the rear of the `mkz_2020` |
+| 4 reverse | confirmed | the reverse lamp is a state |
+| 5 brake_test | **cannot be judged** | a stopping distance is a path, not a state |
+| 6 full_lock | **cannot be judged** | so is a turning circle |
+
+Gemini answered "not seen" at confidence 1.0 for those three, which is a fair reading of the frame
+and the wrong verdict for the car. The design already calls for a 3 s clip per step for exactly this
+reason; until clips exist, a step whose evidence cannot settle the question is recorded as
+**unconfirmed** rather than failed, and each step says whether one frame could show its result.
+
+The verdict now has three outcomes, because there are three cases: a camera that **contradicts**
+telemetry is a FAIL, evidence that could not settle it is a REVIEW, and only a car where both
+sources agree on every step PASSes unattended. The full routine now returns REVIEW with steps 1, 3
+and 4 confirmed; scene 1 runs step 1 and still passes unattended.
+
+Note that brake lights do read on this vehicle, correcting an earlier note here that called them
+ambiguous.
+
+## Still open against the design
+
+| Design says | Status |
+| --- | --- |
+| 3 s clip per track step (flow 4) | **Not built.** Steps 2, 5 and 6 cannot be confirmed without it and are marked unconfirmed. |
+| 10 s clip with the assistance request (flow 2) | **Stand-in.** One still forward view from the car's own camera; the desk's decision was correct from it. |
+| 60 runs per scenario, 8 in parallel (flow 7) | **Serial only.** Parallel runs need one CARLA server per slot; the search works but takes the full budget serially. |
+| Release gate blocks a release on a failing test | Implemented in `lab/regression.py`; not yet exercised end to end against BigQuery-backed history. |
+| Demo scene 2 uses a dead brake light | Built with a dead **headlight**: it is the fault the camera reads most clearly, and the disagreement is the point. |
+| Scratches and dents from a car-damage image set | Not wired in; the gate currently finds real colour and variant mismatches only. |
+
 ## Demo scene 1 on real CARLA (`scripts/run_carla_scene1.sh`)
 
 A car leaves the line under the spacing rule, is inspected at the gate, drives the lighting routine,

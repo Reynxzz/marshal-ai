@@ -13,6 +13,8 @@ from __future__ import annotations
 import asyncio
 from types import SimpleNamespace
 
+from marshal_ai.driving.routines import R12
+
 import pytest
 
 from marshal_ai.flows import functional as f
@@ -45,8 +47,8 @@ def _checker(monkeypatch, recorder):
 
 
 def _step():
-    return SimpleNamespace(step=1, name="headlights", command="Headlights on",
-                           expected_on_camera="Both headlights lit")
+    """The real routine step, so this cannot drift from what the flow actually reads."""
+    return R12[0]                       # headlights: confirmable from a single frame
 
 
 def _run(clip):

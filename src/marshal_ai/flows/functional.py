@@ -7,6 +7,8 @@ item passes only when both agree.
 
 from __future__ import annotations
 
+import logging
+
 import asyncio
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
@@ -22,6 +24,8 @@ from marshal_ai.records import CarState, ChecklistItem, InspectionResult, Verdic
 
 if TYPE_CHECKING:
     from marshal_ai.app import MarshalApp
+
+log = logging.getLogger(__name__)
 
 ROUTINE = "R-12"
 CAMERA_MIN_CONFIDENCE = 0.6
@@ -102,6 +106,19 @@ class FunctionalChecker:
         # model: including it ("Telemetry reported: {'headlights': 'ON'}") led Gemini to
         # confirm a lamp that was demonstrably dark in the frame, at confidence 1.0, so the
         # check could never catch the disagreement it exists to catch.
+        # A blink phase, a stopping distance and a turning circle are not states a frame can
+        # hold, so a single still cannot confirm them however good the model is - the design
+        # calls for a 3 s clip for exactly this reason. Evidence that describes the scene rather
+        # than freezing it can still be judged, which is why this asks about the clip in hand
+        # and not only about the step.
+        if not step.still_confirmable and clip.truth is None:
+            # camera_ok stays None: unconfirmed, which is not the same as contradicted. Judged
+            # anyway, Gemini answered "no" at confidence 1.0 and failed healthy cars.
+            log.info("functional: step %s (%s) needs a clip; not judged from a still",
+                     step.step, step.name)
+            return ChecklistItem(step=step.step, name=step.name, telemetry_ok=telemetry_ok,
+                                 camera_ok=None, camera_confidence=None, clip_uri=clip.uri)
+
         reference = self.references.get(step.name)
         if reference is not None:
             # Both frames reach Gemini prefixed with their label, so they must be labelled
@@ -134,7 +151,15 @@ class FunctionalChecker:
             redone = {i.step for i in items}
             items = sorted([i for i in previous.checklist if i.step not in redone] + items,
                            key=lambda i: i.step)
-        verdict = Verdict.PASS if all(i.passed for i in items) else Verdict.FAIL
+        # Three outcomes, because there are three cases. A camera that contradicts telemetry is a
+        # failure; a step whose evidence could not confirm either way needs a person; only a car
+        # where both sources agree on every step passes unattended.
+        if any(i.telemetry_ok is False or i.camera_ok is False for i in items):
+            verdict = Verdict.FAIL
+        elif any(i.camera_ok is None for i in items):
+            verdict = Verdict.REVIEW
+        else:
+            verdict = Verdict.PASS
         result = InspectionResult(vin=vin, kind="functional", verdict=verdict, checklist=items,
                                   created_at=self.rt.clock())
         self.rt.store.put(result)
