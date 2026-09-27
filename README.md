@@ -436,27 +436,98 @@ All 25 plant points now carry CARLA transforms; an approved re-plan had failed o
 
 ### Why flows cannot all share one process
 
-A pooled capture camera used to be created once and left listening forever with no `sensor_tick`,
-producing every simulation frame at full resolution for the life of the run. With the gate's four
-1280×720 cameras that constant load filled the server log with
-`Invalid session: no stream available`. Cameras now stream only while a frame is wanted, all gate
-views come from **one camera that is moved** between poses (the pattern Day 2 has always used), and a
-capture no longer ticks the world when the driving loop is already ticking it. The flow 1 run
-completes with **zero CARLA restarts** where it previously restarted the server several times.
+Four 1280×720 gate cameras streaming at once filled the server log with
+`Invalid session: no stream available`. The fix was to stop pointing four cameras at the gate — it
+now moves a single camera between poses, the pattern Day 2 has always used — and to stop a capture
+ticking the world when the driving loop is already ticking it. Flow 1 runs with **zero CARLA
+restarts** where it previously restarted the server several times.
 
-None of that makes a gate inspection work alongside a running driving loop. Four approaches were
-tried — idle-stream shutdown, pre-warming the sensor before `start()`, one moved camera instead of
-four, and running the capture off-thread — and the result is a hard pair of failure modes:
+### Correction: unsubscribing idle cameras was the wrong fix
+
+This section previously said cameras stream *only while a frame is wanted*. That was reasoning about
+server load, and it broke two flows:
+
+- While the driving loop is running it is the only ticker. A camera that subscribes in the middle of
+  a capture has no tick of its own to wait for, so the track phase failed with `camera produced no
+  frame after bounded warm-up`.
+- Cycling the subscription also wedged the gate: `attempting to unsubscribe from stream but sensor
+  wasn't listening`, then a destroy that timed out and a segfaulted server.
+
+Cameras are now created once and stay subscribed. A capture taken while the loop is running takes
+the **freshest frame already delivered** rather than waiting for a new one — what Day 2's
+`save_latest` does, and why Day 2 never hung. The cost is stated plainly: that frame is up to a few
+ticks old, so it cannot distinguish a lamp that has just changed from one that has not. A step
+needing an exact moment needs a clip, which is still open.
+
+A gate inspection still cannot share a process with a running driving loop:
 
 - **Capture inline**, blocking the loop: the loop is the only thing ticking the world, so no frame
   ever arrives and the capture times out.
 - **Capture concurrently** with the loop: the server segfaults —
   `Waited for 10 seconds on IO....Signal 11 caught.`
 
-So the capture path is left inline and deliberately unused during driving: `--with-gate` is off in the
-yard demo. **A gate inspection must run in a phase with no active driving loop**, which is what
-`run_carla_day2.sh` does and why it has always been stable. Demo scene 1 (gate, then track, then
-report) should be orchestrated as separate phases rather than one process.
+So each flow gets its own process. `--with-gate` is off in the yard demo, and demo scene 1 runs as
+four processes.
+
+## All seven flows on the real server, after the camera changes
+
+The camera and verdict changes above touch every flow, so each was re-run against real CARLA and
+real Gemini rather than assumed:
+
+| Flow | Script | Result |
+| --- | --- | --- |
+| 1 yard | `run_carla_yard.sh` | `success` — rules held on every release; truck delay → Gemini proposal → supervisor approval → 3 cars re-slotted |
+| 2 assistance | `run_carla_day5.sh` | `success` — `people_or_moving_equipment: true`, recommends `wait_for_removal` |
+| 3 visual | `run_carla_scene1.sh`, `run_carla_day2.sh` | `PASS` on a matching car; 4 gate views ~150 KB each |
+| 4 functional | `run_carla_day4.sh` | healthy `PASS`, dark lamp `FAIL` on the telemetry/camera disagreement → `rework.electrical` |
+| 5 report | `run_carla_scene1.sh` | `PASS` merged from both results → car parked in `yard.Y1` |
+| 6 generate | `run_carla_lab.sh` | `SC-0142` generated in 1 attempt, dry run clean, judged `passed: true`, moved to `in_library` |
+| 7 adversarial | `run_carla_lab.sh` | search shrinks the failure to one parameter (`trigger_distance_m` 9 → 7) |
+
+Flow 2 was broken by the camera work and is now fixed properly: the assistance frame comes from a
+camera **on the car**, created with it and streaming for as long as it exists. It used to be taken by
+spawning a camera behind the car at the moment it stopped, which cannot work — the stall is detected
+inside the driving loop, so the loop was blocked waiting for a frame only it could produce. That
+failure was swallowed, the request went out carrying a `gs://` name nothing had been uploaded to, and
+it surfaced as a **403 from Vertex AI** trying to read it. Media with no bytes is no longer presented
+as a clip.
+
+## Demo scene 1 on real CARLA (`scripts/run_carla_scene1.sh`)
+
+A car leaves the line under the spacing rule, is inspected at the gate, drives the lighting routine,
+and gets a clean report — four phases, one flow each, against the real server and real Gemini:
+
+```
+release  VIN-S1 released, rule "within 25 m of line end" held, arrives at inspection_gate
+gate     PASS   4 views captured (~150 KB each), 0 findings, 0 mismatches
+track    PASS   headlights: telemetry_ok=true camera_ok=true (504 KB frame, taken while driving)
+report   PASS   "All visual and functional checks passed."  -> car parked in yard.Y1
+```
+
+Zero CARLA restarts, and repeatable: two consecutive runs gave the same three PASS verdicts and the
+same slot. Getting there uncovered six faults, none of them cosmetic:
+
+1. **Gate arrival was never recorded.** It was written by the visual inspector when the inspection
+   finished, so a car standing at the gate still reported `location: line_end`, and anything waiting
+   on the arrival rather than the verdict waited forever. An earlier claim that this phase worked was
+   wrong: what had been checked was `state`, which is set at release, not on arrival.
+2. **A prewarmed camera was silent.** `prewarm_camera` spawned without subscribing while `capture`
+   spawned and subscribed, because each built the sensor itself. There is now one creation path.
+3. **Capture waited for a frame the blocked loop had to produce.** See the correction above.
+4. **`set_weather` is ignored straight after a map load.** The first version asked once and reported
+   the value it had asked for, so it looked correct while evidence frames came back in broad daylight
+   and a healthy car failed its headlight check. The value is now read back and the request repeated.
+5. **Phases trusted stale records.** Each phase waits for its own result, which a result left by an
+   earlier run satisfied instantly — the track phase once reported a FAIL whose evidence frame came
+   from the previous run, having taken no frame at all. A phase now deletes what it is about to
+   produce.
+6. **The gate invented mismatches.** On a car that matched its build sheet exactly, it failed on
+   `sunroof: build sheet says not present, car shows present (1.00)` and then
+   `rear_badge: build sheet says none, car shows TESLA (1.00)` — on a Lincoln. An options list says
+   what a car is built with, not what it may not have, so a mismatch must now name a field the sheet
+   states. Separately PASS was unreachable: a clean car scored `[0.9, 0.95, 0.9, 0.9]` on its
+   all-clears and went to review because 0.9 counted as uncertain, and 0.9 is the value the model
+   returns most often. An all-clear at the bar now clears.
 
 ### Correction: the host is not CPU-starved
 
