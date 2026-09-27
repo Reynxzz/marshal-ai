@@ -72,6 +72,19 @@ class GeminiLLM:
             client = self._local.client = genai.Client()
         return client
 
+    # One call at a time. Flow 3 asks five questions at once - four views and the variant check -
+    # each on its own thread, and google-genai is not safe to drive that way: runs failed
+    # intermittently with pydantic rejecting a JSON schema as a model ("5 validation errors for
+    # BaseModel ... Extra inputs are not permitted", naming ViewAssessment in one run and
+    # VariantAssessment in another), which is a schema belonging to one call being handled as
+    # another's. A per-thread client fixed a separate fault - "Cannot send a request, as the
+    # client has been closed" - but not this one.
+    #
+    # The calls stay concurrent from the flow's point of view; they queue here. The gate spends
+    # about the sum of them rather than the longest, which the phased demo can afford because the
+    # car is stopped at the gate. Overlapping them again needs an SDK that supports it.
+    _call_lock = threading.Lock()
+
     def generate(self, task, prompt, schema=None, media=None, system=""):
         from google.genai import types
 
@@ -92,9 +105,12 @@ class GeminiLLM:
             response_schema=schema,
             system_instruction=system or None,
         )
-        response = self.client.models.generate_content(
-            model=self.model, contents=[types.Content(role="user", parts=parts)], config=config,
-        )
+        with GeminiLLM._call_lock:
+            response = self.client.models.generate_content(
+                model=self.model,
+                contents=[types.Content(role="user", parts=parts)],
+                config=config,
+            )
         if schema is not None:
             if response.parsed is None:
                 raise LLMError(f"{task}: response did not match schema: {response.text[:300]}")

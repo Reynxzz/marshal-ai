@@ -528,6 +528,7 @@ ambiguous.
 | Release gate blocks a release on a failing test | Implemented in `lab/regression.py`; not yet exercised end to end against BigQuery-backed history. |
 | Demo scene 2 uses a dead brake light | Built with a dead **headlight**: it is the fault the camera reads most clearly, and the disagreement is the point. |
 | Scratches and dents from a car-damage image set | Not wired in; the gate currently finds real colour and variant mismatches only. |
+| Gate decides in under 5 s (flow 3) | Its five model calls now run one at a time, so the gate takes about their sum. `google-genai` proved unsafe to drive from five threads: runs failed intermittently with pydantic rejecting a JSON schema as a model, a schema from one call being handled as another's. The phased demo can afford it because the car is stopped; overlapping them again needs an SDK that supports it. |
 
 ## Demo scene 1 on real CARLA (`scripts/run_carla_scene1.sh`)
 
