@@ -21,8 +21,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import queue
-import tempfile
 import threading
+from collections import deque
+import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -49,6 +50,75 @@ try:
     from agents.navigation.behavior_agent import BehaviorAgent
 except ImportError:  # bundled under CARLA_ROOT/PythonAPI/carla, not in the PyPI client wheel
     BehaviorAgent = None
+
+
+# The design asks for a 3 s clip of each track step and a 10 s clip before a stop. Frames are held
+# for those windows and sampled: a blink phase or a path is read from a handful of frames across the
+# window, and keeping every frame of ten seconds would be some 700 MB per camera.
+CLIP_WINDOW_S, CLIP_FRAMES = 3.0, 8
+ASSIST_WINDOW_S, ASSIST_FRAMES = 10.0, 8
+
+
+class _FrameBuffer:
+    """The recent past of one camera, sampled over time.
+
+    A clip cannot be taken by asking the camera for frames when the moment arrives: the stop or the
+    routine step is detected inside the driving loop, so the loop is blocked in that very call and
+    no further frame can arrive. The frames have to be there already, which they are - the cameras
+    stream continuously - so this keeps them.
+
+    It cannot keep all of them. A CARLA frame at 1280x720 is raw BGRA, about 3.7 MB, and the server
+    produces 20 a second: ten seconds would be some 700 MB per camera. So frames are kept at an
+    interval spread across the window, capped in number, which is also what the judgement needs - a
+    blinker cycle is read from a handful of frames across it, not from sixty consecutive ones.
+
+    The newest frame is kept whatever the sampling, because a single-frame capture must reflect the
+    world now rather than the last sample.
+    """
+
+    def __init__(self, window_s: float = 3.0, max_frames: int = 12, clock=time.monotonic):
+        self.window_s = window_s
+        self.max_frames = max_frames
+        self._interval_s = window_s / max_frames if max_frames else window_s
+        self._samples: deque = deque(maxlen=max_frames)
+        self._latest = None
+        self._last_kept_at = 0.0
+        self._clock = clock
+        self._lock = threading.Lock()
+
+    def append(self, image) -> None:
+        now = self._clock()
+        with self._lock:
+            self._latest = image
+            if not self._samples or now - self._last_kept_at >= self._interval_s:
+                self._samples.append((now, image))
+                self._last_kept_at = now
+
+    def latest(self):
+        with self._lock:
+            return self._latest
+
+    def recent(self, count: int) -> list:
+        """Up to `count` frames spread across the window, oldest first."""
+        with self._lock:
+            samples = list(self._samples)
+        if not samples:
+            return []
+        if len(samples) <= count:
+            return samples
+        # even spread, always including the oldest and newest held
+        step = (len(samples) - 1) / (count - 1) if count > 1 else 0
+        picked = [samples[min(len(samples) - 1, round(i * step))] for i in range(count)]
+        seen, out = set(), []
+        for at, image in picked:                  # rounding can repeat an index
+            if at not in seen:
+                seen.add(at)
+                out.append((at, image))
+        return out
+
+    def empty(self) -> bool:
+        with self._lock:
+            return self._latest is None
 
 
 @dataclass
@@ -78,6 +148,15 @@ ASSIST_OPTIONS = ["wait_for_removal", "pass_left_3kmh", "reroute_lane_c"]
 STEP_LIGHTS = {
     "headlights": "LowBeam", "indicators": "LeftBlinker", "brake_lights": "Brake", "reverse": "Reverse",
 }
+
+# The indicators step is "left, then right". Only LeftBlinker was ever set, so the right indicator
+# was never energised and the step could not be performed, let alone confirmed - the camera check
+# was failing a car for something the simulation had not done. The side switches halfway through.
+#
+# CARLA renders a blinker light state as steadily lit rather than flashing, so what a camera can
+# confirm here is that the correct side is lit and that it changes sides. The flash rate itself is
+# not simulated, and stays out of scope as horn and wipers do.
+INDICATOR_SIDES = ("LeftBlinker", "RightBlinker")
 
 
 class CarlaDrivingSystem:
@@ -115,7 +194,7 @@ class CarlaDrivingSystem:
         # case_id -> forward frame taken when the car stopped, so the desk can show Gemini real
         # pixels. AssistRequest only carries a URI, and Vertex AI cannot read a gs:// path that
         # does not exist, which is how flow 3 first failed.
-        self.assist_clips: dict[str, bytes] = {}
+        self.assist_clips: dict[str, list[bytes]] = {}
         self.blocked_after_s = blocked_after_s
         self.blocked_speed_kmh = blocked_speed_kmh
         self.obstacle_range_m = obstacle_range_m
@@ -159,15 +238,10 @@ class CarlaDrivingSystem:
             bp = self.world.get_blueprint_library().find("sensor.camera.rgb")
             bp.set_attribute("image_size_x", str(EVIDENCE_WIDTH))
             bp.set_attribute("image_size_y", str(EVIDENCE_HEIGHT))
-            frames: queue.Queue = queue.Queue(maxsize=4)
+            frames = _FrameBuffer(window_s=ASSIST_WINDOW_S, max_frames=ASSIST_FRAMES)
 
-            def receive(image, q=frames) -> None:
-                if q.full():
-                    try:
-                        q.get_nowait()
-                    except queue.Empty:
-                        pass
-                q.put(image)
+            def receive(image, buffer=frames) -> None:
+                buffer.append(image)
 
             pose = carla.Transform(carla.Location(x=-6.0, z=3.0), carla.Rotation(pitch=-12.0))
             cam = self.world.spawn_actor(bp, pose, attach_to=v.actor)
@@ -356,16 +430,16 @@ class CarlaDrivingSystem:
                 best, best_d = actor, distance
         return best, best_d
 
-    def assist_clip(self, v: _Vehicle) -> bytes | None:
-        """The newest forward view from the camera on the car."""
+    def assist_clip(self, v: _Vehicle) -> list[bytes]:
+        """The seconds before the stop, from the camera on the car, oldest frame first."""
         if v.onboard_frames is None:
-            return None
+            return []
         try:
-            return self._latest_frame(v.onboard_frames)
-        except Exception as exc:                # a missing frame must not block the request
+            return self._clip_frames(v.onboard_frames, ASSIST_FRAMES)
+        except Exception as exc:                # a missing clip must not block the request
             log.warning("assist clip capture failed for %s: %s: %s",
                         v.vin, type(exc).__name__, exc)
-            return None
+            return []
 
     async def raise_assist(self, vin: str, case_id: str, reason: str, options: list[str],
                            clip_uri: str | None = None) -> None:
@@ -376,21 +450,28 @@ class CarlaDrivingSystem:
         v.actor.apply_control(carla.VehicleControl(throttle=0.0, brake=1.0))
         clip = self.assist_clip(v)
         uri = clip_uri or f"gs://marshal/assist/{case_id}.jpg"
-        if clip is not None:
+        if clip:
             self.assist_clips[case_id] = clip
-            uri = self.store_artifact(uri, clip)
+            # The recorded URI points at the last frame, the one showing what stopped the car.
+            uri = self.store_artifact(uri, clip[-1])
         await emit(self._handlers, AssistRequest(
             case_id=case_id, vin=vin, location=v.location, reason=reason, options=options,
             clip_uri=uri,
         ))
 
-    def assist_media(self, case_id: str) -> Media | None:
-        """The frame captured when the car stopped, for the desk to show Gemini."""
-        data = self.assist_clips.get(case_id)
-        if data is None:
-            return None
-        return Media(mime="image/jpeg", data=data, label="forward view at the stop",
-                     uri=f"gs://marshal/assist/{case_id}.jpg")  # recorded URI is on the request
+    def assist_media(self, case_id: str) -> list[Media]:
+        """The seconds before the stop, as an ordered run of frames.
+
+        The design asks for a ten second clip with the request. One still was a stand-in for it;
+        the car's camera has been streaming the whole time, so the frames were already there.
+        """
+        frames = self.assist_clips.get(case_id) or []
+        if isinstance(frames, bytes):             # a single frame, from an older recording
+            frames = [frames]
+        return [Media(mime="image/jpeg", data=data, label=f"frame {i} of {len(frames)}, "
+                      "the seconds before the car stopped",
+                      uri=f"gs://marshal/assist/{case_id}_f{i}.jpg")
+                for i, data in enumerate(frames, start=1)]
 
     async def _check_blocked(self, v: _Vehicle) -> bool:
         """Raise assist.request once the agent has stalled mid-mission behind something."""
@@ -423,8 +504,15 @@ class CarlaDrivingSystem:
     def _set_lights(self, v: _Vehicle, step: RoutineStep | None) -> None:
         state = carla.VehicleLightState.NONE
         if step is not None and step.name in STEP_LIGHTS and step.name not in self.faults.get(v.vin, set()):
-            state = getattr(carla.VehicleLightState, STEP_LIGHTS[step.name])
+            state = getattr(carla.VehicleLightState, self._lamp_for(v, step))
         v.actor.set_light_state(carla.VehicleLightState(state))
+
+    def _lamp_for(self, v: _Vehicle, step: RoutineStep) -> str:
+        """Which lamp this step energises now; the indicators step changes side halfway."""
+        if step.name != "indicators":
+            return STEP_LIGHTS[step.name]
+        first_half = v.step_left_s > step.duration_s / 2
+        return INDICATOR_SIDES[0] if first_half else INDICATOR_SIDES[1]
 
     async def _routine_step(self, v: _Vehicle) -> None:
         v.actor.apply_control(carla.VehicleControl(throttle=0.0, brake=1.0))
@@ -466,12 +554,6 @@ class CarlaDrivingSystem:
             # for that - it compares against a reference frame - and a step that needs an exact
             # moment needs a clip, which is still open.
             return self._latest_frame(frames)
-        while not frames.empty():                 # discard anything queued
-            try:
-                frames.get_nowait()
-            except queue.Empty:
-                break
-
         # Cameras stay subscribed. Stopping an idle camera and restarting it per capture was an
         # attempt to spare the server, but it cannot work while the driving loop is running: the
         # loop is the only ticker, a camera that subscribes mid-capture has no tick of its own to
@@ -482,36 +564,13 @@ class CarlaDrivingSystem:
         # What actually overloaded the server was four gate cameras streaming at full resolution
         # at once. The gate no longer uses this path - it moves a single camera - so what streams
         # here is the track's pair, which is the configuration day 2 has always run.
-        # Draining is not enough. Frames already in flight arrive after the drain and still
-        # show the previous world state, which made a dark lamp look lit because the frame
-        # was of the previous, healthy car. Skip a couple before trusting one.
-        skip = 2
-        image = None
-        if self._owns_ticks():
-            for _ in range(8 + skip):
-                self._tick_world()
-                try:
-                    candidate = frames.get(timeout=self.frame_timeout_s)
-                except queue.Empty:
-                    continue
-                if skip > 0:
-                    skip -= 1
-                    continue
-                image = candidate
-                break
-        else:
-            # the driving loop (or the server in async mode) produces the frames
-            for _ in range(skip + 1):
-                try:
-                    candidate = frames.get(timeout=self.frame_timeout_s * 6)
-                except queue.Empty:
-                    break
-                if skip > 0:
-                    skip -= 1
-                    continue
-                image = candidate
-        if image is None:
-            raise RuntimeError("camera produced no frame after bounded warm-up")
+        #
+        # Ticking a few times first matters: frames already in flight show the previous world
+        # state, which once made a dark lamp look lit because the frame was of the previous,
+        # healthy car. Each tick delivers a frame, so after a few the newest held is current.
+        for _ in range(4):
+            self._tick_world()
+        return self._latest_frame(frames)
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "frame.jpg"
             image.save_to_disk(str(path))
@@ -539,42 +598,63 @@ class CarlaDrivingSystem:
         cam, frames, _receive = entry
 
         cam.set_transform(transform)
-        # Frames already in flight show the previous pose, so wait for several fresh ones and
-        # keep the last.
-        image = None
+        # Frames already in flight still show the previous pose, so let several more arrive and
+        # keep the last of them.
+        before = frames.latest()
         deadline = time.monotonic() + max(2.0, self.frame_timeout_s * (settle_frames + 4))
-        seen = 0
+        settled = 0
         while time.monotonic() < deadline:
             if self._owns_ticks():
                 self._tick_world()
-            try:
-                candidate = frames.get(timeout=self.frame_timeout_s)
-            except queue.Empty:
-                continue
-            seen += 1
-            image = candidate
-            if seen > settle_frames:
-                break
+            current = frames.latest()
+            if current is not None and current is not before:
+                settled += 1
+                before = current
+                if settled > settle_frames:
+                    break
+            else:
+                time.sleep(0.02)
+        image = frames.latest()
         if image is None:
             raise RuntimeError("camera produced no frame after moving to the requested pose")
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "frame.jpg"
-            image.save_to_disk(str(path))
-            return path.read_bytes()
+        return self._encode(image)
 
-    def _latest_frame(self, frames: "queue.Queue") -> bytes:
+    def clip_frames(self, transform, width: int | None = None,
+                    height: int | None = None, count: int = CLIP_FRAMES) -> list[bytes]:
+        """An ordered run of recent frames from the camera at this pose, oldest first."""
+        width = EVIDENCE_WIDTH if width is None else width
+        height = EVIDENCE_HEIGHT if height is None else height
+        key = self._camera_key(transform, width, height)
+        entry = self._cameras.get(key) or self._make_camera(key, transform, width, height)
+        _cam, frames, _receive = entry
+        return self._clip_frames(frames, count)
+
+    def _latest_frame(self, frames: "_FrameBuffer") -> bytes:
         """The newest frame already delivered, waiting only if none has been."""
-        image = None
-        while True:                               # drain to the newest
-            try:
-                image = frames.get_nowait()
-            except queue.Empty:
-                break
-        if image is None:                         # nothing delivered yet: give it a moment
-            try:
-                image = frames.get(timeout=self.frame_timeout_s * 6)
-            except queue.Empty:
-                raise RuntimeError("camera produced no frame after bounded warm-up") from None
+        deadline = time.monotonic() + self.frame_timeout_s * 6
+        image = frames.latest()
+        while image is None and time.monotonic() < deadline:
+            time.sleep(0.02)
+            image = frames.latest()
+        if image is None:
+            raise RuntimeError("camera produced no frame after bounded warm-up")
+        return self._encode(image)
+
+    def _clip_frames(self, frames: "_FrameBuffer", count: int) -> list[bytes]:
+        """The recent past of this camera as an ordered sequence, oldest first.
+
+        This is the clip the design asks for, assembled from frames the camera had already
+        delivered. Nothing is requested at the moment it is wanted, because at that moment the
+        driving loop is blocked in the call doing the asking.
+        """
+        samples = frames.recent(count)
+        if not samples:
+            latest = frames.latest()
+            return [self._encode(latest)] if latest is not None else []
+        return [self._encode(image) for _at, image in samples]
+
+    def _encode(self, image) -> bytes:
+        """One CARLA frame as JPEG bytes."""
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "frame.jpg"
             image.save_to_disk(str(path))
@@ -592,15 +672,9 @@ class CarlaDrivingSystem:
         bp = self.world.get_blueprint_library().find("sensor.camera.rgb")
         bp.set_attribute("image_size_x", str(width))
         bp.set_attribute("image_size_y", str(height))
-        frames: queue.Queue = queue.Queue(maxsize=4)
-
-        def receive(image, q=frames) -> None:
-            if q.full():                          # keep only recent frames
-                try:
-                    q.get_nowait()
-                except queue.Empty:
-                    pass
-            q.put(image)
+        frames = _FrameBuffer(window_s=CLIP_WINDOW_S, max_frames=CLIP_FRAMES)
+        def receive(image, buffer=frames) -> None:
+            buffer.append(image)
 
         cam = self.world.spawn_actor(bp, transform)
         cam.listen(receive)
@@ -612,15 +686,9 @@ class CarlaDrivingSystem:
         bp = self.world.get_blueprint_library().find("sensor.camera.rgb")
         bp.set_attribute("image_size_x", str(width))
         bp.set_attribute("image_size_y", str(height))
-        frames: queue.Queue = queue.Queue(maxsize=8)
-
-        def receive(image, q=frames) -> None:
-            if q.full():
-                try:
-                    q.get_nowait()
-                except queue.Empty:
-                    pass
-            q.put(image)
+        frames = _FrameBuffer(window_s=1.0, max_frames=4)   # the gate judges single frames
+        def receive(image, buffer=frames) -> None:
+            buffer.append(image)
 
         cam = self.world.spawn_actor(bp, transform)
         cam.listen(receive)                   # subscribed once; never stopped mid-run
@@ -724,6 +792,7 @@ TRACK_CAMERA_DEFAULT = TRACK_VIEWS["rear"]
 EVIDENCE_WIDTH, EVIDENCE_HEIGHT = 1280, 720
 
 
+
 def _offset(ds: CarlaDrivingSystem, point: str, forward: float, right: float, z: float, yaw: float):
     base = ds.transform(point)
     fwd, rgt = base.get_forward_vector(), base.get_right_vector()
@@ -775,3 +844,22 @@ class CarlaTrackCamera:
         uri = self.ds.store_artifact(f"gs://marshal/track/{vin}/step{step}_{name}.jpg", data)
         return Media(mime="image/jpeg", data=data, label=f"track camera, step {step} {name}",
                      uri=uri)
+
+    def sequence(self, vin: str, step: int, name: str) -> list[Media]:
+        """The step as an ordered run of frames, for what one frame cannot show.
+
+        A blinker is lit for only part of its cycle, and a stopping distance or a turning circle is
+        a path rather than a state, so those steps were left unconfirmed when all the checker had
+        was a still. The frames come from the camera's own recent past, because at the moment the
+        step reports in, the driving loop is blocked in that very call and cannot produce more.
+        """
+        placement = TRACK_CAMERAS.get(name, TRACK_CAMERA_DEFAULT)
+        frames = self.ds.clip_frames(_offset(self.ds, self.point, *placement),
+                                     EVIDENCE_WIDTH, EVIDENCE_HEIGHT)
+        out: list[Media] = []
+        for i, data in enumerate(frames, start=1):
+            uri = self.ds.store_artifact(
+                f"gs://marshal/track/{vin}/step{step}_{name}_f{i}.jpg", data)
+            out.append(Media(mime="image/jpeg", data=data, uri=uri,
+                             label=f"frame {i} of {len(frames)}, step {step} {name}"))
+        return out

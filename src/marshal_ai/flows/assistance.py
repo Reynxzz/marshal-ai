@@ -95,8 +95,8 @@ class AssistanceDesk:
         supplier = getattr(self.rt.driving, "assist_media", None)
         if supplier is not None:
             media = supplier(request.case_id)
-            if media is not None:
-                return [media]
+            if media:
+                return list(media) if isinstance(media, list) else [media]
         truth = self.rt.world.scenes.get(request.case_id) if self.rt.world else None
         if truth is not None:                   # the fake plant describes the scene in words
             return [Media(mime="video/mp4", uri=request.clip_uri,

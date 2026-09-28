@@ -12,10 +12,9 @@ A camera on the car needs no pose chosen at the stop and no waiting.
 
 from __future__ import annotations
 
-import queue
 from types import SimpleNamespace
 
-from marshal_ai.driving.carla_backend import CarlaDrivingSystem
+from marshal_ai.driving.carla_backend import CarlaDrivingSystem, _FrameBuffer
 
 
 class _Image:
@@ -36,18 +35,34 @@ def _backend() -> CarlaDrivingSystem:
 
 
 def _car_with_frames(*tags: str):
-    frames: queue.Queue = queue.Queue(maxsize=4)
+    """Frames arriving far enough apart to each be kept.
+
+    The buffer holds eight samples across ten seconds, so it keeps one per 1.25 s and drops what
+    falls between - that is the point of it, since keeping every frame of ten seconds would be
+    some 700 MB. The clock here steps past that interval so each frame in the test is a sample.
+    """
+    ticks = iter(range(0, 1000, 2))
+    frames = _FrameBuffer(window_s=10.0, max_frames=8, clock=lambda: next(ticks))
     for tag in tags:
-        frames.put(_Image(tag))
+        frames.append(_Image(tag))
     return SimpleNamespace(vin="VIN-1", onboard=object(), onboard_frames=frames)
 
 
-def test_the_assist_frame_is_the_newest_the_car_has_delivered():
+def test_the_assist_clip_is_the_seconds_before_the_stop_in_order():
+    """The design asks for a ten second clip with the request, oldest frame first."""
     backend = _backend()
 
-    data = backend.assist_clip(_car_with_frames("older", "newest"))
+    frames = backend.assist_clip(_car_with_frames("oldest", "middle", "newest"))
 
-    assert data == b"newest"
+    assert frames == [b"oldest", b"middle", b"newest"], "in order, so a path can be read"
+
+
+def test_the_last_frame_is_the_one_that_shows_what_stopped_the_car():
+    backend = _backend()
+
+    frames = backend.assist_clip(_car_with_frames("before", "at the stop"))
+
+    assert frames[-1] == b"at the stop"
 
 
 def test_a_car_without_a_camera_can_still_ask_for_help():
@@ -55,11 +70,12 @@ def test_a_car_without_a_camera_can_still_ask_for_help():
     backend = _backend()
     car = SimpleNamespace(vin="VIN-2", onboard=None, onboard_frames=None)
 
-    assert backend.assist_clip(car) is None
+    assert backend.assist_clip(car) == []
 
 
 def test_no_frame_yet_is_reported_rather_than_raised():
     backend = _backend()
-    car = SimpleNamespace(vin="VIN-3", onboard=object(), onboard_frames=queue.Queue())
+    car = SimpleNamespace(vin="VIN-3", onboard=object(),
+                          onboard_frames=_FrameBuffer(window_s=10.0, max_frames=8))
 
-    assert backend.assist_clip(car) is None, "an empty queue must not break the request"
+    assert backend.assist_clip(car) == [], "an empty buffer must not break the request"

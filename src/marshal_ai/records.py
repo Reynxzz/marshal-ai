@@ -88,9 +88,15 @@ class ChecklistItem(BaseModel):
     camera_ok: bool | None = None
     camera_confidence: float | None = None
     clip_uri: str | None = None
+    # False when the simulation does not perform this step, so no camera could confirm it and the
+    # step rests on telemetry alone. Kept on the record because a report that says PASS should be
+    # able to say how much of it two sources agreed on.
+    camera_applicable: bool = True
 
     @property
     def passed(self) -> bool:
+        if not self.camera_applicable:
+            return bool(self.telemetry_ok)
         return bool(self.telemetry_ok) and bool(self.camera_ok)
 
 

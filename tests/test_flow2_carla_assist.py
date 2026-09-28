@@ -42,7 +42,7 @@ class _Backend:
         self.obstacle_range_m = 14.0
         self.assist_options = list(ASSIST_OPTIONS)
         self.auto_assist = True
-        self.assist_clips: dict[str, bytes] = {}
+        self.assist_clips: dict[str, list[bytes]] = {}
         self.stored: list[tuple[str, bytes]] = []
         self.events: list = []
         self._handlers = [self.events.append]
@@ -59,7 +59,8 @@ class _Backend:
         return self._obstacle
 
     def assist_clip(self, v):
-        return b"forward-frame"
+        # the seconds before the stop, oldest frame first
+        return [b"approaching", b"closer", b"forward-frame"]
 
     def store_artifact(self, uri, data):
         self.stored.append((uri, data))
@@ -105,13 +106,14 @@ def test_a_car_blocked_by_a_person_asks_after_the_grace_period():
     assert request.vin == "VIN-1"
     assert request.options == ASSIST_OPTIONS
     assert "a person" in request.reason and "3.4 m" in request.reason
+    assert backend.stored[-1][1] == b"forward-frame", "the stored frame is the one at the stop"
     assert v.assist_case == request.case_id, "the car must stay stopped until a human answers"
     # the frame is stored and the request carries the stored URI, not the placeholder
     assert backend.stored == [(f"gs://marshal/assist/{request.case_id}.jpg", b"forward-frame")]
     assert request.clip_uri == f"gs://marshal-artifacts/assist/{request.case_id}.jpg"
 
 
-def test_the_captured_frame_is_offered_to_the_desk_as_bytes():
+def test_the_captured_clip_is_offered_to_the_desk_as_bytes():
     walker = SimpleNamespace(id=99, type_id="walker.pedestrian.0001")
     backend = _Backend(speed_kmh=0.0, obstacle=walker)
     v = _vehicle(backend)
@@ -121,8 +123,10 @@ def test_the_captured_frame_is_offered_to_the_desk_as_bytes():
 
     media = backend.assist_media(request.case_id)
 
-    assert media is not None and media.data == b"forward-frame"
-    assert media.mime == "image/jpeg"
+    assert [m.data for m in media] == [b"approaching", b"closer", b"forward-frame"], \
+        "the design asks for the seconds before the stop, in order"
+    assert all(m.mime == "image/jpeg" for m in media)
+    assert "the seconds before the car stopped" in media[0].label
 
 
 def test_only_one_request_per_blockage():

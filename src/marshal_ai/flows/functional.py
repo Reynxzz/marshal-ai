@@ -47,6 +47,11 @@ lamp named, e.g. a brake light test needs left, right and third brake lamps lit.
 # never catch the fault it exists for. Given a known-good reference frame of the same step to
 # compare against, the same model answered correctly at 0.99 both ways. End-of-line rigs
 # compare against a golden reference for the same reason.
+SEQUENCE_SYSTEM = """You are shown several frames of one test-track step, in order, a fraction of a
+second apart. Judge whether the expected result happens anywhere across them - an indicator counts as
+blinking if it is lit in some frames and dark in others, and a movement counts if the car's position
+changes across the frames as described. Say what you actually see; do not assume the step succeeded."""
+
 REFERENCE_SYSTEM = """You compare two frames of the same test-track step. The FIRST is a reference
 recorded from a car that passed this step. The SECOND is the car under test. Decide whether the
 expected result is present in the SECOND frame, judging by how it differs from the reference.
@@ -96,6 +101,18 @@ class FunctionalChecker:
         self._last_clips[run.vin] = dict(run.clips)
         return await self._record(run.vin, list(items))
 
+    def _sequence(self, vin: str, step: RoutineStep) -> list:
+        """The step as ordered frames, when the camera can supply them."""
+        supplier = getattr(self.rt.track_camera, "sequence", None)
+        if supplier is None:
+            return []
+        try:
+            return supplier(vin, step.step, step.name)
+        except Exception as exc:
+            log.warning("no clip for step %s (%s): %s: %s",
+                        step.step, step.name, type(exc).__name__, exc)
+            return []
+
     async def _judge(self, run: _Run, step: RoutineStep) -> ChecklistItem:
         reported = run.reported.get(step.step)
         telemetry_ok = bool(reported and TELEMETRY_CHECKS[step.name](reported.telemetry))
@@ -111,13 +128,36 @@ class FunctionalChecker:
         # calls for a 3 s clip for exactly this reason. Evidence that describes the scene rather
         # than freezing it can still be judged, which is why this asks about the clip in hand
         # and not only about the step.
-        if not step.still_confirmable and clip.truth is None:
-            # camera_ok stays None: unconfirmed, which is not the same as contradicted. Judged
-            # anyway, Gemini answered "no" at confidence 1.0 and failed healthy cars.
-            log.info("functional: step %s (%s) needs a clip; not judged from a still",
+        if not step.camera_demonstrable and clip.truth is None:
+            # Nothing happened for a camera to see: the car is held stationary for the step, so
+            # its telemetry is scripted. Recorded as telemetry-only rather than as a step the
+            # camera failed, which is what the design scopes when it says steps 1 to 4 can be
+            # demonstrated in CARLA.
+            log.info("functional: step %s (%s) is telemetry-only in this build",
                      step.step, step.name)
             return ChecklistItem(step=step.step, name=step.name, telemetry_ok=telemetry_ok,
-                                 camera_ok=None, camera_confidence=None, clip_uri=clip.uri)
+                                 camera_ok=None, camera_confidence=None, clip_uri=clip.uri,
+                                 camera_applicable=False)
+
+        if not step.still_confirmable and clip.truth is None:
+            frames = self._sequence(run.vin, step)
+            if len(frames) < 2:
+                # Still nothing to judge. camera_ok stays None - unconfirmed, which is not the
+                # same as contradicted. Judged from one frame anyway, Gemini answered "no" at
+                # confidence 1.0 and failed healthy cars.
+                log.info("functional: step %s (%s) needs a clip and none was held",
+                         step.step, step.name)
+                return ChecklistItem(step=step.step, name=step.name, telemetry_ok=telemetry_ok,
+                                     camera_ok=None, camera_confidence=None, clip_uri=clip.uri)
+            prompt = (f"Step {step.step}: {step.command}.\n"
+                      f"Expected across these frames, which are in order: "
+                      f"{step.expected_on_camera}.\n"
+                      "Judge only what the frames show. Do not assume the car behaved correctly.")
+            seen = await ask(self.rt, "track.step", prompt, StepSeen, frames, SEQUENCE_SYSTEM)
+            camera_ok = seen.seen if seen.confidence >= CAMERA_MIN_CONFIDENCE else None
+            return ChecklistItem(step=step.step, name=step.name, telemetry_ok=telemetry_ok,
+                                 camera_ok=camera_ok, camera_confidence=seen.confidence,
+                                 clip_uri=frames[-1].uri)
 
         reference = self.references.get(step.name)
         if reference is not None:
@@ -156,7 +196,7 @@ class FunctionalChecker:
         # where both sources agree on every step passes unattended.
         if any(i.telemetry_ok is False or i.camera_ok is False for i in items):
             verdict = Verdict.FAIL
-        elif any(i.camera_ok is None for i in items):
+        elif any(i.camera_ok is None and i.camera_applicable for i in items):
             verdict = Verdict.REVIEW
         else:
             verdict = Verdict.PASS
