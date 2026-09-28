@@ -145,7 +145,11 @@ async def check_one(app: MarshalApp, vin: str, steps: list[int], fault: str | No
 
 
 async def run(args: argparse.Namespace) -> dict:
-    settings = Settings(driving="carla", llm="gemini", bus="memory", store="memory")
+    # The store and bus come from the environment. They were pinned to "memory" here, so the
+    # verdicts this scene produces - the dark lamp its telemetry reports as healthy, which is the
+    # whole point of it - vanished with the process and could never be looked at afterwards. Set
+    # MARSHAL_STORE=gcp to keep them.
+    settings = Settings(driving="carla", llm="gemini")
     rt = build_runtime(settings, host=args.host, port=args.port)
     app = MarshalApp(rt)
     if type(rt.llm).__name__ != "GeminiLLM":
