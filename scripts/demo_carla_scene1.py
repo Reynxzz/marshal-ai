@@ -194,6 +194,7 @@ def capture_gate_views(rt, vin: str) -> list:
 async def phase_gate(rt, app, args) -> dict:
     """Flow 3. Cameras and no driving loop, which is the only combination that works."""
     only_this_flow(app, gate=True)
+    ensure_car(rt, args, CarState.INSPECTION_GATE, "inspection_gate")
     drop_stale(rt, (InspectionResult, f"{args.vin}:visual"))
     respawn(rt, args.vin, "inspection_gate")
     try:
@@ -211,6 +212,22 @@ async def phase_gate(rt, app, args) -> dict:
         # No sensor or vehicle teardown here, for the reason in capture_gate_views. The next
         # phase is a new process and clears anything left behind before it spawns.
         pass
+
+
+def ensure_car(rt, args, state: CarState, location: str) -> None:
+    """Create the car record if this phase is running without the ones before it.
+
+    Each phase can be run on its own, and the phases before it are what normally put the record
+    there. Running the track phase against a cleared store failed with "unknown VIN VIN-S1" - the
+    phase was quietly depending on a record it had not made. An existing record is left alone, so
+    a full run still carries the verdicts already reached.
+    """
+    if rt.store.get(Car, args.vin) is None:
+        rt.store.put(Car(vin=args.vin, state=state, location=location,
+                         build_sheet=BuildSheet(model="sedan", colour="blue",
+                                                options=list(CAR_OPTIONS), truck_id=args.truck)))
+        emit({"type": "scene1.car_created", "vin": args.vin, "state": state.value,
+              "why": "this phase was run without the ones before it"})
 
 
 def drop_stale(rt, *records) -> None:
@@ -260,6 +277,7 @@ async def phase_track(rt, app, args) -> dict:
     # car faulty while its telemetry said the lights were on. Day 2 drops the sun for the same
     # reason. This is the lighting the check needs, not a trick to make it pass: a lamp that
     # cannot be seen cannot be confirmed either way.
+    ensure_car(rt, args, CarState.TEST_TRACK, "test_track")
     drop_stale(rt, (InspectionResult, f"{args.vin}:functional"), (CarReport, args.vin))
     set_sun(rt, args.sun_altitude)
     rt.track_camera.prewarm()
@@ -313,6 +331,7 @@ async def phase_track(rt, app, args) -> dict:
 
 async def phase_report(rt, app, args) -> dict:
     """Flow 5. Merge both results, then drive the car to its slot."""
+    ensure_car(rt, args, CarState.REPORT, "report_point")
     drop_stale(rt, (CarReport, args.vin))
     visual = rt.store.get(InspectionResult, f"{args.vin}:visual")
     functional = rt.store.get(InspectionResult, f"{args.vin}:functional")

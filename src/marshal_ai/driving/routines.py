@@ -32,17 +32,28 @@ R12 = [
                 "Both headlights lit", ("headlight_left", "headlight_right"),
                 {"headlights": "ON"}),
     RoutineStep(2, "indicators", "Left, then right indicator",
-                "The left indicator is lit in the earlier frames and the right indicator in the "
-                "later ones, so the side changes across the sequence",
+                # Checked against the vehicle with each light state set on its own: RightBlinker
+                # lights one amber segment of the rear bar, and LeftBlinker renders nothing at all
+                # - the frame is identical to lights-off. One side of this asset is simply not
+                # drawn, so "left, then right" cannot be read from a camera however it is framed.
+                # Telemetry-only here, for the same reason horn and wipers are out of scope.
+                "The left indicator lights, then the right one does",
                 ("indicator_left", "indicator_right"),
                 {"indicator_left": "BLINK", "indicator_right": "BLINK"}, 10.0,
-                still_confirmable=False),
+                still_confirmable=False, camera_demonstrable=False),
     RoutineStep(3, "brake_lights", "Brake lights",
-                "All brake lights lit, left, right and the third (centre high) lamp",
+                # This asset has one continuous rear bar and no separate third lamp, and it lights
+                # amber rather than red. Asking for "left, right and the third" described a real car
+                # and failed this one: with the lamps framed closely enough to read, Gemini rightly
+                # said there were no such separate lamps.
+                "The full width of the rear light bar is lit",
                 ("brake_left", "brake_right", "brake_third"),
                 {"brake_signal": True, "brake_lamps": "ON"}),
     RoutineStep(4, "reverse", "Reverse 3 m",
-                "Reverse light on and the car moves straight back about 3 m", ("reverse",),
+                # The car does not actually roll back: it is held stationary for the length of a
+                # step, so asking the camera to see 3 m of movement failed a healthy car. What
+                # CARLA does demonstrate is the reverse lamp, and that is what is asked for.
+                "The reverse lamp is lit, white, at the back of the car", ("reverse",),
                 {"gear": "R", "distance_m": 3.0, "reverse_lamp": "ON"}, 10.0),
     RoutineStep(5, "brake_test", "Brake test from 20 km/h",
                 "Car stops in a straight line within the marked 5 m zone", (),

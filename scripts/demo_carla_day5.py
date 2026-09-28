@@ -130,10 +130,15 @@ async def run(args: argparse.Namespace) -> dict:
         emit({"type": "flow2.request", "case_id": request.case_id, "vin": request.vin,
               "reason": request.reason, "options": request.options})
 
+        # The design asks for a 10 s clip with the request, so this is a run of frames now, not
+        # one still. All of them are written out: the desk's recommendation should be checkable
+        # against the same evidence it was given.
         clip = rt.driving.assist_media(request.case_id)
-        if clip is not None and clip.data:
-            (out / f"{request.case_id}.jpg").write_bytes(clip.data)
-        emit({"type": "flow2.clip", "bytes": len(clip.data) if clip and clip.data else 0})
+        for i, frame in enumerate(clip, start=1):
+            if frame.data:
+                (out / f"{request.case_id}_f{i}.jpg").write_bytes(frame.data)
+        emit({"type": "flow2.clip", "frames": len(clip),
+              "bytes": sum(len(f.data or b"") for f in clip)})
 
         # the desk: Gemini reads the frame, the rules are enforced in code
         case = await app.assistance.on_request(request)
@@ -162,7 +167,8 @@ async def run(args: argparse.Namespace) -> dict:
             "people_or_moving_equipment": case.people_or_moving_equipment,
             "recommended": case.recommended,
             "choice": resolved.choice,
-            "clip_bytes": len(clip.data) if clip and clip.data else 0,
+            "clip_frames": len(clip),
+            "clip_bytes": sum(len(f.data or b"") for f in clip),
             "test_requests": app.test_requests[-1:],
             "released": v.assist_case is None,
         }

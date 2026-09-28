@@ -42,7 +42,8 @@ def _car_with_frames(*tags: str):
     some 700 MB. The clock here steps past that interval so each frame in the test is a sample.
     """
     ticks = iter(range(0, 1000, 2))
-    frames = _FrameBuffer(window_s=10.0, max_frames=8, clock=lambda: next(ticks))
+    frames = _FrameBuffer(window_s=10.0, max_frames=8, clock=lambda: next(ticks),
+                          encode=lambda image: image.tag.encode())
     for tag in tags:
         frames.append(_Image(tag))
     return SimpleNamespace(vin="VIN-1", onboard=object(), onboard_frames=frames)

@@ -42,12 +42,17 @@ def test_a_lit_lamp_is_settled_by_one_frame():
         assert steps[name].camera_demonstrable
 
 
-def test_the_indicators_step_needs_a_sequence_but_is_performed():
+def test_the_indicators_step_cannot_be_read_from_this_vehicle():
+    """Checked with each light state set on its own, against the car's own rear camera.
+
+    RightBlinker lights one amber segment of the rear bar. LeftBlinker renders nothing at all - the
+    frame is identical to lights-off. One side of this asset is not drawn, so "left, then right"
+    cannot be read from a camera however it is framed, and the step rests on telemetry.
+    """
     step = _by_name()["indicators"]
 
-    assert not step.still_confirmable, "one frame cannot show the side changing"
-    assert step.camera_demonstrable, "the car does energise each side in turn"
-    assert "earlier frames" in step.expected_on_camera, "the expectation describes a sequence"
+    assert not step.camera_demonstrable, "one side of this asset is never drawn"
+    assert not step.still_confirmable, "and one frame could not show a change of side anyway"
 
 
 def test_the_steps_the_simulation_does_not_perform_are_marked_as_such():
@@ -55,6 +60,13 @@ def test_the_steps_the_simulation_does_not_perform_are_marked_as_such():
 
     for name in ("brake_test", "full_lock"):
         assert not steps[name].camera_demonstrable, f"the car stands still through {name}"
+
+
+def test_the_steps_that_can_be_read_are_the_lamps_this_asset_draws():
+    """Headlights, the rear bar and the reverse lamp; that is what CARLA renders here."""
+    readable = [s.name for s in R12 if s.camera_demonstrable]
+
+    assert readable == ["headlights", "brake_lights", "reverse"]
 
 
 def test_a_telemetry_only_step_passes_on_telemetry_alone():

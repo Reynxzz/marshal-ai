@@ -492,38 +492,66 @@ failure was swallowed, the request went out carrying a `gs://` name nothing had 
 it surfaced as a **403 from Vertex AI** trying to read it. Media with no bytes is no longer presented
 as a clip.
 
-## Flow 4 on the whole R-12 routine, and what a still cannot show
+## Flow 4 on the whole R-12 routine, and what this vehicle actually shows
 
-All six steps were run against real CARLA for the first time. Three failed on a healthy car:
+Running all six steps against real CARLA failed three of them on a healthy car. None of the failures
+were the judgement's fault. Each was the routine asking for something the simulation or the vehicle
+asset does not do, and the checks were right to say so:
 
-| Step | Camera | Why |
+| Step | Camera | What the asset does |
 | --- | --- | --- |
-| 1 headlights | confirmed | a lit lamp is a state a frame holds |
-| 2 indicators | **cannot be judged** | a blinker is lit for only part of its cycle |
-| 3 brake_lights | confirmed | all three lamps read on the rear of the `mkz_2020` |
-| 4 reverse | confirmed | the reverse lamp is a state |
-| 5 brake_test | **cannot be judged** | a stopping distance is a path, not a state |
-| 6 full_lock | **cannot be judged** | so is a turning circle |
+| 1 headlights | confirmed | both lamps light |
+| 2 indicators | **telemetry only** | `RightBlinker` lights one amber segment; `LeftBlinker` renders nothing at all - the frame is identical to lights-off |
+| 3 brake_lights | confirmed | one continuous amber bar, with no separate third lamp |
+| 4 reverse | confirmed | the reverse lamp lights; the car does not roll back |
+| 5 brake_test | **telemetry only** | the car is held stationary, so nothing happens |
+| 6 full_lock | **telemetry only** | likewise |
 
-Gemini answered "not seen" at confidence 1.0 for those three, which is a fair reading of the frame
-and the wrong verdict for the car. The design already calls for a 3 s clip per step for exactly this
-reason; until clips exist, a step whose evidence cannot settle the question is recorded as
-**unconfirmed** rather than failed, and each step says whether one frame could show its result.
+Three expectations described a real car rather than this one and were corrected: brake lights asked
+for "left, right and the third (centre high) lamp" on a car with a single bar, and reverse asked to
+see 3 m of movement that never happens. The indicators step was checked by setting each light state
+on its own and photographing the result - one side of this asset is simply not drawn - so it rests on
+telemetry, for the same reason horn and wipers are out of scope.
 
-The verdict now has three outcomes, because there are three cases: a camera that **contradicts**
-telemetry is a FAIL, evidence that could not settle it is a REVIEW, and only a car where both
-sources agree on every step PASSes unattended. The full routine now returns REVIEW with steps 1, 3
-and 4 confirmed; scene 1 runs step 1 and still passes unattended.
+The checklist now distinguishes three kinds of step: one a frame settles, one needing the run of
+frames the design calls a clip, and one the simulation does not perform. The verdict has three
+outcomes to match: a camera that **contradicts** telemetry is a FAIL, a camera that could have
+settled a step and did not is a REVIEW, and a step with no camera to speak for it passes on telemetry
+while the record says so. A report that says PASS can now say how much of it two sources agreed on.
 
-Note that brake lights do read on this vehicle, correcting an earlier note here that called them
-ambiguous.
+The full routine now returns **PASS** with headlights, brake lights and reverse camera-confirmed.
+
+## Clips (`_FrameBuffer`)
+
+The design asks for a 3 s clip of each track step and a 10 s clip before a stop; both had been one
+still. A clip cannot be taken at the moment it is wanted, because that moment is inside the driving
+loop - the loop is blocked in the very call asking for frames, so none can arrive. The frames have to
+be there already, and they were, since the cameras stream continuously. Each camera now keeps its
+recent past.
+
+Three things had to be got right, each found by looking at the frames that came back:
+
+- **Memory.** A frame at 1280x720 is raw BGRA, about 3.7 MB, and the server makes 20 a second, so ten
+  seconds would be some 700 MB per camera. Kept frames are sampled across the window and encoded to
+  JPEG as they arrive, which is also safer: a frame object belongs to its sensor's stream, and holding
+  a few of them for later encoding took the server down with a 20 s timeout.
+- **Evidence has to follow the car.** Track cameras fixed to the map lose it - the car moves while it
+  performs the routine, and by the end of a clip it was a speck twenty metres away with no lamp on it
+  resolvable. The cameras are now attached to the car, one at each end.
+- **Framing.** At the default 90 degrees the car sat in the middle of a wide night scene and a lamp
+  was a handful of pixels. Narrowed to 38 degrees the car's end fills the frame, which is what made
+  the difference between a guess and a reading - it is also what revealed that two of the expectations
+  described a different car.
+
+Flow 2 now sends the seconds before a stop as seven frames, and still recommends `wait_for_removal`
+with a worker beside the box.
 
 ## Still open against the design
 
 | Design says | Status |
 | --- | --- |
-| 3 s clip per track step (flow 4) | **Not built.** Steps 2, 5 and 6 cannot be confirmed without it and are marked unconfirmed. |
-| 10 s clip with the assistance request (flow 2) | **Stand-in.** One still forward view from the car's own camera; the desk's decision was correct from it. |
+| 3 s clip per track step (flow 4) | Built, as a sampled run of frames from the camera's recent past. The steps that remain unconfirmed are limited by the asset and the simulation, not by the evidence. |
+| 10 s clip with the assistance request (flow 2) | Built: seven frames of the approach to the stop. Not an encoded video - a video file would need an encoder on the host and buys nothing for the judgement. |
 | 60 runs per scenario, 8 in parallel (flow 7) | **Serial only.** Parallel runs need one CARLA server per slot; the search works but takes the full budget serially. |
 | Release gate blocks a release on a failing test | Implemented in `lab/regression.py`; not yet exercised end to end against BigQuery-backed history. |
 | Demo scene 2 uses a dead brake light | Built with a dead **headlight**: it is the fault the camera reads most clearly, and the disagreement is the point. |

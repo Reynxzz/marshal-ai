@@ -13,14 +13,20 @@ from a handful of frames across the window, not from sixty consecutive ones.
 
 from __future__ import annotations
 
-from marshal_ai.driving.carla_backend import ASSIST_WINDOW_S, CLIP_WINDOW_S, _FrameBuffer
+from marshal_ai.driving.carla_backend import (ASSIST_WINDOW_S, CLIP_WINDOW_S,
+                                             INDICATOR_PERIOD_S, _FrameBuffer)
+from marshal_ai.driving.routines import R12
+
+
+def _stepping(step: float):
+    """A clock that advances `step` seconds each time it is read."""
+    ticks = iter(range(0, 10_000))
+    return lambda: next(ticks) * step
 
 
 def _buffer(window_s: float, max_frames: int, step: float):
     """A buffer whose clock advances `step` seconds per frame."""
-    ticks = iter(range(0, 10_000))
-    return _FrameBuffer(window_s=window_s, max_frames=max_frames,
-                        clock=lambda: next(ticks) * step)
+    return _FrameBuffer(window_s=window_s, max_frames=max_frames, clock=_stepping(step))
 
 
 def test_the_newest_frame_is_always_available():
@@ -74,6 +80,57 @@ def test_an_empty_buffer_reports_empty_rather_than_guessing():
     assert buffer.latest() is None
 
 
-def test_the_windows_match_what_the_design_asks_for():
-    assert CLIP_WINDOW_S == 3.0, "a 3 s clip of each track step"
+def test_samples_are_encoded_as_they_arrive_not_held_as_frames():
+    """A CARLA frame belongs to its sensor's stream and is not safe to keep for seconds.
+
+    Holding a handful for later encoding took the server down with a 20 s timeout. Encoding on
+    arrival also turns 3.7 MB of raw BGRA into about 0.5 MB of JPEG.
+    """
+    encoded: list[str] = []
+
+    def encode(image):
+        encoded.append(image)
+        return f"jpeg:{image}".encode()
+
+    buffer = _FrameBuffer(window_s=3.0, max_frames=8, clock=_stepping(0.5), encode=encode)
+    for tag in ("one", "two"):
+        buffer.append(tag)
+
+    assert [data for _at, data in buffer.recent(8)] == [b"jpeg:one", b"jpeg:two"]
+    assert encoded == ["one", "two"], "encoded once each, when kept"
+
+
+def test_frames_not_kept_are_never_encoded():
+    """Encoding happens a few times a second, not twenty."""
+    encoded: list[str] = []
+    buffer = _FrameBuffer(window_s=10.0, max_frames=8, clock=_stepping(0.05),
+                          encode=lambda image: encoded.append(image) or b"x")
+
+    for i in range(40):                 # two seconds at 20 fps, interval is 1.25 s
+        buffer.append(f"f{i}")
+
+    assert len(encoded) <= 3, f"encoded {len(encoded)} of 40 frames"
+
+
+def test_a_clip_covers_a_change_of_indicator_side():
+    """The clip looks backwards from the step reporting in, so what it shows must happen often.
+
+    The indicators step lasts 10 s and originally changed side once, at its midpoint: a clip of the
+    last seconds showed one side steadily lit and a healthy car failed at confidence 1.0. Widening
+    the window instead caught the car driving away afterwards, by which point its lamps were not
+    resolvable. So the side alternates faster than the window is wide.
+    """
+    assert INDICATOR_PERIOD_S * 2 <= CLIP_WINDOW_S, \
+        f"a {CLIP_WINDOW_S}s clip must contain both sides at a {INDICATOR_PERIOD_S}s period"
+
+
+def test_the_track_window_does_not_reach_past_a_step():
+    """Beyond the step the car drives off and the evidence becomes a speck in the distance."""
+    shortest_step = min(s.duration_s for s in R12 if s.camera_demonstrable)
+
+    assert CLIP_WINDOW_S <= shortest_step, \
+        f"window {CLIP_WINDOW_S}s must fit inside a {shortest_step}s step"
+
+
+def test_the_assist_window_is_what_the_design_asks_for():
     assert ASSIST_WINDOW_S == 10.0, "a 10 s clip before a stop"
