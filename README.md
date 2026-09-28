@@ -83,6 +83,15 @@ wheel, waits for the API, loads Town05, verifies client/server 0.9.16, and insta
 viewer. The AWS Terraform module emits both commands with the real address as
 `marshal_upload_command` and `marshal_prepare_command`.
 
+The AMI does **not** carry the Google SDKs, so anything using real Gemini or the GCP data layer
+needs them installed into the same runtime directory first. A host rebuilt from the AMI fails with
+`ModuleNotFoundError: No module named 'google'` until this is run:
+
+```
+sudo pip3 install --target /opt/marshal-runtime/vendor --upgrade \
+  google-genai google-cloud-firestore google-cloud-storage google-cloud-bigquery google-cloud-pubsub
+```
+
 For the private GCP VM, upload still uses `gcloud compute scp --tunnel-through-iap`; after upload,
 the same `prepare_carla_host.sh`, Day 1 and Day 2 commands apply unchanged.
 
@@ -319,13 +328,21 @@ recovery around camera cleanup. Keep the serial/process-isolated workflow on bot
 larger AWS scenario is measured.
 
 Offline reasoning cannot judge real pixels because it intentionally reads only fake-camera truth.
-For now the manifest deterministically verifies JPEG presence, telemetry and CARLA light state;
-real image judgement is deferred to Gemini. Next implement physical reverse/brake/full-lock
-maneuvers, then enable Gemini, Pub/Sub and Firestore independently.
+The manifest deterministically verifies JPEG presence, telemetry and CARLA light state; real image
+judgement is Gemini's, which is now wired up along with Pub/Sub, Firestore, Cloud Storage and
+BigQuery. What is still not implemented is the physical reverse, brake and full-lock manoeuvres —
+the car is held stationary for the length of a routine step, so those rest on telemetry.
 
 Do not send a CARLA mission to any named point whose `carla` transform is still null.
 
 ## Status
+
+**Where this stands.** All seven flows run against a real CARLA 0.9.16 server and real Gemini via
+Vertex AI, with records in Firestore, evidence in Cloud Storage and history in BigQuery. Demo scene 1
+runs end to end and repeatably. 193 tests pass. The three sections that matter most for reading the
+current state are **All seven flows on the real server**, **Demo scene 1**, and **Still open against
+the design** — the rest of this section is the trail of what was tried and what turned out to be
+wrong, kept because several of the wrong turns are easy to repeat.
 
 Verified locally: all seven flows on the fake plant with offline stand-ins, plus CARLA connection,
 viewer, spawn-synchronization, calibration, and mission-demo tests.
@@ -456,8 +473,8 @@ server load, and it broke two flows:
 Cameras are now created once and stay subscribed. A capture taken while the loop is running takes
 the **freshest frame already delivered** rather than waiting for a new one — what Day 2's
 `save_latest` does, and why Day 2 never hung. The cost is stated plainly: that frame is up to a few
-ticks old, so it cannot distinguish a lamp that has just changed from one that has not. A step
-needing an exact moment needs a clip, which is still open.
+ticks old, so it cannot distinguish a lamp that has just changed from one that has not. A step that
+needs to show a change over time uses a clip instead — see **Clips** below.
 
 A gate inspection still cannot share a process with a running driving loop:
 
@@ -571,7 +588,7 @@ report   PASS   "All visual and functional checks passed."  -> car parked in yar
 ```
 
 Zero CARLA restarts, and repeatable: two consecutive runs gave the same three PASS verdicts and the
-same slot. Getting there uncovered six faults, none of them cosmetic:
+same slot. Getting there uncovered seven faults, none of them cosmetic:
 
 1. **Gate arrival was never recorded.** It was written by the visual inspector when the inspection
    finished, so a car standing at the gate still reported `location: line_end`, and anything waiting
@@ -587,7 +604,12 @@ same slot. Getting there uncovered six faults, none of them cosmetic:
    earlier run satisfied instantly — the track phase once reported a FAIL whose evidence frame came
    from the previous run, having taken no frame at all. A phase now deletes what it is about to
    produce.
-6. **The gate invented mismatches.** On a car that matched its build sheet exactly, it failed on
+6. **A phase run on its own failed with "unknown VIN".** Each phase can be started alone, and the
+   phases before it are what normally put the car record in the store. Run against a cleared store,
+   the track phase was quietly depending on a record it had not made. Every phase now creates the
+   record it needs and leaves an existing one alone, so a full run still carries the verdicts already
+   reached.
+7. **The gate invented mismatches.** On a car that matched its build sheet exactly, it failed on
    `sunroof: build sheet says not present, car shows present (1.00)` and then
    `rear_badge: build sheet says none, car shows TESLA (1.00)` — on a Lincoln. An options list says
    what a car is built with, not what it may not have, so a mismatch must now name a field the sheet
@@ -635,15 +657,29 @@ Verified on real CARLA frames:
   - reverse lamps are a few pixels at 640×360, so evidence frames are now 1280×720
     (`--evidence-width/height`).
 
-  After those, headlights and reverse are reliably confirmed from pixels, brake lights are
-  ambiguous (the `mkz_2020` rear light bar reads as a running light in some runs) and indicators
-  cannot be confirmed from a still at all, because a blinker is only lit for part of its cycle.
-  `demo_carla_day2.py` records this as `CAMERA_CONFIRMABLE` / `CAMERA_AMBIGUOUS` /
+  After those, headlights and reverse are reliably confirmed from pixels.
+  `demo_carla_day2.py` records what it can judge as `CAMERA_CONFIRMABLE` / `CAMERA_AMBIGUOUS` /
   `CAMERA_NEEDS_CLIP`.
 
-  Narrowing the field of view to 50° to gain detail was a regression: it filled the frame with the
-  car's door instead of its rear, and Gemini correctly reported the rear was not visible. Detail
-  comes from resolution, not field of view. CARLA's camera auto-exposure also hides the brightness
+  **Both of the doubtful cases here were later settled, and neither reason above was right.** Brake
+  lights are not ambiguous: with the camera attached to the car and narrowly framed, the rear bar
+  reads clearly every time — what was wrong was the expectation, which asked for "left, right and
+  the third (centre high) lamp" on a car that has one continuous bar. Indicators are not blocked by
+  the blink phase either: setting each light state on its own and photographing the result showed
+  that `RightBlinker` lights one amber segment while `LeftBlinker` renders **nothing at all**, the
+  frame being identical to lights-off. One side of this asset is simply not drawn. See **Flow 4 on
+  the whole R-12 routine** below.
+
+  Narrowing the field of view to 50° was a regression **for a camera fixed to the map**: the car
+  drives past it, so at some distances the frame filled with a door instead of the rear, and Gemini
+  correctly reported the rear was not visible. That is a framing problem, not an argument against
+  detail — and the conclusion drawn here, that detail comes from resolution rather than field of
+  view, was too broad. Once the camera is **attached to the car** the distance no longer varies, and
+  narrowing to 38° is what made the lamps legible enough to read: it is what showed that the brake
+  expectation described a different car. Resolution alone did not do that at 90°, where a lamp was a
+  handful of pixels in a wide night scene.
+
+  CARLA's camera auto-exposure also hides the brightness
   a lamp adds (measured deltas of 0.3–0.8 on a 0–255 mean, with front `LowBeam` measuring *darker*
   than lights-off), so a brightness heuristic cannot replace the model's judgement.
 
