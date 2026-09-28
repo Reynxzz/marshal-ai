@@ -36,11 +36,13 @@ class Finding(BaseModel):
     type: str = Field(description="scratch, dent, panel_gap, missing_part, paint_run, ...")
     size_cm: float | None = None
     confidence: float = Field(ge=0, le=1)
+    observation: str = Field(default="", description="what you see, one sentence")
 
 
 class ViewAssessment(BaseModel):
     findings: list[Finding]
     clear_confidence: float = Field(ge=0, le=1, description="confidence that zones without findings are defect-free")
+    observation: str = Field(default="", description="what this view shows, one sentence")
 
 
 class Mismatch(BaseModel):
@@ -163,7 +165,8 @@ class VisualInspector:
                     continue
                 kept.append(f)
                 findings.append(ZoneFinding(zone=f.zone, type=f.type, size_cm=f.size_cm,
-                                            confidence=f.confidence, image=img.uri))
+                                            confidence=f.confidence, image=img.uri,
+                                            observation=f.observation or None))
         mismatches = [m for m in (variant.mismatches if variant else []) if m.confidence >= REVIEW_CONFIDENCE]
         clear_confidences = [v.clear_confidence for v in view_results]
         verdict = visual_verdict(kept, mismatches, clear_confidences,
@@ -173,8 +176,14 @@ class VisualInspector:
         log.info("visual: %s -> %s (clear confidences %s, variant %s)", vin, verdict.value,
                  [round(c, 2) for c in clear_confidences],
                  round(variant.confidence, 2) if variant else None)
+        # The words behind a verdict are kept whichever way it went. A PASS with nothing to read is
+        # indistinguishable from a stub that always passes, which is exactly the doubt a second
+        # source is supposed to remove.
+        observations = [f"{name}: {va.observation}" for name, va in zip(view_names, view_results)
+                        if va.observation]
         result = InspectionResult(vin=vin, kind="visual", verdict=verdict, findings=findings,
                                   build_sheet_mismatches=[mismatch_text(m) for m in mismatches],
+                                  observations=observations,
                                   created_at=self.rt.clock())
         self.rt.store.put(result)
         if verdict == Verdict.REVIEW:

@@ -36,7 +36,7 @@ from marshal_ai.records import (BuildSheet, Car, CarReport, CarState, Inspection
 from marshal_ai.runtime import build_runtime
 
 SUPERVISOR = "supervisor-ana"
-PHASES = ("release", "gate", "track", "report")
+PHASES = ("release", "gate", "track", "report", "ship")
 # The car is spawned in this colour and the build sheet says the same, because scene 1 is the
 # clean-report narrative. Flow 3 does catch a mismatch: with the sheet set to black it reported
 # "colour: build sheet says black, car shows blue (1.00)" and failed the car, which is scene 2.
@@ -361,6 +361,31 @@ async def phase_report(rt, app, args) -> dict:
         respawn_cleanup(rt, args.vin)
 
 
+async def phase_ship(rt, app, args) -> dict:
+    """The end of the journey. A car reaches a truck only with a report marked PASS.
+
+    The design's journey runs line end to shipped, and the scene used to stop at the yard slot. The
+    last step is the one that carries the rule worth showing: the gate on shipping is the report, so
+    a car nobody passed cannot leave the plant however much of the yard it has crossed.
+    """
+    car = rt.store.get(Car, args.vin)
+    report = rt.store.get(CarReport, args.vin)
+    if car is None or report is None:
+        raise RuntimeError(f"{args.vin} has no car or report to ship; run the earlier phases first")
+
+    truck = car.build_sheet.truck_id or args.truck
+    rt.plant.trucks.setdefault(truck, {})
+    loaded = app.yard.ship(truck)
+
+    shipped = rt.store.get(Car, args.vin)
+    emit({"type": "scene1.shipped", "truck": truck, "loaded": loaded,
+          "vin": args.vin, "state": shipped.state.value,
+          "report_verdict": report.verdict.value,
+          "why": "a report marked PASS is what allows a car onto a truck"})
+    return {"truck": truck, "loaded": loaded, "state": shipped.state.value,
+            "report_verdict": report.verdict.value}
+
+
 def respawn_cleanup(rt, vin: str) -> None:
     for actor in rt.driving.world.get_actors().filter("vehicle.*"):
         if actor.attributes.get("role_name") == vin:
@@ -371,7 +396,7 @@ def respawn_cleanup(rt, vin: str) -> None:
     rt.driving.vehicles.pop(vin, None)
 
 
-RUNNERS = {"release": phase_release, "gate": phase_gate,
+RUNNERS = {"release": phase_release, "gate": phase_gate, "ship": phase_ship,
            "track": phase_track, "report": phase_report}
 
 

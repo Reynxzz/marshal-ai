@@ -47,7 +47,7 @@ fi
 python3 scripts/ensure_carla_map.py --map Town05 --wait-seconds 600
 
 before=$(systemctl show carla -p NRestarts --value 2>/dev/null || echo 0)
-for phase in release gate track report; do
+for phase in release gate track report ship; do
   echo "=== phase: $phase ==="
   # Each phase is a fresh process on purpose; do not merge these into one.
   if ! python3 scripts/demo_carla_scene1.py --phase "$phase" --vin "$VIN"; then

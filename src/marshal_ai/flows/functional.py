@@ -137,6 +137,8 @@ class FunctionalChecker:
                      step.step, step.name)
             return ChecklistItem(step=step.step, name=step.name, telemetry_ok=telemetry_ok,
                                  camera_ok=None, camera_confidence=None, clip_uri=clip.uri,
+                                 observation="the simulation does not perform this step, so no "
+                                             "camera can confirm it",
                                  camera_applicable=False)
 
         if not step.still_confirmable and clip.truth is None:
@@ -148,7 +150,8 @@ class FunctionalChecker:
                 log.info("functional: step %s (%s) needs a clip and none was held",
                          step.step, step.name)
                 return ChecklistItem(step=step.step, name=step.name, telemetry_ok=telemetry_ok,
-                                     camera_ok=None, camera_confidence=None, clip_uri=clip.uri)
+                                     camera_ok=None, camera_confidence=None, clip_uri=clip.uri,
+                                     observation="no clip was held for this step")
             prompt = (f"Step {step.step}: {step.command}.\n"
                       f"Expected across these frames, which are in order: "
                       f"{step.expected_on_camera}.\n"
@@ -157,7 +160,7 @@ class FunctionalChecker:
             camera_ok = seen.seen if seen.confidence >= CAMERA_MIN_CONFIDENCE else None
             return ChecklistItem(step=step.step, name=step.name, telemetry_ok=telemetry_ok,
                                  camera_ok=camera_ok, camera_confidence=seen.confidence,
-                                 clip_uri=frames[-1].uri)
+                                 observation=seen.observation, clip_uri=frames[-1].uri)
 
         reference = self.references.get(step.name)
         if reference is not None:
@@ -183,7 +186,7 @@ class FunctionalChecker:
             self.references[step.name] = clip
         return ChecklistItem(step=step.step, name=step.name, telemetry_ok=telemetry_ok,
                              camera_ok=camera_ok, camera_confidence=seen.confidence,
-                             clip_uri=clip.uri)
+                             observation=seen.observation, clip_uri=clip.uri)
 
     async def _record(self, vin: str, items: list[ChecklistItem]) -> InspectionResult:
         previous = self.rt.store.get(InspectionResult, f"{vin}:functional")
