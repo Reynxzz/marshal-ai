@@ -80,3 +80,19 @@ def test_plan_completion_adds_missed_defects_and_orders_safety_first():
                 ReworkStepDraft(bay="mechanical", defect_type="brakes", reason="brake test")]
     plan = complete_plan(draft, required)
     assert [s.bay for s in plan] == ["mechanical", "paint"]
+
+
+def test_dispatch_refuses_a_rework_with_no_bays(app):
+    """merge_verdict returns REVIEW when a result is missing, which sent a car with no failed
+    checks down the rework path and crashed on tickets[0]."""
+    import asyncio
+
+    import pytest
+
+    from marshal_ai.flows.report import _Plan
+
+    app.router.plans["VIN-EMPTY"] = _Plan(tickets=[], visual_views=None, check_variant=False,
+                                          functional_steps=[])
+
+    with pytest.raises(ValueError, match="no bays to visit"):
+        asyncio.run(app.router.dispatch("VIN-EMPTY"))

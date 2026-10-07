@@ -79,6 +79,7 @@ class ZoneFinding(BaseModel):
     size_cm: float | None = None
     confidence: float
     image: str | None = None
+    observation: str | None = None                     # what the inspector saw, in its own words
 
 
 class ChecklistItem(BaseModel):
@@ -87,10 +88,21 @@ class ChecklistItem(BaseModel):
     telemetry_ok: bool | None = None
     camera_ok: bool | None = None
     camera_confidence: float | None = None
+    # What the camera judge actually said, in its own words. Gemini has always written this - the
+    # schema asks for "what the clip shows, one sentence" - and it used to be dropped on the floor,
+    # leaving a bare true/false behind. A verdict nobody can read the reasoning for is a verdict
+    # nobody can check, and it is the reasoning that makes a second source worth having.
+    observation: str | None = None
     clip_uri: str | None = None
+    # False when the simulation does not perform this step, so no camera could confirm it and the
+    # step rests on telemetry alone. Kept on the record because a report that says PASS should be
+    # able to say how much of it two sources agreed on.
+    camera_applicable: bool = True
 
     @property
     def passed(self) -> bool:
+        if not self.camera_applicable:
+            return bool(self.telemetry_ok)
         return bool(self.telemetry_ok) and bool(self.camera_ok)
 
 
@@ -101,6 +113,9 @@ class InspectionResult(BaseModel):
     findings: list[ZoneFinding] = Field(default_factory=list)
     build_sheet_mismatches: list[str] = Field(default_factory=list)
     checklist: list[ChecklistItem] = Field(default_factory=list)
+    # What the inspector saw, per view, in its own words - kept for a pass as well as a failure. A
+    # PASS with nothing to read is indistinguishable from a stub that always passes.
+    observations: list[str] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=now)
 
 

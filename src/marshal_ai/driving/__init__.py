@@ -9,9 +9,6 @@ def make_driving_system(kind: str, plant_map, **kwargs) -> DrivingSystem:
     if kind == "fake":
         from marshal_ai.driving.fake import FakeDrivingSystem
         return FakeDrivingSystem(plant_map, **kwargs)
-    if kind == "metadrive":
-        from marshal_ai.driving.metadrive_backend import MetaDriveDrivingSystem
-        return MetaDriveDrivingSystem(plant_map, **kwargs)
     if kind == "carla":
         from marshal_ai.driving.carla_backend import CarlaDrivingSystem
         return CarlaDrivingSystem(plant_map, **kwargs)

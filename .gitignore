@@ -5,10 +5,12 @@ __pycache__/
 .env
 *.egg-info/
 dist/
-runs/
-*.snet
+PR_DESCRIPTION.md
 
 # service account keys: never commit
 sa-*.json
 *-sa.json
+*.json.key
+service-account*.json
 credentials/
+.adk/

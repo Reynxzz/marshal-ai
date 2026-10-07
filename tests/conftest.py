@@ -1,5 +1,3 @@
-import os
-
 import pytest
 
 from marshal_ai.app import MarshalApp, set_app
@@ -7,9 +5,7 @@ from marshal_ai.config import Settings
 from marshal_ai.demo import seed_demo
 from marshal_ai.runtime import build_runtime, set_runtime
 
-# MARSHAL_TEST_DRIVING=metadrive runs the flow tests on MetaDrive instead of the fake plant
-DRIVING = os.getenv("MARSHAL_TEST_DRIVING", "fake")
-OFFLINE = Settings(bus="memory", store="memory", driving=DRIVING, llm="offline")
+OFFLINE = Settings(bus="memory", store="memory", driving="fake", llm="offline")
 
 
 @pytest.fixture

@@ -18,35 +18,31 @@ zones:
   yard:              {description: Outbound yard, slots grouped by truck}
 
 points:
-  line_end:            {zone: line_end,         x: 0,   y: 0,   carla: null}
-  inspection_gate:     {zone: inspection_gate,  x: 40,  y: 0,   carla: null}
-  test_track:          {zone: test_track,       x: 90,  y: 0,   carla: null}
-  report_point:        {zone: test_track,       x: 130, y: 0,   carla: null}
-  finishing_corner.p1: {zone: finishing_corner, x: 145, y: 3,   carla: null}
-  finishing_corner.p2: {zone: finishing_corner, x: 153, y: 9,   carla: null}
-  finishing_corner.p3: {zone: finishing_corner, x: 158, y: 18,  carla: null}
-  finishing:           {zone: finishing,        x: 160, y: 40,  carla: null}
-  lane_c:              {zone: finishing,        x: 130, y: 40,  carla: null}
-  buffer_zone_b:       {zone: buffer_zone_b,    x: 20,  y: 40,  carla: null}
-  rework.paint:        {zone: rework,           x: 100, y: -40, carla: null}
-  rework.body:         {zone: rework,           x: 115, y: -40, carla: null}
-  rework.electrical:   {zone: rework,           x: 130, y: -40, carla: null}
-  rework.mechanical:   {zone: rework,           x: 145, y: -40, carla: null}
-  production_control:  {zone: rework,           x: 160, y: -40, carla: null}
-  yard.entry:          {zone: yard,             x: 200, y: 40,  carla: null}
-  yard.a1:             {zone: yard,             x: 206, y: 40,  carla: null}   # aisle
-  yard.a2:             {zone: yard,             x: 213, y: 40,  carla: null}   # aisle
-  yard.a3:             {zone: yard,             x: 220, y: 40,  carla: null}   # aisle
-  yard.a4:             {zone: yard,             x: 227, y: 40,  carla: null}   # aisle
-  yard.Y1:             {zone: yard,             x: 206, y: 33,  carla: null}
-  yard.Y2:             {zone: yard,             x: 206, y: 47,  carla: null}
-  yard.Y3:             {zone: yard,             x: 213, y: 33,  carla: null}
-  yard.Y4:             {zone: yard,             x: 213, y: 47,  carla: null}
-  yard.Y5:             {zone: yard,             x: 220, y: 33,  carla: null}
-  yard.Y6:             {zone: yard,             x: 220, y: 47,  carla: null}
-  yard.Y7:             {zone: yard,             x: 227, y: 33,  carla: null}
-  yard.Y8:             {zone: yard,             x: 227, y: 47,  carla: null}
-  loading_bay:         {zone: yard,             x: 240, y: 40,  carla: null}
+  line_end:            {zone: line_end,         x: 0,   y: 0,   carla: {x: 207.27, y: -13.93, z: 0.30, yaw: -90.7}}
+  inspection_gate:     {zone: inspection_gate,  x: 40,  y: 0,   carla: {x: 206.97, y: -33.93, z: 0.50, yaw: -90.7}}
+  test_track:          {zone: test_track,       x: 90,  y: 0,   carla: {x: 206.74, y: -53.93, z: 0.50, yaw: -90.7}}
+  report_point:        {zone: test_track,       x: 130, y: 0,   carla: {x: 206.51, y: -73.93, z: 0.50, yaw: -90.7}}
+  finishing_corner.p1: {zone: finishing_corner, x: 145, y: 3,   carla: {x: 204.93, y: -114.62, z: 0.50, yaw: -98.9}}
+  finishing_corner.p2: {zone: finishing_corner, x: 153, y: 9,   carla: {x: 199.64, y: -134.95, z: 0.50, yaw: -110.3}}
+  finishing_corner.p3: {zone: finishing_corner, x: 158, y: 18,  carla: {x: 190.45, y: -153.83, z: 0.50, yaw: -121.6}}
+  finishing:           {zone: finishing,        x: 160, y: 40,  carla: {x: 177.72, y: -170.54, z: 0.50, yaw: -133.0}}
+  lane_c:              {zone: finishing,        x: 130, y: 40,  carla: {x: 203.01, y: -73.89, z: 0.50, yaw: -90.7}}
+  buffer_zone_b:       {zone: buffer_zone_b,    x: 20,  y: 40,  carla: {x: 207.07, y: -25.93, z: 0.50, yaw: -90.7}}
+  rework.paint:        {zone: rework,           x: 100, y: -40, carla: {x: 203.01, y: -73.89, z: 0.50, yaw: -90.7}}
+  rework.body:         {zone: rework,           x: 115, y: -40, carla: {x: 210.01, y: -73.97, z: 0.50, yaw: -90.7}}
+  rework.electrical:   {zone: rework,           x: 130, y: -40, carla: {x: 202.65, y: -101.93, z: 0.50, yaw: -92.1}}
+  rework.mechanical:   {zone: rework,           x: 145, y: -40, carla: {x: 209.64, y: -102.19, z: 0.50, yaw: -92.1}}
+  production_control:  {zone: rework,           x: 160, y: -40, carla: {x: 197.69, y: -129.89, z: 0.50, yaw: -108.0}}
+  yard.entry:          {zone: yard,             x: 200, y: 40,  carla: {x: 204.34, y: -132.05, z: 0.50, yaw: -108.0}}
+  yard.Y1:             {zone: yard,             x: 210, y: 30,  carla: {x: 206.27, y: -93.92, z: 0.50, yaw: -90.7}}
+  yard.Y2:             {zone: yard,             x: 210, y: 36,  carla: {x: 185.26, y: -155.42, z: 0.50, yaw: -123.9}}
+  yard.Y3:             {zone: yard,             x: 210, y: 42,  carla: {x: 191.07, y: -159.32, z: 0.50, yaw: -123.9}}
+  yard.Y4:             {zone: yard,             x: 210, y: 48,  carla: {x: 200.76, y: -118.08, z: 0.50, yaw: -101.2}}
+  yard.Y5:             {zone: yard,             x: 220, y: 30,  carla: {x: 207.63, y: -119.44, z: 0.50, yaw: -101.2}}
+  yard.Y6:             {zone: yard,             x: 220, y: 36,  carla: {x: 194.07, y: -139.39, z: 0.50, yaw: -113.7}}
+  yard.Y7:             {zone: yard,             x: 220, y: 42,  carla: {x: 200.48, y: -142.20, z: 0.50, yaw: -113.7}}
+  yard.Y8:             {zone: yard,             x: 220, y: 48,  carla: {x: 167.87, y: -175.25, z: 0.50, yaw: -138.6}}
+  loading_bay:         {zone: yard,             x: 240, y: 40,  carla: {x: 172.49, y: -180.50, z: 0.50, yaw: -138.6}}
 
 # Drivable segments, both directions unless one_way is set.
 # Buffer zone B only connects to line end: untested cars cannot bypass the gate.
@@ -68,17 +64,12 @@ segments:
   - [rework.mechanical, production_control]
   - {from: rework.paint, to: inspection_gate, one_way: true}   # repaired cars are re-inspected
   - [finishing, yard.entry]
-  # the yard: an aisle to the loading bay, slots either side of it
-  - [yard.entry, yard.a1]
-  - [yard.a1, yard.a2]
-  - [yard.a2, yard.a3]
-  - [yard.a3, yard.a4]
-  - [yard.a4, loading_bay]
-  - [yard.a1, yard.Y1]
-  - [yard.a1, yard.Y2]
-  - [yard.a2, yard.Y3]
-  - [yard.a2, yard.Y4]
-  - [yard.a3, yard.Y5]
-  - [yard.a3, yard.Y6]
-  - [yard.a4, yard.Y7]
-  - [yard.a4, yard.Y8]
+  - [yard.entry, yard.Y1]
+  - [yard.entry, yard.Y2]
+  - [yard.entry, yard.Y3]
+  - [yard.entry, yard.Y4]
+  - [yard.entry, yard.Y5]
+  - [yard.entry, yard.Y6]
+  - [yard.entry, yard.Y7]
+  - [yard.entry, yard.Y8]
+  - [yard.entry, loading_bay]

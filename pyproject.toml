@@ -16,18 +16,12 @@ dependencies = [
 gcp = [
     "google-cloud-pubsub>=2.21",
     "google-cloud-firestore>=2.16",
+    "google-cloud-storage>=2.14",
+    "google-cloud-bigquery>=3.17",
 ]
 # The CARLA client matches the server version on the GPU VM; install it there only.
 carla = [
-    "carla==0.9.15",
-]
-# Laptop simulation: MetaDrive plant backend and Scenic test lab (MARSHAL_DRIVING=metadrive)
-metadrive = [
-    "metadrive-simulator==0.4.3",
-    "scenic==3.1.1",
-    "eclipse-sumo>=1.20",
-    "sumolib>=1.20",
-    "shapely>=2.0",
+    "carla==0.9.16",
 ]
 dev = [
     "pytest>=8.0",

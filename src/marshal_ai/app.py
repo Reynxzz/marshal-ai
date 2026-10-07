@@ -76,8 +76,11 @@ class MarshalApp:
         car = self.rt.store.get(Car, event.vin)
         if car is not None and event.location == "inspection_gate" and car.state == CarState.INSPECTION_GATE:
             views, check_variant = self.router.views_for(event.vin)
+            # Inline on purpose: see VisualInspector.inspect. Deferring this so the driving
+            # loop could keep ticking only moved the capture into a thread that ran alongside
+            # the loop, which segfaults the server.
             await self.rt.bus.publish(Topic.GATE_IMAGES, {"vin": event.vin, "views": views,
-                                                          "check_variant": check_variant})
+                                                         "check_variant": check_variant})
         await self.yard.on_mission_done(event)
         await self.router.on_mission_done(event)
         await self.functional.on_mission_done(event)
@@ -107,7 +110,7 @@ class MarshalApp:
         self.assistance.check_escalations()
 
     async def run_for(self, seconds: float, dt: float = 0.5) -> None:
-        """Advance a simulated plant (fake or MetaDrive driving system) by simulated seconds."""
+        """Advance a simulated plant (fake driving system only) by simulated seconds."""
         fake = self.rt.driving
         elapsed, since_tick = 0.0, 1.0
         while elapsed < seconds:

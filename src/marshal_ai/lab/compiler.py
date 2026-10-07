@@ -22,6 +22,7 @@ BLUEPRINTS = {
     "forklift": "vehicle.carlamotors.carlacola",
     "parked_car": "vehicle.audi.a2",
     "pallet_stack": "static.prop.shoppingtrolley",
+    "box": "static.prop.box01",                # an object in the lane, as in a stuck-car case
     "car": "vehicle.tesla.model3",
 }
 
@@ -40,6 +41,7 @@ ROUTE = $route
 BLUEPRINTS = $blueprints
 SUN = {"noon": 70.0, "dusk": 4.0, "night": -30.0}
 ROADSIDE, WORKER_LAT, CROSSED_LAT = 3.5, 3.0, -5.0
+LAB_ROLE = "marshal-lab"
 
 
 def transform(name, forward=0.0, right=0.0):
@@ -67,7 +69,9 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--host", default="localhost")
     ap.add_argument("--port", type=int, default=2000)
-    ap.add_argument("--timeout", type=float, default=120.0)
+    ap.add_argument("--timeout", type=float, default=200.0,
+                    help="simulated seconds before the run is abandoned; the "
+                         "line_end->finishing route alone takes about 76 s")
     args = ap.parse_args()
 
     client = carla.Client(args.host, args.port)
@@ -80,9 +84,30 @@ def main():
     lib = world.get_blueprint_library()
     spawned, events = [], []
 
+    # A run killed by a timeout cannot reach its own cleanup, and a leaked actor
+    # blocks the same spawn point for every later run. Every actor this script
+    # creates is tagged, so stale ones can be cleared first.
+    stale = [a for a in world.get_actors()
+             if a.attributes.get("role_name") == LAB_ROLE]
+    for a in stale:
+        a.destroy()
+    if stale:
+        events.append(f"cleared {len(stale)} stale actor(s) from a previous run")
+        world.tick()
+
+    def blueprint(name):
+        bp = lib.find(name)
+        if bp.has_attribute("role_name"):
+            bp.set_attribute("role_name", LAB_ROLE)
+        return bp
+
     try:
-        ego = world.spawn_actor(lib.find("vehicle.lincoln.mkz_2020"), transform(ROUTE[0]))
+        ego = world.spawn_actor(blueprint("vehicle.lincoln.mkz_2020"), transform(ROUTE[0]))
         spawned.append(ego)
+        # A freshly spawned actor reports the origin until the server publishes one
+        # frame, and BehaviorAgent reads the transform in its constructor. Without
+        # this tick it plans from (0,0,0) and drives off the lane immediately.
+        world.tick()
         agent = BehaviorAgent(ego, behavior="cautious")
         agent._behavior.max_speed = SPEC["ego"]["speed_kmh"]
         targets = list(ROUTE[1:])
@@ -93,22 +118,43 @@ def main():
         col.listen(lambda e: contact.append(e.other_actor.type_id))
 
         occluders, movers = {}, []
+        occluder_actors = {}
         for i, a in enumerate(SPEC["actors"]):
             if a.get("position") and a["type"] in ("forklift", "parked_car", "pallet_stack"):
                 occluders[a["type"]] = a["position"]
         for i, a in enumerate(SPEC["actors"]):
             start = a.get("start") or ""
+            candidates = []
             if start.startswith("behind:"):
-                tf = transform(occluders[start.split(":", 1)[1]], forward=1.5, right=WORKER_LAT)
+                kind = start.split(":", 1)[1]
+                at = occluders[kind]
+                # "Behind" must clear the occluder's own body, or the spawn lands inside
+                # it and fails. Step past its half-length, then widen if still blocked.
+                hidden = occluder_actors.get(kind)
+                half_len = hidden.bounding_box.extent.x if hidden is not None else 3.0
+                base = half_len + 1.8
+                candidates = [transform(at, forward=base + d, right=WORKER_LAT + r)
+                              for d, r in ((0.0, 0.0), (1.5, 0.0), (0.0, 1.2), (3.0, 0.0), (1.5, 1.2))]
             elif a["type"] == "car" and a.get("state") == "braking":
                 gap = (a.get("trigger") or {}).get("ego_distance_m", 10.0)
-                tf = transform(ROUTE[0], forward=gap + 4.8)
+                candidates = [transform(ROUTE[0], forward=gap + 4.8)]
             else:
-                lat = WORKER_LAT if a["type"] == "worker" else ROADSIDE
-                tf = transform(a.get("position") or start, right=lat)
-            actor = world.try_spawn_actor(lib.find(BLUEPRINTS[a["type"]]), tf)
+                lat = WORKER_LAT if a["type"] == "worker" else 0.0 if a["type"] == "box" else ROADSIDE
+                where = a.get("position") or start
+                candidates = [transform(where, right=lat),
+                              transform(where, right=lat, forward=4.0),
+                              transform(where, right=lat + 1.5)]
+            actor = tf = None
+            for cand in candidates:
+                actor = world.try_spawn_actor(blueprint(BLUEPRINTS[a["type"]]), cand)
+                if actor is not None:
+                    tf = cand
+                    break
             if actor is None:
-                raise SystemExit(f"could not spawn actor {i} ({a['type']})")
+                raise SystemExit(f"could not spawn actor {i} ({a['type']}) at any of "
+                                 f"{len(candidates)} candidate placements")
+            if a["type"] in ("forklift", "parked_car", "pallet_stack"):
+                occluder_actors[a["type"]] = actor
             spawned.append(actor)
             moving = a.get("state") in ("moving", "crossing") or (a["type"] == "worker" and (a.get("trigger") or start.startswith("behind:")))
             movers.append({"i": i, "spec": a, "actor": actor, "moving": moving, "triggered": False,

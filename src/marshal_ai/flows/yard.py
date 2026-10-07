@@ -67,15 +67,40 @@ class YardTraffic:
     def gate_queue(self) -> list[Car]:
         return cars_in(self.rt, CarState.INSPECTION_GATE)
 
+    def line_end_xy(self) -> tuple[float, float]:
+        """The line end in the same frame as Status.x/y.
+
+        The plant map holds abstract coordinates (line_end is 0,0) while a real backend reports
+        world coordinates (line_end is 207.27,-13.93 on Town05). Comparing the two made the
+        spacing rule compute 207.7 m for a car standing still at the line end, so it always read
+        "clear" and cars were released 16 m apart on CARLA. The backend owns its frame.
+        """
+        reference = getattr(self.rt.driving, "reference_xy", None)
+        if reference is not None:
+            return reference("line_end")
+        point = self.rt.map.points["line_end"]
+        return float(point.x), float(point.y)
+
     def first_segment_clear(self) -> tuple[bool, str]:
-        start = self.rt.map.points["line_end"]
+        start_x, start_y = self.line_end_xy()
         now = self.rt.clock()
+        live = getattr(self.rt.driving, "position_xy", None)
         for car in self.gate_queue():
-            status = self.rt.missions.last_status.get(car.vin)
-            if status is not None and status.location != "inspection_gate":
-                if math.hypot(status.x - start.x, status.y - start.y) < MIN_SPACING_M:
+            if car.location == "inspection_gate":
+                continue                      # it has left the first segment
+            # Ask the driving system where the car is. Relying on the status stream meant that
+            # before the first Status arrived the rule fell back to wall-clock time, which has
+            # no fixed relationship to simulated time: measured at 10.3x real time on this
+            # host, so an 18 second wall-clock wait is about 180 simulated seconds. Wall clock
+            # cannot stand in for distance travelled in either direction.
+            here = live(car.vin) if live is not None else None
+            if here is None:
+                status = self.rt.missions.last_status.get(car.vin)
+                here = (status.x, status.y) if status is not None else None
+            if here is not None:
+                if math.hypot(here[0] - start_x, here[1] - start_y) < MIN_SPACING_M:
                     return False, f"{car.vin} is within {MIN_SPACING_M:.0f} m of line end"
-            elif status is None and car.released_at is not None:
+            elif car.released_at is not None:
                 min_gap_s = MIN_SPACING_M / (GATE_SPEED_KMH / 3.6)
                 if (now - car.released_at).total_seconds() < min_gap_s:
                     return False, f"{car.vin} released less than {min_gap_s:.0f} s ago"
@@ -160,6 +185,13 @@ class YardTraffic:
             update_car(self.rt, event.vin, state=CarState.YARD, location=event.location,
                        mission_id=None, yard_at=car.yard_at or self.rt.clock())
         elif event.location == "buffer_zone_b":
+            update_car(self.rt, event.vin, location=event.location, mission_id=None)
+        elif event.location == "inspection_gate":
+            # Arrival at the gate was previously recorded by the visual inspector, when the
+            # inspection finished. Until then a car standing at the gate still reported
+            # location "line_end", which is simply not where it is - and anything waiting for
+            # the arrival rather than for the verdict waited forever. Where the car is and what
+            # has been decided about it are different facts, so the arrival is recorded here.
             update_car(self.rt, event.vin, location=event.location, mission_id=None)
 
     def ship(self, truck_id: str) -> list[str]:

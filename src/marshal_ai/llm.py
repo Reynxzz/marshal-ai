@@ -9,6 +9,7 @@ tasks to one and the rest to the other, e.g. fake perception with real Gemini re
 from __future__ import annotations
 
 import json
+import threading
 import logging
 from dataclasses import dataclass, field
 from typing import Any, Callable, Protocol, TypeVar
@@ -57,14 +58,35 @@ class GeminiLLM:
         self.model = model
         self.temperature = temperature
         self.seed = seed
-        self._client = None
+        self._local = threading.local()
 
     @property
     def client(self):
-        if self._client is None:
+        """One client per thread.
+
+        `ask` runs each call with asyncio.to_thread, and flow 3 issues five at once (four views
+        plus the variant check). Sharing a single google-genai client across those threads ended
+        with "Cannot send a request, as the client has been closed" - its underlying httpx client
+        is not safe to share that way. A client per thread costs little and removes the race.
+        """
+        client = getattr(self._local, "client", None)
+        if client is None:
             from google import genai
-            self._client = genai.Client()
-        return self._client
+            client = self._local.client = genai.Client()
+        return client
+
+    # One call at a time. Flow 3 asks five questions at once - four views and the variant check -
+    # each on its own thread, and google-genai is not safe to drive that way: runs failed
+    # intermittently with pydantic rejecting a JSON schema as a model ("5 validation errors for
+    # BaseModel ... Extra inputs are not permitted", naming ViewAssessment in one run and
+    # VariantAssessment in another), which is a schema belonging to one call being handled as
+    # another's. A per-thread client fixed a separate fault - "Cannot send a request, as the
+    # client has been closed" - but not this one.
+    #
+    # The calls stay concurrent from the flow's point of view; they queue here. The gate spends
+    # about the sum of them rather than the longest, which the phased demo can afford because the
+    # car is stopped at the gate. Overlapping them again needs an SDK that supports it.
+    _call_lock = threading.Lock()
 
     def generate(self, task, prompt, schema=None, media=None, system=""):
         from google.genai import types
@@ -87,9 +109,12 @@ class GeminiLLM:
             response_schema=schema,
             system_instruction=system or None,
         )
-        response = self.client.models.generate_content(
-            model=self.model, contents=[types.Content(role="user", parts=parts)], config=config,
-        )
+        with GeminiLLM._call_lock:
+            response = self.client.models.generate_content(
+                model=self.model,
+                contents=[types.Content(role="user", parts=parts)],
+                config=config,
+            )
         if schema is not None:
             if response.parsed is None:
                 raise LLMError(f"{task}: response did not match schema: {response.text[:300]}")

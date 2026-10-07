@@ -229,6 +229,12 @@ class ReportRouter:
     async def dispatch(self, vin: str) -> str | None:
         """Send the car to its next bay, or hand it to Yard Traffic when the bay is full."""
         plan = self.plans[vin]
+        if not plan.tickets:
+            # A confirmed rework with no steps means the report was not actually a failure:
+            # merge_verdict returns REVIEW when a result is missing, which sent a car with no
+            # failed checks down this path and crashed on tickets[0].
+            raise ValueError(f"{vin}: rework was confirmed with no bays to visit; "
+                             "the report had no failed checks")
         ticket = plan.tickets[plan.next_index]
         if ticket.bay in self.rt.plant.bay_capacity and not self.rt.plant.bay_free(ticket.bay):
             if vin not in self.waiting_for_bay:

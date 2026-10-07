@@ -7,6 +7,8 @@ Every resolved case is sent to the test lab.
 
 from __future__ import annotations
 
+import logging
+
 from datetime import timedelta
 from typing import TYPE_CHECKING, Literal
 
@@ -14,7 +16,7 @@ from pydantic import BaseModel, Field
 
 from marshal_ai.driving import AssistChoose, AssistRequest
 from marshal_ai.events import Topic
-from marshal_ai.flows.base import ask_or, log
+from marshal_ai.flows.base import ask_or
 from marshal_ai.llm import Media
 from marshal_ai.records import AssistanceCase, Car
 
@@ -22,6 +24,9 @@ if TYPE_CHECKING:
     from marshal_ai.app import MarshalApp
 
 ESCALATE_AFTER = timedelta(seconds=60)
+
+
+log = logging.getLogger(__name__)
 
 
 class RankedOption(BaseModel):
@@ -84,11 +89,24 @@ class AssistanceDesk:
         self.rt = app.rt
 
     def clip(self, request: AssistRequest) -> list[Media]:
+        # A real backend can hand over the frame it captured when the car stopped. Without
+        # bytes the media is only a gs:// URI, and Vertex AI cannot read a path that does not
+        # exist - the 403 that made flow 3 unusable on the fake plant.
+        supplier = getattr(self.rt.driving, "assist_media", None)
+        if supplier is not None:
+            media = supplier(request.case_id)
+            if media:
+                return list(media) if isinstance(media, list) else [media]
         truth = self.rt.world.scenes.get(request.case_id) if self.rt.world else None
-        if request.clip_uri is None and truth is None:
-            return []
-        return [Media(mime="video/mp4", uri=request.clip_uri, label="10 s clip before the stop",
-                      truth=truth)]
+        if truth is not None:                   # the fake plant describes the scene in words
+            return [Media(mime="video/mp4", uri=request.clip_uri,
+                          label="10 s clip before the stop", truth=truth)]
+        # No bytes and nothing describing the scene. The URI on the request is the name the clip
+        # would have had, not a file that exists, and sending it as readable media got a 403
+        # from Vertex AI. The desk decides from the text of the request instead.
+        if request.clip_uri is not None:
+            log.info("assist %s: deciding without a clip; none was captured", request.case_id)
+        return []
 
     async def on_request(self, request: AssistRequest) -> AssistanceCase:
         car = self.rt.store.get(Car, request.vin)

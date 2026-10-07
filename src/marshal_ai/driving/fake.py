@@ -55,6 +55,16 @@ class FakeDrivingSystem:
         p = self.map.points[at]
         self.cars[vin] = _Car(vin=vin, x=p.x, y=p.y, location=at)
 
+    def position_xy(self, vin: str) -> tuple[float, float] | None:
+        """Where a car is right now, in the same frame as reference_xy."""
+        car = self.cars.get(vin)
+        return (float(car.x), float(car.y)) if car else None
+
+    def reference_xy(self, point: str) -> tuple[float, float]:
+        """Where a named point is, in the same frame as Status.x/y."""
+        p = self.map.points[point]
+        return float(p.x), float(p.y)
+
     async def raise_assist(self, vin: str, case_id: str, reason: str, options: list[str],
                            clip_uri: str | None = None) -> None:
         """Make a car stop and ask for help, as the real driving system would."""
