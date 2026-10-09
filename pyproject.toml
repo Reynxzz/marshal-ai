@@ -10,9 +10,19 @@ dependencies = [
     "pyyaml>=6.0",
     "python-dotenv>=1.0",
     "truststore>=0.9",
+    # Backend data layer (docs-be/ERD_AND_DATA_MODELING.md)
+    "sqlmodel>=0.0.22",
+    "alembic>=1.13",
+    "python-ulid>=3.0",
+    "aiosqlite>=0.20",
+    "greenlet>=3.0",
 ]
 
 [project.optional-dependencies]
+# PostgreSQL driver for staging/production (`postgresql+asyncpg://` URLs).
+postgres = [
+    "asyncpg>=0.29",
+]
 gcp = [
     "google-cloud-pubsub>=2.21",
     "google-cloud-firestore>=2.16",
@@ -33,7 +43,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/marshal_ai"]
+packages = ["src/marshal_ai", "src/marshal_api"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
