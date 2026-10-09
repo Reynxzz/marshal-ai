@@ -138,6 +138,29 @@ The replay emits one status per simulated second, advances progress at each name
 `mission.done` at `yard.Y1`, restores asynchronous world mode, and removes its vehicle. The browser
 viewer is fixed over the start lane, so the vehicle is visible as it departs.
 
+## Recording and replaying a run
+
+The viewer cannot show a run: every `run_carla_*.sh` stops it for the run, and it is a fixed
+camera over one road. Instead each run script records the run on the server (`MARSHAL_RECORD=0`
+to skip), and a recording is filmed afterwards into an MP4. On the host:
+
+```bash
+sudo pip3 install --target /opt/marshal-runtime/vendor imageio-ffmpeg   # once: the encoder
+
+bash scripts/run_carla_scene1.sh                    # records /var/lib/carla/recordings/scene1-<time>.log
+bash scripts/run_carla_replay.sh                    # films the latest recording
+bash scripts/run_carla_replay.sh yard-20261009-135434 --follow VIN-Y2 --speed 2
+```
+
+The video lands in `/tmp/marshal-replays/<recording>.mp4`; copy it off with `scp`. It opens on a
+still of all the cars, then each drive is filmed by a still camera beside the road and the still
+stretches are cut. Options: `--follow VIN`, `--speed N` (default 4), `--keep-idle`,
+`--opening-s 0`, `--side left|right`, `--width/--height`.
+
+Two things in CARLA 0.9.16 shape this, and both segfault the server: moving a camera during a
+replay, and a camera west of the yard lane looking west. The replay therefore gives each shot its own
+camera and films from the east side by default. See [PROGRESS.md](PROGRESS.md).
+
 ## Real Gemini via Vertex AI
 
 `GeminiLLM` uses `google-genai` with no explicit credentials, so it reads the environment. With a
@@ -339,7 +362,8 @@ Do not send a CARLA mission to any named point whose `carla` transform is still 
 
 **Where this stands.** All seven flows run against a real CARLA 0.9.16 server and real Gemini via
 Vertex AI, with records in Firestore, evidence in Cloud Storage and history in BigQuery. Demo scene 1
-runs end to end and repeatably. 193 tests pass. The three sections that matter most for reading the
+runs end to end and repeatably. 213 tests pass. The latest checkpoint, with what changed and
+what is still broken, is in [PROGRESS.md](PROGRESS.md). The three sections that matter most for reading the
 current state are **All seven flows on the real server**, **Demo scene 1**, and **Still open against
 the design** — the rest of this section is the trail of what was tried and what turned out to be
 wrong, kept because several of the wrong turns are easy to repeat.

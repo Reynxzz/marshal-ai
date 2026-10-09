@@ -32,7 +32,9 @@ if systemctl is-active --quiet carla-viewer 2>/dev/null; then
   viewer_was_active=true
   sudo systemctl stop carla-viewer
 fi
+source "$APP_ROOT/scripts/carla_recording.sh"
 restore_viewer() {
+  stop_recording
   if "$viewer_was_active"; then
     sudo systemctl reset-failed carla-viewer 2>/dev/null || true
     sudo systemctl restart carla-viewer || true
@@ -45,15 +47,26 @@ if ! timeout 30 python3 scripts/check_carla.py >/dev/null 2>&1; then
   sudo systemctl restart carla
 fi
 python3 scripts/ensure_carla_map.py --map Town05 --wait-seconds 600
+start_recording scene1
 
 before=$(systemctl show carla -p NRestarts --value 2>/dev/null || echo 0)
 for phase in release gate track report ship; do
   echo "=== phase: $phase ==="
   # Each phase is a fresh process on purpose; do not merge these into one.
-  if ! python3 scripts/demo_carla_scene1.py --phase "$phase" --vin "$VIN"; then
-    echo "scene 1 failed in the $phase phase" >&2
-    exit 1
+  phase_log=$(mktemp)
+  if ! python3 scripts/demo_carla_scene1.py --phase "$phase" --vin "$VIN" | tee "$phase_log"; then
+    # The CARLA client can abort while the interpreter shuts down ("terminate called without an
+    # active exception"), after the phase has finished and stored its result. That is not a
+    # failed phase; only a phase that never reported done is.
+    if grep -q "\"phase\": \"$phase\".*\"type\": \"scene1.phase.done\"" "$phase_log"; then
+      echo "phase $phase finished, then its process crashed on exit; carrying on" >&2
+    else
+      rm -f "$phase_log"
+      echo "scene 1 failed in the $phase phase" >&2
+      exit 1
+    fi
   fi
+  rm -f "$phase_log"
 done
 after=$(systemctl show carla -p NRestarts --value 2>/dev/null || echo 0)
 

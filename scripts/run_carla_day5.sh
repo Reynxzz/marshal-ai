@@ -35,7 +35,9 @@ if systemctl is-active --quiet carla-viewer 2>/dev/null; then
   viewer_was_active=true
   sudo systemctl stop carla-viewer
 fi
+source "$APP_ROOT/scripts/carla_recording.sh"
 restore_viewer() {
+  stop_recording
   if "$viewer_was_active"; then
     sudo systemctl reset-failed carla-viewer 2>/dev/null || true
     sudo systemctl restart carla-viewer || true
@@ -48,6 +50,7 @@ if ! timeout 30 python3 scripts/check_carla.py >/dev/null 2>&1; then
   sudo systemctl restart carla
 fi
 python3 scripts/ensure_carla_map.py --map Town05 --wait-seconds 600
+start_recording day5
 
 rm -rf "$OUTPUT"
 args=(--output "$OUTPUT")

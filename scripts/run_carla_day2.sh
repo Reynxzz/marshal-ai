@@ -14,7 +14,9 @@ if systemctl is-active --quiet carla-viewer 2>/dev/null; then
   sudo systemctl stop carla-viewer
 fi
 
+source "$APP_ROOT/scripts/carla_recording.sh"
 restore_viewer() {
+  stop_recording
   if ! carla_healthy; then
     echo "Recovering CARLA before viewer restoration..." >&2
     sudo systemctl restart carla || true
@@ -48,6 +50,7 @@ rm -rf "$OUTPUT"
 mkdir -p "$OUTPUT"
 recover_if_needed
 wait_and_load_map
+start_recording day2
 
 # Fixed-view process isolation avoids camera relocation/lifecycle instability while
 # remaining cheap on a healthy g4dn.xlarge. Restarts occur only when health fails.
