@@ -103,6 +103,8 @@ simulation cannot yet show what the design describes. The target is the design's
   "What is real"): findings per zone for the eight body zones, against labelled ground truth.
 - [ ] **Gate under 5 s** (design, "A car's journey"). Its five Gemini calls run one at a time
   because `google-genai` misbehaved from five threads; retry with a current SDK or the async client.
+  *Progress:* calls run at once again (lock removed, schema sent as JSON): 33 s → 12 s on
+  gemini-2.5-flash, same answers. Under 5 s still open: the gate waits for its slowest call.
 - [ ] **Brake-lamp fault judged** on Qais's asset, with the 3 s clip per step, so scene 2 can use the
   design's dead left brake light.
 - [ ] **Rework loop on real runs**: the summary orders safety items first, picks the bay from the

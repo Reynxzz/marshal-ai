@@ -23,8 +23,21 @@ ISOLATED = Settings(bus="memory", store="memory", history="none", artifacts="non
                     llm="offline", lab="sim")
 
 
+class _QuietBus:
+    """Delivers nothing. A judgement is scored on its own; left wired, a PASS at the gate set off
+    the report flow, which tried to send the evaluation car to the track and failed."""
+
+    async def publish(self, topic, message) -> None:
+        pass
+
+    def subscribe(self, topic, handler) -> None:
+        pass
+
+
 def fresh_app(llm: LLM) -> MarshalApp:
-    return MarshalApp(build_runtime(ISOLATED, llm=llm))
+    rt = build_runtime(ISOLATED, llm=llm)
+    rt.bus = _QuietBus()
+    return MarshalApp(rt)
 
 
 def _jpeg(cache: MediaCache, ref: str, label: str) -> Media:
