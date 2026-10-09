@@ -11,7 +11,7 @@ import time
 from pathlib import Path
 
 from marshal_ai.driving import MissionClient, MissionDone, MissionGo, Status, TrackStep
-from marshal_ai.driving.carla_backend import CarlaDrivingSystem, GATE_CAMERAS, _offset
+from marshal_ai.driving.carla_backend import SENSOR_ROLE, CarlaDrivingSystem, GATE_CAMERAS, _offset
 from marshal_ai.driving.routines import TELEMETRY_CHECKS
 from marshal_ai.events import InMemoryBus
 from marshal_ai.fakeworld import GATE_VIEWS
@@ -60,6 +60,10 @@ class _FixedEvidenceCamera:
         blueprint.set_attribute("image_size_x", str(width))
         blueprint.set_attribute("image_size_y", str(height))
         blueprint.set_attribute("fov", str(fov))
+        # Tagged like every Marshal sensor, so the next run clears it if this one does not. Scene 1's
+        # gate phase leaves this camera alive on purpose (destroying it mid-run crashed the server).
+        if blueprint.has_attribute("role_name"):
+            blueprint.set_attribute("role_name", SENSOR_ROLE)
         self.actor = world.spawn_actor(blueprint, transform)
 
         def receive(image) -> None:

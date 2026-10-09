@@ -179,6 +179,12 @@ class _Vehicle:
 # it never invents a path. "wait" first so a rule-bound desk always has a safe choice.
 ASSIST_OPTIONS = ["wait_for_removal", "pass_left_3kmh", "reroute_lane_c"]
 
+# Every sensor Marshal spawns carries this role_name, so leftovers can be found and cleared. Runs used
+# to leave cameras alive in the world - 28 built up in one session, each rendering every frame on the
+# GPU - and nothing could tell Marshal's apart from the viewer's or a replay's. The lab already tags
+# its actors the same way ("marshal-lab").
+SENSOR_ROLE = "marshal-sensor"
+
 STEP_LIGHTS = {
     "headlights": "LowBeam", "indicators": "LeftBlinker", "brake_lights": "Brake", "reverse": "Reverse",
 }
@@ -193,6 +199,17 @@ STEP_LIGHTS = {
 INDICATOR_SIDES = ("LeftBlinker", "RightBlinker")
 
 
+def _destroy_quietly(actor) -> None:
+    """Destroy an actor that may already be gone."""
+    try:
+        if hasattr(actor, "stop") and getattr(actor, "is_listening", False):
+            actor.stop()
+        actor.destroy()
+    except Exception as exc:
+        log.warning("could not destroy %s %s: %s", getattr(actor, "type_id", "actor"),
+                    getattr(actor, "id", "?"), exc)
+
+
 class CarlaDrivingSystem:
     def __init__(self, plant_map: PlantMap, host: str = "localhost", port: int = 2000,
                  fixed_delta_s: float = 0.05, behavior: str = "cautious",
@@ -200,7 +217,7 @@ class CarlaDrivingSystem:
                  timeout_s: float = 20.0, expected_version: str = "0.9.16",
                  auto_assist: bool = True, blocked_after_s: float = 5.0,
                  blocked_speed_kmh: float = 0.6, obstacle_range_m: float = 14.0,
-                 assist_options: list[str] | None = None):
+                 assist_options: list[str] | None = None, sweep_stale_sensors: bool = True):
         if carla is None:
             raise RuntimeError(
                 "CARLA client not available. Install the 0.9.16 wheel bundled with the server "
@@ -243,6 +260,8 @@ class CarlaDrivingSystem:
         # Replaced by the runtime when MARSHAL_ARTIFACTS=gcs, so the gs:// URI a record
         # carries points at the actual photo behind the verdict.
         self.artifacts: Artifacts = NoArtifacts()
+        if sweep_stale_sensors:
+            self.sweep_sensors()
 
     def transform(self, point: str):
         spec = self.map.points[point].carla
@@ -281,11 +300,7 @@ class CarlaDrivingSystem:
                        window_s: float, frames: int, fov: float | None = None):
         """One camera bolted to the car, subscribed for the life of the car."""
         try:
-            bp = self.world.get_blueprint_library().find("sensor.camera.rgb")
-            bp.set_attribute("image_size_x", str(EVIDENCE_WIDTH))
-            bp.set_attribute("image_size_y", str(EVIDENCE_HEIGHT))
-            if fov is not None and bp.has_attribute("fov"):
-                bp.set_attribute("fov", str(fov))
+            bp = self._camera_blueprint(EVIDENCE_WIDTH, EVIDENCE_HEIGHT, fov)
             buffer = _FrameBuffer(window_s=window_s, max_frames=frames, encode=self._encode)
 
             def receive(image, into=buffer) -> None:
@@ -301,6 +316,73 @@ class CarlaDrivingSystem:
             log.warning("no camera at x=%s yaw=%s for %s: %s: %s",
                         x, yaw, v.vin, type(exc).__name__, exc)
             return None, None
+
+    def _camera_blueprint(self, width: int, height: int, fov: float | None = None):
+        """An RGB camera blueprint, tagged so Marshal can find its own sensors later."""
+        bp = self.world.get_blueprint_library().find("sensor.camera.rgb")
+        bp.set_attribute("image_size_x", str(width))
+        bp.set_attribute("image_size_y", str(height))
+        if fov is not None and bp.has_attribute("fov"):
+            bp.set_attribute("fov", str(fov))
+        if bp.has_attribute("role_name"):
+            bp.set_attribute("role_name", SENSOR_ROLE)
+        return bp
+
+    def release_car_sensors(self, v: "_Vehicle") -> None:
+        """Stop and destroy the cameras attached to one car.
+
+        CARLA does not destroy a sensor when the car it is attached to is destroyed: the sensor stays
+        in the world, still rendering. Each car carries three, so every car a run removed without this
+        left three cameras behind.
+        """
+        cams = [v.onboard] + [cam for cam, _buffer in v.evidence.values()]
+        for cam in cams:
+            if cam is None:
+                continue
+            try:
+                cam.stop()
+                cam.destroy()
+            except Exception as exc:              # already gone with the world
+                log.warning("could not release a camera on %s: %s", v.vin, exc)
+        v.onboard, v.onboard_frames = None, None
+        v.evidence.clear()
+
+    def despawn(self, vin: str) -> None:
+        """Remove a car and everything attached to it, whether or not this process spawned it.
+
+        A car left by an earlier process is found by its role_name (the VIN), and its sensors by
+        being attached to it, so a new phase can clear the previous phase's car completely.
+        """
+        v = self.vehicles.pop(vin, None)
+        if v is not None:
+            self.release_car_sensors(v)
+        actors = self.world.get_actors()
+        for car in actors.filter("vehicle.*"):
+            if car.attributes.get("role_name") != vin:
+                continue
+            for sensor in actors.filter("sensor.*"):
+                if sensor.parent is not None and sensor.parent.id == car.id:
+                    _destroy_quietly(sensor)
+            _destroy_quietly(car)
+
+    def sweep_sensors(self) -> int:
+        """Destroy Marshal sensors left in the world by earlier processes. Returns how many.
+
+        Called when a backend connects, so each run starts from a world with none of Marshal's
+        cameras in it, however the previous run ended - including a phase that deliberately skipped
+        teardown, or a process that was killed. Only sensors tagged SENSOR_ROLE are touched: the
+        viewer's camera and a replay's are left alone.
+
+        Run one Marshal process against a server at a time. A second process connecting would clear
+        the first one's cameras.
+        """
+        stale = [a for a in self.world.get_actors().filter("sensor.*")
+                 if a.attributes.get("role_name") == SENSOR_ROLE]
+        for sensor in stale:
+            _destroy_quietly(sensor)
+        if stale:
+            log.info("cleared %d Marshal sensor(s) left by an earlier run", len(stale))
+        return len(stale)
 
     def spawn(self, vin: str, at: str = "line_end", colour: str | None = None,
               behind_m: float = 0.0) -> None:
@@ -727,9 +809,7 @@ class CarlaDrivingSystem:
         "camera produced no frame after bounded warm-up". One creation path, so the two cannot
         drift apart again.
         """
-        bp = self.world.get_blueprint_library().find("sensor.camera.rgb")
-        bp.set_attribute("image_size_x", str(width))
-        bp.set_attribute("image_size_y", str(height))
+        bp = self._camera_blueprint(width, height)
         frames = _FrameBuffer(window_s=CLIP_WINDOW_S, max_frames=CLIP_FRAMES,
                               encode=self._encode)
         def receive(image, buffer=frames) -> None:
@@ -742,9 +822,7 @@ class CarlaDrivingSystem:
 
     def _make_movable(self, key, transform, width: int, height: int):
         """Create the movable camera and subscribe it once, for the life of the run."""
-        bp = self.world.get_blueprint_library().find("sensor.camera.rgb")
-        bp.set_attribute("image_size_x", str(width))
-        bp.set_attribute("image_size_y", str(height))
+        bp = self._camera_blueprint(width, height)
         frames = _FrameBuffer(window_s=1.0, max_frames=4)   # the gate judges single frames only
         def receive(image, buffer=frames) -> None:
             buffer.append(image)
@@ -796,17 +874,10 @@ class CarlaDrivingSystem:
             except Exception:                     # already gone with the world
                 pass
         self._cameras.clear()
-        # The cars' own cameras too. They are attached, so the server drops them with the car,
-        # but releasing them here keeps "sensor object went out of the scope but the sensor is
-        # still alive" out of the logs and makes cleanup one thing rather than two.
+        # The cars' own cameras too: all three on each car. Only the forward one used to be released
+        # here, so the front and rear evidence cameras outlived every run.
         for v in self.vehicles.values():
-            if v.onboard is not None:
-                try:
-                    v.onboard.stop()
-                    v.onboard.destroy()
-                except Exception as exc:
-                    log.warning("could not release the onboard camera for %s: %s", v.vin, exc)
-                v.onboard, v.onboard_frames = None, None
+            self.release_car_sensors(v)
 
     def _status(self, v: _Vehicle) -> Status:
         loc = v.actor.get_location()

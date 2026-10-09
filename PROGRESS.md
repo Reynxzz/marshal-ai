@@ -80,9 +80,9 @@ The design is shaped by what failed along the way:
   `(221, -27, 7)`, yaw 163°) segfaults CARLA 0.9.16 on this host, with or without a replay. The same
   stretch filmed from the east side is fine. The replay films from that side by default (`--side`).
   This may also be what crashed scene 1's gate phase earlier in the day.
-- **Leaked camera sensors.** Runs leave cameras alive in the world ("sensor object went out of the
-  scope but the sensor is still alive"); 28 had built up by mid-session. They render every frame on
-  the GPU. `sudo systemctl restart carla` clears them; the leak itself is not fixed.
+- ~~**Leaked camera sensors.**~~ Fixed on `qais/m1-sensor-leak`: one scene 1 run used to leave 11
+  cameras in the world; two runs now leave 0. Marshal's sensors are tagged `marshal-sensor`, a car's
+  three cameras are destroyed with it, and each backend clears tagged leftovers when it connects.
 - **Day 4 replays in daylight.** The recording does not restore the weather, and the replay sets
   daylight, so the lamps do not show; the evidence frames in Cloud Storage
   (`track/<VIN>/step1_headlights.jpg`) are what show them.

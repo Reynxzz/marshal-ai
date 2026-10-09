@@ -46,7 +46,7 @@ simulation cannot yet show what the design describes. The target is the design's
 ## Qais: simulation
 
 ### M1: dependable runs
-- [ ] **Fix the camera sensor leak.** Runs leave cameras alive in the world; 28 built up in one
+- [x] **Fix the camera sensor leak.** (`qais/m1-sensor-leak`: 11 left per scene 1 run → 0) Runs leave cameras alive in the world; 28 built up in one
   session, all rendering every frame. Destroy them when each phase ends. Scene 1's gate deliberately
   skips teardown (see `capture_gate_views`), so handle that one with care.
 - [ ] **`scripts/run_carla_all.sh`**: every flow in order, CARLA health-checked and restarted between

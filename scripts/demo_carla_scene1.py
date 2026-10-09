@@ -83,9 +83,9 @@ def build(args):
 
 
 def respawn(rt, vin: str, at: str, colour: str = CAR_COLOUR) -> None:
-    for actor in rt.driving.world.get_actors().filter("vehicle.*"):
-        if actor.attributes.get("role_name") == vin:
-            actor.destroy()
+    # despawn, not a bare actor.destroy(): CARLA leaves a destroyed car's sensors in the world, so
+    # every respawn used to strand the previous car's three cameras, still rendering.
+    rt.driving.despawn(vin)
     rt.driving.spawn(vin, at=at, colour=colour)
 
 
@@ -393,13 +393,11 @@ async def phase_ship(rt, app, args) -> dict:
 
 
 def respawn_cleanup(rt, vin: str) -> None:
-    for actor in rt.driving.world.get_actors().filter("vehicle.*"):
-        if actor.attributes.get("role_name") == vin:
-            try:
-                actor.destroy()
-            except Exception:
-                pass
-    rt.driving.vehicles.pop(vin, None)
+    try:
+        rt.driving.despawn(vin)
+    except Exception as exc:              # cleanup must not hide the phase's own result
+        emit({"type": "scene1.cleanup_warning", "vin": vin, "error": f"{type(exc).__name__}: {exc}"})
+        rt.driving.vehicles.pop(vin, None)
 
 
 RUNNERS = {"release": phase_release, "gate": phase_gate, "ship": phase_ship,
