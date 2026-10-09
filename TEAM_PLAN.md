@@ -49,12 +49,12 @@ simulation cannot yet show what the design describes. The target is the design's
 - [x] **Fix the camera sensor leak.** (`qais/m1-sensor-leak`: 11 left per scene 1 run → 0) Runs leave cameras alive in the world; 28 built up in one
   session, all rendering every frame. Destroy them when each phase ends. Scene 1's gate deliberately
   skips teardown (see `capture_gate_views`), so handle that one with care.
-- [ ] **`scripts/run_carla_all.sh`**: every flow in order, CARLA health-checked and restarted between
+- [x] **`scripts/run_carla_all.sh`** (`qais`): every flow in order, CARLA health-checked and restarted between
   flows, each recording filmed at the end. One command to verify any change.
 - [ ] **Find what crashes the renderer.** A camera west of the yard lane looking west
   (`(221, -27, 7)`, yaw 163°) segfaults the server even with no replay. Grid-probe to the asset or
   area, then try `-quality-level` (now `Low`). May also be what crashed scene 1's gate.
-- [ ] **Crash-on-exit of the CARLA client** (`terminate called without an active exception` after a
+- [x] **Crash-on-exit of the CARLA client** (`qais`: demos exit via `exit_without_teardown`) (`terminate called without an active exception` after a
   phase finished). Scene 1 tolerates it; fix the cause so other flows don't need the workaround.
 
 ### M2: the plant behaves as the design describes

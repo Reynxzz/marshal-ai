@@ -74,6 +74,13 @@ The design is shaped by what failed along the way:
   down (`terminate called without an active exception`) after the phase has stored its result. The
   runner now carries on when the phase reported done, and fails only when it did not.
 
+### M1 check on branch `qais`
+
+`MARSHAL_ALL_RUNS=3 bash scripts/run_carla_all.sh`: **18 of 18 flow runs passed, 0 CARLA crashes,
+0 exit-time aborts, 33 min**, with every scene 1 run shipping its car. That is TEAM_PLAN's M1 "done
+when" (every flow three times in a row with no CARLA restart). The same check before the exit fix
+had 17 of 18: one day 4 run aborted on exit (134) after reporting success.
+
 ### Known issues
 
 - **A camera view that crashes the server.** A camera west of the yard lane looking west (e.g.
