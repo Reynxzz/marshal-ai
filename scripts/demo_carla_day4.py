@@ -76,6 +76,14 @@ async def check_one(app: MarshalApp, vin: str, steps: list[int], fault: str | No
             actor.destroy()
     rt.driving.spawn(vin, at="test_track", colour="0,80,200")
 
+    # The waits below end as soon as these records exist. Left in Firestore by an earlier run,
+    # they ended them at once: the run reported the old verdicts in seconds, with no frame taken
+    # and no Gemini call made. Scene 1 drops its stale records for the same reason.
+    for model, key in ((InspectionResult, f"{vin}:functional"), (CarReport, vin)):
+        if rt.store.get(model, key) is not None:
+            rt.store.delete(model, key)
+            emit({"type": "day4.dropped_stale", "record": model.__name__, "key": key})
+
     await app.functional.start(vin, steps)
     loop = asyncio.get_event_loop()
     deadline = loop.time() + timeout

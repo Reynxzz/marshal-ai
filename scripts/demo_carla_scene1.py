@@ -62,6 +62,8 @@ def parser() -> argparse.ArgumentParser:
                     help="where the track evidence frames are written")
     ap.add_argument("--sun-altitude", type=float, default=-8.0,
                     help="sun angle for the track phase; lamps do not read at noon")
+    ap.add_argument("--gate-sun-altitude", type=float, default=45.0,
+                    help="sun angle for the gate phase; body defects do not read at night")
     ap.add_argument("--timeout", type=float, default=300.0)
     return ap
 
@@ -197,6 +199,10 @@ async def phase_gate(rt, app, args) -> dict:
     ensure_car(rt, args, CarState.INSPECTION_GATE, "inspection_gate")
     drop_stale(rt, (InspectionResult, f"{args.vin}:visual"))
     respawn(rt, args.vin, "inspection_gate")
+    # Daylight for the body inspection. The track phase drops the sun for its headlight check and
+    # nothing raises it again, so a gate run after any track run took four night-time photos and
+    # Gemini answered REVIEW, "too dark to identify defects".
+    set_sun(rt, args.gate_sun_altitude, phase="gate")
     try:
         images = capture_gate_views(rt, args.vin)
         emit({"type": "scene1.gate_captured",
@@ -244,7 +250,7 @@ def drop_stale(rt, *records) -> None:
             emit({"type": "scene1.dropped_stale", "record": model.__name__, "key": key})
 
 
-def set_sun(rt, altitude: float, attempts: int = 10) -> None:
+def set_sun(rt, altitude: float, attempts: int = 10, phase: str = "track") -> None:
     """Set the sun angle and confirm it, retrying until the server agrees.
 
     A lit headlight does not read against bright noon, so the camera check called a healthy car
@@ -263,7 +269,7 @@ def set_sun(rt, altitude: float, attempts: int = 10) -> None:
         time.sleep(0.5)
         applied = rt.driving.world.get_weather().sun_altitude_angle
         if abs(applied - altitude) <= 0.5:
-            emit({"type": "scene1.track_lighting", "sun_altitude": applied,
+            emit({"type": f"scene1.{phase}_lighting", "sun_altitude": applied,
                   "attempts": attempt + 1})
             return
     raise RuntimeError(f"sun altitude did not apply after {attempts} attempts: "
