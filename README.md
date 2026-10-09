@@ -161,6 +161,26 @@ Two things in CARLA 0.9.16 shape this, and both segfault the server: moving a ca
 replay, and a camera west of the yard lane looking west. The replay therefore gives each shot its own
 camera and films from the east side by default. See [PROGRESS.md](PROGRESS.md).
 
+## Evaluating the flows
+
+`python -m marshal_ai.eval` scores Gemini's part of flows 2, 3 and 4 against known answers, many
+runs per case, through the flows' own code (fresh app, in-memory store, no CARLA). It needs only the
+Vertex AI credentials.
+
+```bash
+python -m marshal_ai.eval eval/datasets/v1.json --runs 5
+python -m marshal_ai.eval eval/datasets/v1.json --flows track --runs 10 --model gemini-2.5-pro
+```
+
+It prints the design's KPIs per flow (gate: first-pass yield, review share, false alarms,
+build-sheet mismatches caught, latency against the 5 s budget; track: dark lamps confirmed as lit,
+lit lamps rejected, unconfirmed; assistance: recommendation, people detected, high-risk
+recommendations) plus consistency across runs, and writes the full answers to `eval/results/`.
+
+A dataset is JSON (`eval/datasets/v1.json`): each case names its frames and the right answer. Frames
+point at a frozen copy in the artifacts bucket, because the run scripts overwrite evidence for the
+same VIN; freeze new evidence with `scripts/snapshot_eval_media.py v2 gate/VIN-X/ ...`.
+
 ## Real Gemini via Vertex AI
 
 `GeminiLLM` uses `google-genai` with no explicit credentials, so it reads the environment. With a

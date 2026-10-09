@@ -215,6 +215,18 @@ class FunctionalChecker:
         await self.rt.bus.publish(Topic.INSPECTION_RESULTS, result)
         return result
 
+    async def judge_clip(self, vin: str, step_no: int, clip: Media, telemetry: dict) -> ChecklistItem:
+        """Judge one routine step from evidence already in hand, exactly as a run would.
+
+        For callers holding their own frames, such as the evaluation harness. A reference set in
+        `references` for the step is used, as it would be after a passing car.
+        """
+        [step] = routine_steps(ROUTINE, [step_no])
+        reported = TrackStep(vin=vin, mission_id="judge-clip", routine=ROUTINE, step=step_no,
+                             name=step.name, telemetry=telemetry)
+        run = _Run(vin, [step], reported={step_no: reported}, clips={step_no: clip})
+        return await self._judge(run, step)
+
     def kpis(self) -> dict:
         results = [r for r in self.rt.store.list(InspectionResult) if r.kind == "functional"]
         failures: dict[str, int] = {}

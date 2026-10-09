@@ -133,6 +133,8 @@ simulation cannot yet show what the design describes. The target is the design's
   telemetry and camera, failures per item; flow 5 rework rate, cars shipped with an open finding
   (target 0); flow 7 failures per 100 runs, time to first failure. It runs mostly on saved images
   and the offline runner, so it needs little CARLA time.
+  *Started:* `python -m marshal_ai.eval` covers flows 2, 3 and 4 on dataset v1 (7 cases from
+  the 2026-10-09 runs); flows 1, 5 and 7 KPIs and a larger dataset still to come.
 
 ---
 
