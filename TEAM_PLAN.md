@@ -110,7 +110,7 @@ simulation cannot yet show what the design describes. The target is the design's
 - [ ] **Assistance card content** (design, flow 2): the one-line situation, the object located in the
   clip (for the dashboard to box), ranked options with reasons, confidence, and never recommending a
   high-risk option.
-- [ ] **Persist proposals.** Supervisor proposals (e.g. the late-truck re-plan) live only in the
+- [x] **Persist proposals.** Supervisor proposals (e.g. the late-truck re-plan) live only in the
   running app; there is no Firestore collection for them. Add one beside `COLLECTIONS` in
   `src/marshal_ai/store/__init__.py`; Faris's `/proposals` page reads it.
 

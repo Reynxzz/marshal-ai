@@ -325,12 +325,9 @@ class YardTraffic:
         return done
 
     async def decide(self, proposal_id: str, approve: bool, by: str) -> dict:
-        p = self.rt.proposals[proposal_id]
-        if p.kind != "replan" or p.status != "pending":
-            raise ValueError(f"{proposal_id} is not a pending re-plan")
-        p.status, p.decided_by = ("approved" if approve else "rejected"), by
+        p = self.rt.decide(proposal_id, "replan", approve, by, what="re-plan")
         moved = await self.execute(YardPlan.model_validate(p.payload["plan"])) if approve else []
-        return {"proposal_id": proposal_id, "status": p.status, "moved": moved}
+        return {"proposal_id": proposal_id, "status": p.status.value, "moved": moved}
 
     async def tick(self) -> None:
         for key, kind, details in self.detect_exceptions():

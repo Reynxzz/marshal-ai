@@ -203,10 +203,7 @@ class VisualInspector:
 
     async def decide_review(self, proposal_id: str, confirm_defect: bool, by: str) -> InspectionResult:
         """Supervisor looks at the review card: confirm the defect (to rework) or clear it (to the track)."""
-        p = self.rt.proposals[proposal_id]
-        if p.kind != "review" or p.status != "pending":
-            raise ValueError(f"{proposal_id} is not a pending visual review")
-        p.status, p.decided_by = ("approved" if confirm_defect else "rejected"), by
+        p = self.rt.decide(proposal_id, "review", confirm_defect, by, what="visual review")
         vin = p.payload["vin"]
         result = self.rt.store.get(InspectionResult, f"{vin}:visual")
         if confirm_defect:

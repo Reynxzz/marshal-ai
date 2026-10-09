@@ -18,7 +18,7 @@ from marshal_ai.fakeworld import FakeGateCamera, FakeTrackCamera, FakeWorld
 from marshal_ai.llm import LLM, GeminiLLM
 from marshal_ai.plant import PlantMap, load_plant_map
 from marshal_ai.plant.state import PlantState
-from marshal_ai.records import now
+from marshal_ai.records import Proposal, ProposalStatus, now
 from marshal_ai.store import Store, make_store
 
 
@@ -36,18 +36,6 @@ class SimClock:
 
     def advance(self, seconds: float) -> None:
         self.t += timedelta(seconds=seconds)
-
-
-@dataclass
-class Proposal:
-    """Something an agent proposes and a human must decide: a re-plan, a rework, a visual review."""
-
-    proposal_id: str
-    kind: str                     # "replan" | "rework" | "review"
-    summary: str
-    payload: dict
-    status: str = "pending"       # pending | approved | rejected
-    decided_by: str | None = None
 
 
 @dataclass
@@ -82,13 +70,41 @@ class Runtime:
         return f"{prefix}-{next(counter):0{width}d}"
 
     def propose(self, kind: str, summary: str, payload: dict) -> Proposal:
-        p = Proposal(self.next_id("P"), kind, summary, payload)
+        """Record a proposal for a human, in this process and in the store (the dashboard's copy)."""
+        if "P" not in self._ids:
+            # Each phase of a demo is its own process, so a counter starting at 1 would reuse
+            # P-001 and overwrite an earlier proposal in Firestore. Carry on from the store.
+            self._ids["P"] = itertools.count(_last_number(self.store.list(Proposal)) + 1)
+        p = Proposal(proposal_id=self.next_id("P"), kind=kind, summary=summary, payload=payload,
+                     created_at=self.clock())
         self.proposals[p.proposal_id] = p
+        self.store.put(p)
+        return p
+
+    def decide(self, proposal_id: str, kind: str, approve: bool, by: str, what: str) -> Proposal:
+        """A human's decision on a pending proposal of this kind, recorded and stored.
+
+        `what` names the proposal in the error, e.g. "re-plan", when it is not pending.
+        """
+        p = self.proposals.get(proposal_id)
+        if p is None or p.kind != kind or p.status != ProposalStatus.PENDING:
+            raise ValueError(f"{proposal_id} is not a pending {what}")
+        p.status = ProposalStatus.APPROVED if approve else ProposalStatus.REJECTED
+        p.decided_by, p.decided_at = by, self.clock()
+        self.store.put(p)
         return p
 
     def pending(self, kind: str | None = None) -> list[Proposal]:
+        """This process's open proposals. The store also holds earlier runs' proposals, which a
+        new run must not act on, so this reads the in-process copy."""
         return [p for p in self.proposals.values()
-                if p.status == "pending" and (kind is None or p.kind == kind)]
+                if p.status == ProposalStatus.PENDING and (kind is None or p.kind == kind)]
+
+
+def _last_number(proposals: list[Proposal]) -> int:
+    numbers = [int(tail) for tail in (p.proposal_id.rsplit("-", 1)[-1] for p in proposals)
+               if tail.isdigit()]
+    return max(numbers, default=0)
 
 
 _runtime: Runtime | None = None

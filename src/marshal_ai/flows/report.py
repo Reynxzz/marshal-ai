@@ -197,10 +197,7 @@ class ReportRouter:
     # ---------- supervisor decision and rework ----------
 
     async def decide(self, proposal_id: str, confirm: bool, by: str) -> dict:
-        p = self.rt.proposals[proposal_id]
-        if p.kind != "rework" or p.status != "pending":
-            raise ValueError(f"{proposal_id} is not a pending rework proposal")
-        p.status, p.decided_by = ("approved" if confirm else "rejected"), by
+        p = self.rt.decide(proposal_id, "rework", confirm, by, what="rework proposal")
         vin = p.payload["vin"]
         report = self.rt.store.get(CarReport, vin)
         if not confirm:                 # supervisor clears the findings

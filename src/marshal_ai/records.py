@@ -1,4 +1,7 @@
-"""The six records every agent shares (design doc: "Shared data, events and human authority").
+"""The records every agent shares (design doc: "Shared data, events and human authority").
+
+The design's six, plus proposals: the decisions an agent proposes and a human makes (the design's
+"Human authority" table), kept so the dashboard can show and decide them.
 
 Live copies go to Firestore, history to BigQuery; images and clips are Cloud Storage URIs.
 """
@@ -169,3 +172,23 @@ class TestRun(BaseModel):
     failed_criteria: list[str] = Field(default_factory=list)
     clip_uri: str | None = None
     created_at: datetime = Field(default_factory=now)
+
+
+class ProposalStatus(str, Enum):
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+
+
+class Proposal(BaseModel):
+    """Something an agent proposes and a human must decide: a re-plan, a rework, a visual review."""
+
+    proposal_id: str                                   # P-001, unique across runs
+    kind: Literal["replan", "rework", "review"]
+    summary: str
+    payload: dict = Field(default_factory=dict)        # what deciding acts on, e.g. the plan or VIN
+    status: ProposalStatus = ProposalStatus.PENDING
+    decided_by: str | None = None
+    created_at: datetime = Field(default_factory=now)
+    decided_at: datetime | None = None
+
