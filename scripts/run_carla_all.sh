@@ -19,7 +19,7 @@ set -Euo pipefail
 
 readonly APP_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 readonly RUNS="${MARSHAL_ALL_RUNS:-1}"
-readonly FLOWS="${MARSHAL_ALL_FLOWS:-yard day5 day2 day4 scene1 lab}"
+readonly FLOWS="${MARSHAL_ALL_FLOWS:-yard day5 day2 day4 scene1 plant lab}"
 readonly FILM="${MARSHAL_ALL_FILM:-1}"
 readonly RECORDINGS=/var/lib/carla/recordings
 readonly OUT="${MARSHAL_ALL_OUT:-$HOME/marshal-runs/$(date +%Y%m%d-%H%M%S)}"
@@ -35,6 +35,7 @@ declare -A WHAT=(
   [day2]="flow 3: gate views, track lighting steps"
   [day4]="flows 4+5: dark headlight caught, routed to rework"
   [scene1]="journey: line, gate, track, report, yard, shipped"
+  [plant]="scene 1 with three cars at once, slots by truck"
   [lab]="flows 6+7: scenario generated, run, judged, searched"
 )
 
