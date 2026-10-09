@@ -51,7 +51,7 @@ simulation cannot yet show what the design describes. The target is the design's
   skips teardown (see `capture_gate_views`), so handle that one with care.
 - [x] **`scripts/run_carla_all.sh`** (`qais`): every flow in order, CARLA health-checked and restarted between
   flows, each recording filmed at the end. One command to verify any change.
-- [ ] **Find what crashes the renderer.** A camera west of the yard lane looking west
+- [x] **Find what crashes the renderer.** (`qais`: `-quality-level=Low` itself; the server now runs at Epic) A camera west of the yard lane looking west
   (`(221, -27, 7)`, yaw 163°) segfaults the server even with no replay. Grid-probe to the asset or
   area, then try `-quality-level` (now `Low`). May also be what crashed scene 1's gate.
 - [x] **Crash-on-exit of the CARLA client** (`qais`: demos exit via `exit_without_teardown`) (`terminate called without an active exception` after a

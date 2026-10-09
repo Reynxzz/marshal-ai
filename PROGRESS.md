@@ -83,10 +83,13 @@ had 17 of 18: one day 4 run aborted on exit (134) after reporting success.
 
 ### Known issues
 
-- **A camera view that crashes the server.** A camera west of the yard lane looking west (e.g.
-  `(221, -27, 7)`, yaw 163°) segfaults CARLA 0.9.16 on this host, with or without a replay. The same
-  stretch filmed from the east side is fine. The replay films from that side by default (`--side`).
-  This may also be what crashed scene 1's gate phase earlier in the day.
+- ~~**A camera view that crashes the server.**~~ Found on `qais`: it is `-quality-level=Low`. At Low,
+  any camera looking towards the far west of Town05 segfaults the server, from anywhere along the
+  plant and at any time of day; looking down at the road, or cropping out the horizon, avoids it. At
+  Epic every crashing pose renders and all six flows pass and film, including scene 1, whose replay
+  had failed at Low. `scripts/set_carla_quality.sh` switches the service (a systemd drop-in);
+  `prepare_carla_host.sh` and the Terraform bootstrap now use Epic. Cost: day 2 and scene 1 take
+  ~10-50 % longer.
 - ~~**Leaked camera sensors.**~~ Fixed on `qais/m1-sensor-leak`: one scene 1 run used to leave 11
   cameras in the world; two runs now leave 0. Marshal's sensors are tagged `marshal-sensor`, a car's
   three cameras are destroyed with it, and each backend clears tagged leftovers when it connects.
