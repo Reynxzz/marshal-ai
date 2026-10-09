@@ -58,7 +58,7 @@ simulation cannot yet show what the design describes. The target is the design's
   phase finished). Scene 1 tolerates it; fix the cause so other flows don't need the workaround.
 
 ### M2: the plant behaves as the design describes
-- [ ] **Several cars at once** (scene 1). Cars leave the line on the design's rules: fewer than 2 in
+- [x] **Several cars at once** (scene 1). (`qais`: `run_carla_plant.sh`, 3 cars to 2 trucks, all shipped) Cars leave the line on the design's rules: fewer than 2 in
   the gate queue, 25 m apart, slots by truck nearest the loading bay (design, flow 1).
 - [ ] **Missions that move cars.** Yard re-slotting after a late truck changes only the records
   today; the cars should drive to their new slots (design, flow 1 "Send missions").
