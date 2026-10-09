@@ -134,6 +134,17 @@ class VisualInspector:
                      [d.item for d in dropped])
         return seen.model_copy(update={"mismatches": kept})
 
+    async def assess_photo(self, image: Media, zones: list[str] | None = None
+                           ) -> tuple[list[Finding], float, Verdict]:
+        """The defect check on one photo, judged as the gate judges a view: findings under the
+        review bar dropped, the verdict from the same thresholds. For photos that are not one of
+        the four gate views, such as the evaluation's damage set; zones default to all eight.
+        """
+        view = await self._view(image, zones or BODY_ZONES)
+        kept = [f for f in view.findings
+                if f.zone in (zones or BODY_ZONES) and f.confidence >= REVIEW_CONFIDENCE]
+        return kept, view.clear_confidence, visual_verdict(kept, [], [view.clear_confidence])
+
     async def inspect(self, vin: str, views: list[str] | None = None, check_variant: bool = True,
                       images: list[Media] | None = None) -> InspectionResult:
         """Inspect a car at the gate. Re-inspection passes only the views that had findings.

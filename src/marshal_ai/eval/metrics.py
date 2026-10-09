@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections import Counter
 from statistics import median
 
-from marshal_ai.eval.dataset import AssistCase, GateCase, TrackCase
+from marshal_ai.eval.dataset import AssistCase, DamageCase, GateCase, TrackCase
 
 GATE_BUDGET_S = 5.0          # design, "A car's journey": under 5 s while the car rolls through
 
@@ -83,4 +83,34 @@ def assist_metrics(cases: list[AssistCase], results: dict[str, list[dict]]) -> d
     }
 
 
-METRICS = {"gate": gate_metrics, "track": track_metrics, "assist": assist_metrics}
+def damage_metrics(cases: list[DamageCase], results: dict[str, list[dict]]) -> dict:
+    damaged = [(c, o) for c in cases if c.expect_damaged for o in results.get(c.id, [])]
+    clean = [(c, o) for c in cases if not c.expect_damaged for o in results.get(c.id, [])]
+    flagged = lambda o: bool(o["findings"])           # a defect reported at or over the review bar
+    found = [(c, o) for c, o in damaged if flagged(o)]
+    per_kind = {}
+    for kind in sorted({k for c in cases for k in c.expect_kinds}):
+        runs = [(c, o) for c, o in damaged if kind in c.expect_kinds]
+        per_kind[kind] = _rate([any(kind in f["kinds"] for f in o["findings"]) for _, o in runs])
+    return {
+        # confirmed defects: damage the gate reported (it would reach a person or rework)
+        "damage_recall": _rate([flagged(o) for _, o in damaged]),
+        "damage_failed": _rate([o["verdict"] == "FAIL" for _, o in damaged]),
+        # of the damage found, reported as a kind that is really there
+        "kind_precision": _rate([any(set(f["kinds"]) & set(c.expect_kinds) for f in o["findings"])
+                                 for c, o in found]),
+        # of the damage found on a part inside a gate zone, placed in that zone (doors either side)
+        "zone_accuracy": _rate([any(f["zone"] in c.expect_zones for f in o["findings"])
+                                for c, o in found if c.expect_zones]),
+        "recall_by_kind": per_kind,
+        # false alarms: a defect reported on a clean panel
+        "false_alarm_rate": _rate([flagged(o) for _, o in clean]),
+        # clean panels the gate passed straight through
+        "clean_pass_rate": _rate([o["verdict"] == "PASS" for _, o in clean]),
+        "consistency": _consistency({c.id: [o["verdict"] for o in results.get(c.id, [])] for c in cases}),
+        "latency": _latency([o for _, o in damaged + clean]),
+    }
+
+
+METRICS = {"gate": gate_metrics, "track": track_metrics, "assist": assist_metrics,
+           "damage": damage_metrics}

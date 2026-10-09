@@ -179,7 +179,24 @@ recommendations) plus consistency across runs, and writes the full answers to `e
 
 A dataset is JSON (`eval/datasets/v1.json`): each case names its frames and the right answer. Frames
 point at a frozen copy in the artifacts bucket, because the run scripts overwrite evidence for the
-same VIN; freeze new evidence with `scripts/snapshot_eval_media.py v2 gate/VIN-X/ ...`.
+same VIN; freeze new evidence with `scripts/snapshot_eval_media.py v3 gate/VIN-X/ ...`.
+
+`eval/datasets/v2-damage.json` is the design's stand-in for scratches and dents: 30 photos of damaged
+cars and 16 clean panels from Humans in the Loop's "Car parts and car damages" (CC0), run through the
+gate's defect check one photo at a time (`--flows damage`). It scores damage found, the kind and the
+zone it was put in, recall per kind, and false alarms on the clean panels.
+`scripts/build_damage_dataset.py` rebuilds it from the downloaded archive: it uses the 441 photos
+labelled with both parts and damage (the archive's two folder names are swapped), places each
+damage on a part and the part in a gate zone, balances the kinds towards small damage, and crops
+undamaged parts as the clean cases. Every clean crop was checked by eye; those rejected are listed
+in the script with the reason. The set is mostly salvage-auction crash damage, far heavier than what
+a finishing line sees, so read it as an upper bound on recall.
+
+**Its clean cases do not measure false alarms.** They are crops of used cars whose wear was never
+labelled: on gemini-2.5-flash the gate flagged 7 of 16, and at full size at least three findings are
+right (scratches on the blue door, scuffs on the grey bumper, a missing front number plate). Relabelling
+them after seeing the model's answers would bias the set, so the false-alarm rate needs panels known
+to be clean - new cars, such as the CARLA renders in v1, where it was 0.
 
 ## Real Gemini via Vertex AI
 

@@ -13,7 +13,8 @@ from marshal_ai.app import MarshalApp
 from marshal_ai.config import Settings
 from marshal_ai.driving.messages import AssistRequest
 from marshal_ai.driving.routines import routine_steps
-from marshal_ai.eval.dataset import AssistCase, GateCase, MediaCache, TrackCase
+from marshal_ai.eval.damage import kinds_of
+from marshal_ai.eval.dataset import AssistCase, DamageCase, GateCase, MediaCache, TrackCase
 from marshal_ai.flows.functional import ROUTINE
 from marshal_ai.llm import LLM, Media
 from marshal_ai.records import Car, CarState
@@ -103,4 +104,14 @@ async def run_assist(llm: LLM, case: AssistCase, cache: MediaCache) -> dict:
             "seconds": round(seconds, 2)}
 
 
-RUNNERS = {"gate": run_gate, "track": run_track, "assist": run_assist}
+async def run_damage(llm: LLM, case: DamageCase, cache: MediaCache) -> dict:
+    app = fresh_app(llm)
+    photo = _jpeg(cache, case.image, "inspection photo")
+    (findings, clear, verdict), seconds = await _timed(lambda: app.visual.assess_photo(photo))
+    return {"verdict": verdict.value,
+            "findings": [{"zone": f.zone, "type": f.type, "confidence": f.confidence,
+                          "kinds": sorted(kinds_of(f.type))} for f in findings],
+            "clear_confidence": clear, "seconds": round(seconds, 2)}
+
+
+RUNNERS = {"gate": run_gate, "track": run_track, "assist": run_assist, "damage": run_damage}

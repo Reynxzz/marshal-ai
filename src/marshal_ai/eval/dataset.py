@@ -56,12 +56,26 @@ class AssistCase(BaseModel):
     note: str = ""
 
 
+class DamageCase(BaseModel):
+    """Flow 3's defect check on one photo of a car, damaged or not (see marshal_ai.eval.damage)."""
+
+    id: str
+    image: str
+    expect_damaged: bool
+    expect_kinds: list[str] = Field(default_factory=list,
+                                    description="damage kinds present, of marshal_ai.eval.damage.KIND_WORDS")
+    expect_zones: list[str] = Field(default_factory=list,
+                                    description="gate zones the damage is in; empty when none applies")
+    note: str = ""
+
+
 class Dataset(BaseModel):
     name: str
     description: str = ""
     gate: list[GateCase] = Field(default_factory=list)
     track: list[TrackCase] = Field(default_factory=list)
     assist: list[AssistCase] = Field(default_factory=list)
+    damage: list[DamageCase] = Field(default_factory=list)
 
 
 def load_dataset(path: str | Path) -> tuple[Dataset, Path]:

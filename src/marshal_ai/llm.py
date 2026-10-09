@@ -52,12 +52,16 @@ class LLMError(RuntimeError):
 class GeminiLLM:
     """google-genai client; reads Vertex AI or API key settings from the environment."""
 
-    def __init__(self, model: str, temperature: float = 0.0, seed: int | None = 7):
+    def __init__(self, model: str, temperature: float = 0.0, seed: int | None = 7,
+                 thinking_budget: int | None = None):
         # temperature 0 and a fixed seed: the same plant situation gets (nearly) the same answer,
         # so demos and release decisions are repeatable
         self.model = model
         self.temperature = temperature
         self.seed = seed
+        # None leaves the model's own default. Flash thinks by default and flash-lite does not;
+        # on the gate, flash-lite without thinking flagged a clean car (python -m marshal_ai.eval).
+        self.thinking_budget = thinking_budget
         self._local = threading.local()
 
     @property
@@ -107,6 +111,8 @@ class GeminiLLM:
             response_mime_type="application/json",
             response_json_schema=schema.model_json_schema() if schema is not None else None,
             system_instruction=system or None,
+            thinking_config=(None if self.thinking_budget is None
+                             else types.ThinkingConfig(thinking_budget=self.thinking_budget)),
         )
         response = self.client.models.generate_content(
             model=self.model,

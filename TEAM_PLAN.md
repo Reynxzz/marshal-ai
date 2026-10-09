@@ -99,8 +99,11 @@ simulation cannot yet show what the design describes. The target is the design's
 ### M2: the judgements in demo scenes 1–3
 - [ ] **Wrong colour flagged** at the gate on Qais's car, with the finding written as the design's
   structured output (zone, type, confidence, image) and the verdict from the 0.6 / 0.9 thresholds.
-- [ ] **Scratches and dents** from a public car-damage image set (the design's stated stand-in,
+- [x] **Scratches and dents** from a public car-damage image set (the design's stated stand-in,
   "What is real"): findings per zone for the eight body zones, against labelled ground truth.
+  *Done:* dataset v2-damage (Humans in the Loop, CC0): 30 damaged photos, 16 clean crops.
+  gemini-2.5-flash finds 97% of damage, right kind 95%, right zone 100%, 13.7 s a photo;
+  flash-lite (thinking 1024) 89%, 4.9 s. False alarms need truly clean panels (see README).
 - [ ] **Gate under 5 s** (design, "A car's journey"). Its five Gemini calls run one at a time
   because `google-genai` misbehaved from five threads; retry with a current SDK or the async client.
   *Progress:* calls run at once again (lock removed, schema sent as JSON): 33 s → 12 s on

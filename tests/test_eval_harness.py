@@ -144,3 +144,44 @@ def test_the_shipped_dataset_loads():
     assert isinstance(data, Dataset)
     assert {c.id for c in data.gate} >= {"s1-clean", "s1-sheet-says-red"}
     assert all(c.frame.startswith("gs://") for c in data.track)
+
+
+def damage_model() -> FakeLLM:
+    """Sees a scratch on the rear left door in DENTED photos and nothing in CLEAN ones."""
+    def defects(call):
+        if call.media[0].data == b"DENTED":
+            return {"findings": [{"zone": "rear_left_door", "type": "paint scratch", "confidence": 0.93}],
+                    "clear_confidence": 0.9}
+        return {"findings": [], "clear_confidence": 0.95}
+    return FakeLLM().on("visual.defects", defects)
+
+
+async def test_damage_photos_are_scored_for_recall_kind_zone_and_false_alarms(tmp_path):
+    (tmp_path / "dented.jpg").write_bytes(b"DENTED")
+    (tmp_path / "clean.jpg").write_bytes(b"CLEAN")
+    (tmp_path / "d.json").write_text(json.dumps({"name": "d", "damage": [
+        {"id": "scratched-door", "image": "dented.jpg", "expect_damaged": True,
+         "expect_kinds": ["scratch"], "expect_zones": ["rear_left_door", "rear_right_door"]},
+        {"id": "dent-on-bonnet", "image": "dented.jpg", "expect_damaged": True,
+         "expect_kinds": ["dent"], "expect_zones": ["bonnet"]},
+        {"id": "clean-hood", "image": "clean.jpg", "expect_damaged": False},
+    ]}))
+    data, base = load_dataset(tmp_path / "d.json")
+
+    m = (await evaluate(data, base, damage_model(), flows=("damage",), runs=2))["flows"]["damage"]["metrics"]
+
+    assert m["damage_recall"] == 1.0 and m["damage_failed"] == 1.0
+    assert m["kind_precision"] == 0.5            # a scratch is right on the door, wrong for the dent
+    assert m["zone_accuracy"] == 0.5
+    assert m["recall_by_kind"] == {"dent": 0.0, "scratch": 1.0}
+    assert m["false_alarm_rate"] == 0.0 and m["clean_pass_rate"] == 1.0
+
+
+def test_finding_types_read_as_damage_kinds():
+    from marshal_ai.eval.damage import kinds_of
+    assert kinds_of("scratch") == {"scratch"}
+    assert kinds_of("paint_scratch") == {"scratch", "paint"}
+    assert kinds_of("dent") == {"dent"}
+    assert kinds_of("missing_part") == {"missing_part"}
+    assert kinds_of("cracked bumper") == {"broken_part"}
+    assert kinds_of("panel_gap") == set()
