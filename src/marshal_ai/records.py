@@ -160,6 +160,8 @@ class Scenario(BaseModel):
     owner: str | None = None
     tags: list[str] = Field(default_factory=list)       # e.g. "regression", "from-incident"
     notes: str = ""                                    # validator errors, failure report
+    # A regression test found by the search: marshal_ai.lab.adversarial.FailureReport as JSON
+    failure_report: dict | None = None
     created_at: datetime = Field(default_factory=now)
 
 

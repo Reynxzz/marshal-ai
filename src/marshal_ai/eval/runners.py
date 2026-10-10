@@ -173,7 +173,8 @@ def _search(llm: LLM, case: SearchCase, seed: int = 7) -> dict:
             "failed_criteria": result.minimal.run.failed_criteria if result.minimal else [],
             "unavoidable": len(result.unavoidable), "reasoning": result.reasoning,
             "explanation": result.explanation.model_dump() if result.explanation else None,
-            "seconds": round(seconds, 2)}
+            "failure_report": result.failure_report.model_dump(mode="json") if result.failure_report else None,
+            "report": result.report(), "seconds": round(seconds, 2)}
 
 
 async def run_search(llm: LLM, case: SearchCase, cache: MediaCache) -> dict:

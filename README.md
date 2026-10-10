@@ -218,6 +218,24 @@ pallet stack 11 vs 31. Neither finds a failure in scene 3's incident in 60 runs:
 it was tried (`TestRun.reason`): the batch's reasoning, e.g. "speed near the person is consistently
 at the 5 km/h limit, so the system is at its edge", or the shrinking step.
 
+**The failure report** (`Scenario.failure_report`) follows the design's flow 7 example. The facts come
+from the runs: the conditions, each measurement against its limit, and the single changes back to the
+passing case that make it pass (found while shrinking). Gemini adds the likely cause and a concrete
+fix, a speed cap for one zone and light, which is then tried in the simulator on both the failing and
+the passing case. From the eval run above:
+
+> SC-0300-v15 fails: at night, with the worker starting to move when the car is 8 m away at 1.2 m/s
+> from behind a parked car, the car driving at 8 km/h, min gap to person 1.43 m (limit >= 1.5 m); speed
+> near person 7.28 km/h (limit <= 5 km/h). It passes with the trigger distance back at 12 m or with
+> light back at noon. Likely cause: ... reduced visibility at night and the worker appearing closer ...
+> Fix tried in the simulator: with 5 km/h in test_track at night, the failing case passes and the
+> passing case still passes. Clip: gs://marshal/lab/SC-0300-v15.mp4
+
+On the 9 failures found, Gemini proposed a fix every time and every fix passed both checks
+(`fix_proposed` 1.0, `fix_works` 1.0). Its free-text suggestion stays general ("brake earlier when a
+pedestrian emerges"); the speed cap is the checkable part. On CARLA the check reads "not tried", as the
+CARLA runner cannot change the driving system's limits.
+
 **Its clean cases do not measure false alarms.** They are crops of used cars whose wear was never
 labelled: on gemini-2.5-flash the gate flagged 7 of 16, and at full size at least three findings are
 right (scratches on the blue door, scuffs on the grey bumper, a missing front number plate). Relabelling

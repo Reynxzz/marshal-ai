@@ -142,3 +142,34 @@ def test_release_gate_blocks_until_the_fix_ships(library):
     assert not new.blocked, new.failed
     assert new.newly_passing == sorted(old.failed)
     assert gate.approve(new, "eng-kim").approved_by == "eng-kim"
+
+
+def test_the_failure_report_states_the_facts_and_tries_the_fix(library):
+    app, sid = library
+    result = app.adversarial.search(sid)
+    report = result.failure_report
+    assert report.measured and all("limit" in m or "contact" in m for m in report.measured)
+    assert report.passes_when                    # the shrink established what makes it pass
+    assert report.fix_check.startswith("Fix tried in the simulator") and "failing case passes" in report.fix_check
+    stored = app.rt.store.get(Scenario, result.regression_id)
+    assert stored.failure_report["fix_check"] == report.fix_check and stored.notes == result.report()
+
+
+def _report_with(app, speed_fix):
+    def explain(call):
+        return {"summary": "s", "likely_cause": "c", "suggested_fix": "f", "speed_fix": speed_fix}
+    app.rt.llm.on("adversarial.report", explain)
+
+
+def test_a_fix_that_does_not_work_is_reported_as_such(library):
+    app, sid = library
+    _report_with(app, {"zone": "test_track", "time_of_day": ["night"], "max_speed_kmh": 4.0})  # wrong zone
+    report = app.adversarial.search(sid).failure_report
+    assert "still fails" in report.fix_check
+
+
+def test_a_fix_in_a_zone_the_plant_lacks_is_not_tried(library):
+    app, sid = library
+    _report_with(app, {"zone": "paint_shop", "time_of_day": ["night"], "max_speed_kmh": 4.0})
+    report = app.adversarial.search(sid).failure_report
+    assert report.speed_fix is None and report.fix_check is None and report.suggested_fix == "f"

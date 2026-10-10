@@ -256,4 +256,5 @@ async def test_a_search_is_scored_against_random_search_on_the_same_scenario():
     [outcome] = report["flows"]["search"]["cases"]["design-sc0142"]["outcomes"]
     assert outcome["found"] and outcome["runs_to_failure"] <= 60 and len(outcome["random"]) == 2
     assert m["model"]["found"] == 1.0 and m["explained"] == 1.0
+    assert m["fix_proposed"] == 1.0 and m["fix_works"] == 1.0
     assert set(m["random"]) == set(m["model"])

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import copy
 import random
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, Field
@@ -64,10 +64,102 @@ class VariationBatch(BaseModel):
     variations: list[Variation]
 
 
+class SpeedFix(BaseModel):
+    zone: str = Field(description="the plant zone the speed limit applies in")
+    time_of_day: list[Light] = Field(description="when it applies")
+    max_speed_kmh: float = Field(gt=0, le=10)
+
+
 class FailureExplanation(BaseModel):
     summary: str = Field(description="the failing case and how it differs from the passing one")
     likely_cause: str
-    suggested_fix: str
+    suggested_fix: str = Field(description="one concrete change to the driving system, in a sentence")
+    speed_fix: SpeedFix | None = Field(default=None, description="the fix as a speed limit, when a slower "
+                                       "approach would prevent the failure; null otherwise")
+
+
+class FailureReport(BaseModel):
+    """The design's failure report (flow 7): the facts from code, the cause and fix from Gemini,
+    and the fix tried by code before anyone is asked to believe it."""
+
+    variant: str
+    conditions: str
+    measured: list[str] = Field(description="each failed criterion: what was measured against its limit")
+    passes_when: list[str] = Field(description="single changes back to the passing case that make it pass")
+    likely_cause: str | None = None
+    suggested_fix: str | None = None
+    speed_fix: SpeedFix | None = None
+    fix_check: str | None = None        # what happened when the fix was tried, or why it was not
+    clip_uri: str | None = None
+
+    def text(self) -> str:
+        out = f"{self.variant} fails: {self.conditions}, {'; '.join(self.measured)}."
+        if self.passes_when:
+            out += f" It passes {' or '.join(self.passes_when)}."
+        if self.likely_cause:
+            out += f" Likely cause: {self.likely_cause.rstrip('.')}."
+        if self.suggested_fix:
+            out += f" Suggested fix: {self.suggested_fix.rstrip('.')}."
+        if self.fix_check:
+            out += f" {self.fix_check}"
+        if self.clip_uri:
+            out += f" Clip: {self.clip_uri}"
+        return out
+
+
+OCCLUDER_WORDS = {"forklift": "a forklift", "parked_car": "a parked car", "pallet_stack": "a pallet stack"}
+
+
+def conditions_text(params: dict) -> str:
+    """A variant's conditions in words, as the design's example report states them."""
+    parts = [f"at {params['light']}" if params.get("light") != "noon" else "at noon"]
+    if params.get("weather") and params["weather"] != "clear":
+        parts.append(f"in {params['weather']}")
+    worker = []
+    if params.get("trigger_distance_m") is not None:
+        worker.append(f"starting to move when the car is {params['trigger_distance_m']:g} m away")
+    if params.get("worker_speed_ms") is not None:
+        worker.append(f"at {params['worker_speed_ms']:g} m/s")
+    if params.get("occluder") not in (None, "none"):
+        worker.append(f"from behind {OCCLUDER_WORDS[params['occluder']]}")
+    if worker:
+        parts.append("with the worker " + " ".join(worker))
+    if params.get("second_actor") == "car_ahead_braking":
+        parts.append("with a car braking ahead")
+    parts.append(f"the car driving at {params['ego_speed_kmh']:g} km/h")
+    return ", ".join(parts)
+
+
+# How each varied parameter reads in "It passes with ...": its name and unit.
+PARAM_WORDS = {"ego_speed_kmh": ("the car's speed", " km/h"), "trigger_distance_m": ("the trigger distance", " m"),
+               "worker_speed_ms": ("the worker's speed", " m/s")}
+
+
+def passes_text(key: str, value) -> str:
+    """One single change that makes the failing case pass, e.g. "with the car's speed back at 8 km/h"."""
+    if key == "occluder":
+        return f"with the worker behind {OCCLUDER_WORDS[value]}" if value in OCCLUDER_WORDS else "with nothing hiding the worker"
+    if key == "second_actor":
+        return "without the car braking ahead" if value == "none" else "with the car braking ahead"
+    if key in ("light", "weather"):
+        return f"with {key} back at {value}"
+    name, unit = PARAM_WORDS.get(key, (key.replace("_", " "), ""))
+    return f"with {name} back at {value:g}{unit}" if isinstance(value, float) else f"with {name} back at {value}{unit}"
+
+
+def measured_text(spec: ScenarioSpec, metrics: dict) -> list[str]:
+    out = []
+    for text, c in zip(spec.pass_criteria, spec.criteria()):
+        if c.holds(metrics) if c.metric in metrics else False:
+            continue
+        if c.op == "flag":
+            out.append({"no_contact": "the car made contact", "reached_goal": "the car did not reach its goal"}
+                       .get(c.metric, f"{c.metric} failed"))
+        else:
+            unit = " km/h" if c.metric.endswith("_kmh") else " s" if c.metric.endswith("_s") else " m"
+            out.append(f"{c.metric.replace('_', ' ').removesuffix(' kmh').removesuffix(' m').removesuffix(' s')} "
+                       f"{metrics.get(c.metric)}{unit} (limit {c.op} {c.value:g}{unit})")
+    return out
 
 
 SEARCH_SYSTEM = """You search for situations where a driverless plant car behaves unsafely. You get the
@@ -78,7 +170,11 @@ driver could survive count: variations that even a careful reference driver fail
 listed as unavoidable, so do not propose more of them. Give your reasoning."""
 
 REPORT_SYSTEM = """You explain a simulation test failure to driving-system engineers in plain
-language: what happened, how it differs from the passing case, the likely cause, and a concrete fix."""
+language: what happened, how it differs from the passing case, the likely cause, and one concrete fix
+to the driving system. Name the zone, the conditions and the number, as in "reduce speed near
+finishing_corner at night to 5 km/h"; never a general advice such as "improve detection". When a
+slower approach would prevent the failure, also give the fix as speed_fix, using a zone the car
+drives through; the fix will be tried in the simulator before anyone acts on it."""
 
 
 def base_params(spec: ScenarioSpec) -> dict:
@@ -162,6 +258,8 @@ class SearchResult:
     failure: SearchRun | None = None
     minimal: SearchRun | None = None
     explanation: FailureExplanation | None = None
+    failure_report: FailureReport | None = None
+    necessary: list[str] = field(default_factory=list)      # changes whose undo made the case pass
     reasoning: list[str] = field(default_factory=list)
     regression_id: str | None = None
     unavoidable: list[dict] = field(default_factory=list)   # skipped: even a careful driver fails them
@@ -176,6 +274,8 @@ class SearchResult:
         if self.minimal is None:
             return (f"{self.scenario_id}: no failure in {len(self.runs)} runs; "
                     "robust within the tested ranges." + skipped)
+        if self.failure_report is not None:
+            return self.failure_report.text() + skipped
         m = self.minimal
         metrics = ", ".join(f"{k} {v}" for k, v in m.run.metrics.items())
         text = (f"{m.spec.id} fails ({'; '.join(m.run.failed_criteria)}). Changes from the passing case: "
@@ -271,6 +371,10 @@ class AdversarialTester:
             result.runs.append(r)
             if not r.run.passed:
                 current = r
+            else:
+                result.necessary.append(key)
+        if len(current.changes) == 1:               # undoing the one change is the passing case itself
+            result.necessary = list(current.changes)
         return current
 
     def search(self, scenario_id: str) -> SearchResult:
@@ -296,23 +400,74 @@ class AdversarialTester:
         if result.failure is None:
             return result
         result.minimal = self._shrink(base_spec, base, result.failure, result)
-        result.explanation = self._explain(base_spec, result.minimal)
+        result.failure_report = self._report(base_spec, base, result)
         result.regression_id = self._add_to_suite(result)
         return result
 
-    def _explain(self, base_spec: ScenarioSpec, minimal: SearchRun) -> FailureExplanation | None:
+    def _report(self, base_spec: ScenarioSpec, base: dict, result: SearchResult) -> FailureReport:
+        m = result.minimal
+        params = {**base, **m.changes}
+        passes_when = [passes_text(k, base[k]) for k in result.necessary if k in base and base[k] is not None]
+        report = FailureReport(variant=m.spec.id, conditions=conditions_text(params),
+                               measured=measured_text(m.spec, m.run.metrics), passes_when=passes_when,
+                               clip_uri=m.run.clip_uri)
+        result.explanation = self._explain(base_spec, m, report)
+        if result.explanation is None:
+            return report
+        fix = result.explanation.speed_fix
+        if fix is not None and fix.zone not in self.rt.map.zones:
+            fix = None                       # a zone the plant does not have cannot be tried
+        report = report.model_copy(update={"likely_cause": result.explanation.likely_cause,
+                                           "suggested_fix": result.explanation.suggested_fix,
+                                           "speed_fix": fix})
+        return report.model_copy(update={"fix_check": self._try_fix(base_spec, m.spec, fix)})
+
+    def _explain(self, base_spec: ScenarioSpec, minimal: SearchRun,
+                 report: FailureReport) -> FailureExplanation | None:
         prompt = (f"Passing case: {to_prompt_json(base_spec)}\nFailing variant: {to_prompt_json(minimal.spec)}\n"
                   f"Changes: {minimal.changes}\nMetrics: {minimal.run.metrics}\n"
-                  f"Failed criteria: {minimal.run.failed_criteria}")
+                  f"Failed criteria: {minimal.run.failed_criteria}\n"
+                  f"Measured: {report.measured}\nIt passes: {report.passes_when or 'not established'}\n"
+                  f"Zones the car drives through: {self._route_zones(base_spec)}")
         try:
             return self.rt.llm.generate("adversarial.report", prompt, FailureExplanation, None, REPORT_SYSTEM)
         except Exception:
             return None
 
+    def _route_zones(self, spec: ScenarioSpec) -> list[str]:
+        names = [spec.ego.waypoints[0]]
+        for a, b in zip(spec.ego.waypoints, spec.ego.waypoints[1:]):
+            names += self.rt.map.route(a, b)[1:]
+        return sorted({self.rt.map.points[n].zone for n in names})
+
+    def _try_fix(self, base_spec: ScenarioSpec, failing: ScenarioSpec, fix: SpeedFix | None) -> str | None:
+        """Run the failing case, and the passing one, with the fix in the driving system.
+
+        A fix the lab can state as a speed limit it can also try, which is the point of asking for
+        one: the report then says whether the fix works rather than only proposing it.
+        """
+        if fix is None:
+            return None
+        driver = getattr(self.runner, "driver", None)
+        if driver is None:
+            return "The fix was not tried: this runner cannot change the driving system."
+        caps = {**driver.zone_speed_caps_kmh, **{f"{fix.zone}@{t}": fix.max_speed_kmh for t in fix.time_of_day}}
+        fixed = self.runner.with_driver(replace(driver, name=f"{driver.name}+fix", zone_speed_caps_kmh=caps))
+        failing_now, base_now = (judge(s, fixed.run(s).metrics) for s in (failing, base_spec))
+        when = ", ".join(fix.time_of_day)
+        tried = f"With {fix.max_speed_kmh:g} km/h in {fix.zone} at {when}"
+        if failing_now.passed and base_now.passed:
+            return f"Fix tried in the simulator: {tried.lower()}, the failing case passes and the passing case still passes."
+        if not failing_now.passed:
+            return f"Fix tried in the simulator: {tried.lower()}, the case still fails ({'; '.join(failing_now.failed)})."
+        return f"Fix tried in the simulator: {tried.lower()}, the case passes but the passing case now fails."
+
     def _add_to_suite(self, result: SearchResult) -> str:
         m = result.minimal
         scenario = Scenario(id=m.spec.id, spec=m.spec.model_dump(mode="json"),
                             source=f"adversarial search on {result.scenario_id}",
-                            status=ScenarioStatus.IN_LIBRARY, tags=["regression"], notes=result.report())
+                            status=ScenarioStatus.IN_LIBRARY, tags=["regression"], notes=result.report(),
+                            failure_report=result.failure_report.model_dump(mode="json")
+                            if result.failure_report else None)
         self.rt.store.put(scenario)
         return scenario.id

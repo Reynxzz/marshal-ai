@@ -214,6 +214,9 @@ def scenario_metrics(cases: list[ScenarioCase], results: dict[str, list[dict]]) 
     }
 
 
+FIX_WORKS = "the failing case passes and the passing case still passes"
+
+
 def _search_scores(searches: list[dict]) -> dict:
     found = [s for s in searches if s["found"]]
     return {
@@ -244,6 +247,11 @@ def search_metrics(cases: list[SearchCase], results: dict[str, list[dict]]) -> d
         "random": baseline,
         "runs_to_failure_by_case": per_case,
         "explained": _rate([o["explanation"] is not None for o in runs if o["found"]]),
+        # a fix stated as a speed limit the lab could try, and, tried, one that works: the failing case
+        # passes and the passing case still does
+        "fix_proposed": _rate([bool((o["failure_report"] or {}).get("speed_fix")) for o in runs if o["found"]]),
+        "fix_works": _rate([FIX_WORKS in ((o["failure_report"] or {}).get("fix_check") or "")
+                            for o in runs if o["found"]]),
         "consistency": _consistency({c.id: [str(o["minimal"]) for o in results.get(c.id, [])] for c in cases}),
         "latency": _latency(runs),
     }

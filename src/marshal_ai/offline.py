@@ -266,8 +266,14 @@ def adversarial_report(call: LLMCall) -> dict:
     fix = "reduce speed near finishing_corner to 5 km/h in low light" if changes.get("light") in ("night", "dusk") \
         else "reduce approach speed near occluded crossings to 5 km/h"
     gap = metrics.get("min_gap_to_person_m")
+    zones = _section(call.prompt, "Zones the car drives through: ") or []
+    if isinstance(zones, str):
+        zones = re.findall(r"'([^']+)'", zones)
+    zone = "finishing_corner" if "finishing_corner" in zones else (zones[0] if zones else None)
+    light = changes.get("light", "noon")
+    speed_fix = {"zone": zone, "time_of_day": [light], "max_speed_kmh": 4.0} if zone else None
     return {"summary": f"With {changes}, the car came within {gap} m of the worker ({failed}).",
-            "likely_cause": cause, "suggested_fix": fix}
+            "likely_cause": cause, "suggested_fix": fix, "speed_fix": speed_fix}
 
 
 def offline_llm() -> FakeLLM:

@@ -139,8 +139,13 @@ simulation cannot yet show what the design describes. The target is the design's
   *Done for scores:* measured against random search on dataset v5-search: first failure in 11 runs
   vs 19, 2.9 vs 2.0 failures per 100 runs, faster on every scenario with a failure. Each run keeps
   its reason (`TestRun.reason`). Clips wait on Qais's clip per test run.
-- [ ] **The failure report** in the design's form (flow 7 example): conditions, measured gap vs
+- [x] **The failure report** in the design's form (flow 7 example): conditions, measured gap vs
   limit, likely cause, suggested fix, with the clip.
+  *Done:* conditions, measured vs limit and "it passes with ..." come from the runs, not the model;
+  Gemini gives the cause and a concrete fix (zone, condition, km/h), which is tried in the simulator
+  on the failing and the passing case. Dataset v5-search: fix proposed 1.0, fix works 1.0. Stored as
+  `Scenario.failure_report`. On CARLA the fix is reported "not tried" (the runner cannot change the
+  driving system); the clip waits on Qais's clip per test run.
 - [ ] **Release gate end to end** (scene 5): the failure enters the regression suite, BigQuery
   history is read, and the gate reports "1 failing test, release blocked".
 - [ ] **A retrieval library for generation**: validated specs as examples for new requests, as in
@@ -206,7 +211,7 @@ at a time, so the code work is parallel and the server time is shared.
 | Qais → Rey | Wrong-colour car, brake-lamp asset | Scene 2 judgements |
 | Qais → Rey | Assistance options executed in CARLA | Scene 3 end to end |
 | Qais → Rey | Full search space compiled; parallel servers; a clip per run | Search that reads results, failure report with clip |
-| Rey → Faris | Record shapes, the `proposals` collection, the assistance card fields (`AssistanceCase.objects`: draw `box_2d` on `image`, scaled from 0-1000), `TestRun.reason` (why the search tried each variant) | Dashboard screens |
+| Rey → Faris | Record shapes, the `proposals` collection, the assistance card fields (`AssistanceCase.objects`: draw `box_2d` on `image`, scaled from 0-1000), `TestRun.reason` (why the search tried each variant), `Scenario.failure_report` (conditions, measured, passes_when, likely_cause, suggested_fix, speed_fix, fix_check, clip_uri) | Dashboard screens |
 | Qais → Faris | Replay clips per run, a live camera | Video on the dashboard |
 | Rey → Qais | BehaviorAgent drives into static props: SC-0142 (scene 3's box) fails `no_contact` on CARLA. The stand-in needs to brake for objects in the lane, as the plant's driving system would | Scene 3 and its test passing |
 | Rey → Qais | The VM's `.env` (`~/marshal-app`) points `GOOGLE_APPLICATION_CREDENTIALS` at a laptop path; scripts that do not export it themselves (`run_carla_lab.sh`) cannot reach Gemini | Lab runs with Gemini on the VM |
