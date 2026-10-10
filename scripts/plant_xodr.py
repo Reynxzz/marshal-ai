@@ -35,13 +35,14 @@ STRAIGHT_LONG, STRAIGHT_SHORT, RADIUS = 120.0, 60.0, 22.0
 #   -3      shoulder: the rework bays and, on the yard road, slots Y1-Y8 (parking there)
 #   -4      a walkway, beside the slots on the yard road
 #   -5      on the yard road a second row of parking, for the lot of finished cars; else apron
-#   -6      the apron out to the perimeter wall
+#   -6      the apron out to the perimeter fence (dress_plant.py)
+#   -7      paving beyond the fence: without it the world ends at the fence, in grey nothing
 RIGHT = [(-1, 3.5, "broken"), (-2, 3.5, "solid"), (-3, 3.5, "solid"), (-4, 3.0, "none"), (-5, 5.5, "solid"),
-         (-6, 8.0, "none")]
-RIGHT_TYPES = {"default": ["driving", "driving", "shoulder", "sidewalk", "sidewalk", "sidewalk"],
+         (-6, 8.0, "none"), (-7, 40.0, "none")]
+RIGHT_TYPES = {"default": ["driving", "driving", "shoulder", "sidewalk", "sidewalk", "sidewalk", "sidewalk"],
                # not a driving aisle: a driving lane linked to the next road's sidewalk is a dead end,
                # and the route planner, aiming for the nearest driving lane to a slot, found no path
-               7: ["driving", "driving", "parking", "sidewalk", "parking", "sidewalk"]}
+               7: ["driving", "driving", "parking", "sidewalk", "parking", "sidewalk", "sidewalk"]}
 INNER_APRON = 20.0          # left of the reference line, inside the loop (under the bend radius)
 FILL_WIDTH = 32.0           # each side of the filler road across the middle of the loop
 

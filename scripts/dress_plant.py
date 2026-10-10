@@ -42,7 +42,9 @@ BAYS = {"rework.paint": (211.67, -116.81), "rework.body": (212.89, -106.80),
 GATE_Y, TRACK_Y = (-26.0, -42.0), (-42.0, -84.0)       # along road 34, heading -y
 FREE_SHOULDER_FROM_Y = -84.0     # the shoulder is free of bays and slots north of this (y greater)
 PLANT_COLOURS = ["0,80,200", "230,230,230", "120,120,120", "20,20,20", "200,20,20"]
-PROP_TYPES = ("static.prop.chainbarrier", "static.prop.trafficcone01", "static.prop.box01", "static.prop.box02",
+PROP_TYPES = ("static.prop.dirtdebris01", "static.prop.dirtdebris02", "static.prop.dirtdebris03",
+              "static.prop.brokentile01", "static.prop.brokentile02", "static.prop.brokentile03",
+              "static.prop.chainbarrier", "static.prop.trafficcone01", "static.prop.box01", "static.prop.box02",
               "static.prop.box03", "static.prop.barrel", "static.prop.ironplank", "static.prop.warningconstruction",
               "static.prop.calibrator", "static.prop.trafficwarning", "static.prop.streetbarrier")
 
@@ -292,6 +294,7 @@ def dress_world(world: carla.World, m: carla.Map) -> Dresser:
     # the test track: cones along the walkway
     for s in range(40, 96, 5):
         put("static.prop.trafficcone01", 1, -4, float(s), right=-0.8, up=0.05)
+    detail_world(d, m, put, lengths)
     # the rework bays: workshop clutter on the walkway beside each
     for s in (8.0, 18.0, 28.0, 38.0, 50.0):
         put("static.prop.barrel", 3, -4, s - 2.5, right=0.4)
@@ -300,6 +303,40 @@ def dress_world(world: carla.World, m: carla.Map) -> Dresser:
         put("static.prop.ironplank", 3, -5, s + 0.3)
         put("static.prop.warningconstruction", 3, -5, s + 3.5, yaw_add=180.0)
     return d
+
+
+def detail_world(d: "Dresser", m: carla.Map, put, lengths: dict) -> None:
+    """What makes it read as a working plant rather than a parked-car display: dividers between the
+    lot rows, service vans at the bays, ground clutter, and (MARSHAL_DRESS_PEOPLE, default on) a few
+    staff standing in the yard, the compound and by the bays - away from every driven lane, because a
+    person in view is what makes the assistance card recommend waiting."""
+    import os
+    import random
+    rng = random.Random(7)
+    # dividers between the compound's rows and between the yard's rows on the inner apron
+    for s in range(6, int(lengths[9]) - 4, 4):
+        for lane in (1, -1):
+            put("static.prop.streetbarrier", 9, lane, float(s))
+    for s in range(3, int(lengths[7]) - 2, 4):
+        put("static.prop.streetbarrier", 7, 1, float(s))
+    # service vans on the apron beside the bays
+    for s in (8.0, 28.0, 50.0):
+        put("vehicle.mercedes.sprinter", 3, -5, s + 1.0, "230,230,230", up=0.3)
+    # ground clutter on the aprons, so the concrete is not one flat colour
+    clutter = ["static.prop.dirtdebris01", "static.prop.dirtdebris02", "static.prop.dirtdebris03",
+               "static.prop.brokentile01", "static.prop.brokentile02", "static.prop.brokentile03"]
+    for _ in range(40):
+        road = rng.choice(list(LOOP_ROADS))
+        s = rng.uniform(2.0, lengths[road] - 2.0)
+        lane, right = rng.choice([(-6, rng.uniform(-3.5, 3.5)), (-7, rng.uniform(-18.0, 18.0)),
+                                  (1, rng.uniform(-9.0, 9.0))])
+        put(rng.choice(clutter), road, lane, s, right=right, up=0.02, yaw_add=rng.uniform(0, 360))
+    if os.environ.get("MARSHAL_DRESS_PEOPLE", "1") == "0":
+        return
+    walkers = sorted(b.id for b in d.lib.filter("walker.pedestrian.*"))
+    for k, (road, lane, s, right) in enumerate([(7, 1, 20.0, 0.0), (7, 1, 44.0, 0.0), (9, 1, 40.0, 0.0),
+                                                 (9, -1, 82.0, 0.0), (3, -5, 20.0, 1.5), (3, -5, 42.0, 1.5)]):
+        put(walkers[(k * 7) % len(walkers)], road, lane, s, right=right, up=1.0, yaw_add=90.0 * k)
 
 
 def check_world(m: carla.Map, actors) -> list[str]:
