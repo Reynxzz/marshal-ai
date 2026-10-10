@@ -47,6 +47,7 @@ SCHEMA = [
 
 class History(Protocol):
     def append(self, kind: str, key: str, payload: dict) -> bool: ...
+    def latest(self, kind: str, exclude_key: str | None = None) -> dict | None: ...
 
 
 class NoHistory:
@@ -56,6 +57,9 @@ class NoHistory:
 
     def append(self, kind: str, key: str, payload: dict) -> bool:
         return False
+
+    def latest(self, kind: str, exclude_key: str | None = None) -> dict | None:
+        return None
 
 
 class BigQueryHistory:
@@ -121,6 +125,29 @@ class BigQueryHistory:
                 time.sleep(self.retry_delay_s * (attempt + 1))
         log.warning("could not append %s %s to history (%s)", kind, key, last[:200])
         return False
+
+
+    def latest(self, kind: str, exclude_key: str | None = None) -> dict | None:
+        """The newest row of a kind, optionally not for one key; None if there is none or BigQuery
+        cannot be read. The release gate uses it to compare a release with the one before it,
+        which an earlier process evaluated."""
+        from google.cloud import bigquery
+
+        sql = (f"SELECT payload FROM `{self.table_id}` WHERE kind = @kind"
+               + (" AND key != @key" if exclude_key else "") + " ORDER BY recorded_at DESC LIMIT 1")
+        params = [bigquery.ScalarQueryParameter("kind", "STRING", kind)]
+        if exclude_key:
+            params.append(bigquery.ScalarQueryParameter("key", "STRING", exclude_key))
+        try:
+            rows = list(self._ensure().query(
+                sql, job_config=bigquery.QueryJobConfig(query_parameters=params)).result())
+        except Exception as exc:              # like appends: history informs, it never decides
+            log.warning("could not read %s from history (%s)", kind, str(exc)[:200])
+            return None
+        if not rows:
+            return None
+        payload = rows[0]["payload"]
+        return json.loads(payload) if isinstance(payload, str) else payload
 
 
 class WithHistory:

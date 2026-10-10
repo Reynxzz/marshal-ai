@@ -57,6 +57,9 @@ def parser() -> argparse.ArgumentParser:
                          "server: every compiled run puts the world in synchronous "
                          "mode and ticks it, so concurrent runs corrupt each other. "
                          "The design's 8-way parallelism needs one server per slot.")
+    ap.add_argument("--release", default=None,
+                    help="then run the whole library against this driving system release "
+                         "(demo scene 5); it is blocked if any test fails")
     ap.add_argument("--engineer", default="eng-demo")
     return ap
 
@@ -166,6 +169,18 @@ def run(args: argparse.Namespace) -> dict:
                 for r in search.runs]}, indent=2, sort_keys=True, default=str))
         manifest["adversarial"] = summary
         manifest["artifacts"] = sorted(p.name for p in out.iterdir())
+
+    # ---- scene 5: the release gate over the whole library -------------------
+    if args.release:
+        gate = app.release_gate
+        emit({"type": "lab.release.start", "release": args.release,
+              "suite": [s.id for s in gate.suite()], "history": getattr(rt.history, "name", "none")})
+        report = gate.evaluate(args.release, runner, parallel=args.batch)
+        emit({"type": "lab.release.done", "summary": report.summary(), "blocked": report.blocked,
+              "failed": report.failed, "previous_release": report.previous_release,
+              "newly_failing": report.newly_failing, "newly_passing": report.newly_passing})
+        manifest["release"] = {**report.model_dump(mode="json"), "summary": report.summary(),
+                               "blocked": report.blocked}
 
     library = [s.id for s in rt.store.list(Scenario)]
     manifest["library"] = library

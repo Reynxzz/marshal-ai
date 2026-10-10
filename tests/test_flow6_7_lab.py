@@ -13,7 +13,7 @@ from marshal_ai.lab.sim import simulate
 from marshal_ai.lab.spec import ScenarioSpec
 from marshal_ai.llm import FakeLLM
 from marshal_ai.plant import load_plant_map
-from marshal_ai.records import Scenario, ScenarioStatus
+from marshal_ai.records import ReleaseReport, Scenario, ScenarioStatus
 
 DOC_REQUEST = ("A worker steps out from behind a parked forklift at dusk while a car turns "
                "into the finishing lane.")
@@ -140,8 +140,37 @@ def test_release_gate_blocks_until_the_fix_ships(library):
         gate.approve(old, "eng-kim")
     new = gate.evaluate("behavior-agent-1.1", SimRunner(app.rt.map, RELEASES["behavior-agent-1.1"]))
     assert not new.blocked, new.failed
-    assert new.newly_passing == sorted(old.failed)
+    assert new.previous_release == "behavior-agent-1.0" and new.newly_passing == sorted(old.failed)
     assert gate.approve(new, "eng-kim").approved_by == "eng-kim"
+    assert gate.report("behavior-agent-1.1").approved_by == "eng-kim"     # the approval is stored
+
+
+class _History:
+    """BigQuery history holding one release report that an earlier process wrote."""
+
+    def __init__(self, row):
+        self.row, self.asked = row, []
+
+    def append(self, kind, key, payload):
+        return True
+
+    def latest(self, kind, exclude_key=None):
+        self.asked.append((kind, exclude_key))
+        return self.row if self.row["release"] != exclude_key else None
+
+
+def test_release_gate_compares_with_the_release_history_holds(library):
+    """A fresh process has no reports in its store; what changed is read from history."""
+    app, sid = library
+    app.adversarial.search(sid)
+    earlier = ReleaseReport(release="behavior-agent-0.9", total=1, passed=[sid])
+    app.rt.history = _History(earlier.model_dump(mode="json"))
+    report = app.release_gate.evaluate("behavior-agent-1.0",
+                                       SimRunner(app.rt.map, RELEASES["behavior-agent-1.0"]))
+    assert app.rt.history.asked == [("ReleaseReport", "behavior-agent-1.0")]
+    assert report.previous_release == "behavior-agent-0.9"
+    assert report.newly_failing == sorted(report.failed) and report.blocked
+    assert "Newly failing since behavior-agent-0.9" in report.summary()
 
 
 def test_the_failure_report_states_the_facts_and_tries_the_fix(library):

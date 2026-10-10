@@ -27,7 +27,7 @@ simulation cannot yet show what the design describes. The target is the design's
 | 2 Two faults | Wrong colour flagged at the gate; dead **left brake light** (telemetry ON, camera OFF); both booked into rework | Dead **headlight** caught (`run_carla_day4.sh`); wrong colour not run on CARLA | Wrong-colour car on CARLA; a brake-lamp fault the asset can show; cars driven to rework bays and re-inspected |
 | 3 Stuck car | Box in lane, worker nearby, "wait" recommended, case sent to the lab | Works (`run_carla_day5.sh`) | The chosen option executed by the car; the case turned into a lab scenario on CARLA |
 | 4 Test lab | Plain-language request → spec → run → passes; adversarial search finds a night / pallet-stack failure, report with clip | Generation and a serial search work (`run_carla_lab.sh`) | Search over light, weather, occluder, second actor; 8 runs in parallel; failure report with its clip |
-| 5 Close | Failure joins the regression suite; release gate shows "1 failing test, release blocked" | Implemented (`lab/regression.py`), never run end to end | Release gate end to end on real runs and BigQuery history |
+| 5 Close | Failure joins the regression suite; release gate shows "1 failing test, release blocked" | Run end to end on CARLA (`run_carla_release.sh`): blocked by the search's failure, reports in BigQuery | Release gate end to end on real runs and BigQuery history |
 
 ---
 
@@ -146,8 +146,12 @@ simulation cannot yet show what the design describes. The target is the design's
   on the failing and the passing case. Dataset v5-search: fix proposed 1.0, fix works 1.0. Stored as
   `Scenario.failure_report`. On CARLA the fix is reported "not tried" (the runner cannot change the
   driving system); the clip waits on Qais's clip per test run.
-- [ ] **Release gate end to end** (scene 5): the failure enters the regression suite, BigQuery
+- [x] **Release gate end to end** (scene 5): the failure enters the regression suite, BigQuery
   history is read, and the gate reports "1 failing test, release blocked".
+  *Done:* `run_carla_release.sh` on CARLA with Gemini: the search failed SC-0142-v1 in 2 runs, it
+  joined the suite, and the gate reported "2 tests, 1 passed, 1 failed. 1 failing test, release
+  blocked." Release reports are stored (`releases`) and written to BigQuery; the previous release is
+  read back from there. Release 1.1 (the fix) runs only on the quick simulator.
 - [ ] **A retrieval library for generation**: validated specs as examples for new requests, as in
   ChatScene (design, flow 6 "The method Marshal keeps").
 
@@ -211,7 +215,7 @@ at a time, so the code work is parallel and the server time is shared.
 | Qais → Rey | Wrong-colour car, brake-lamp asset | Scene 2 judgements |
 | Qais → Rey | Assistance options executed in CARLA | Scene 3 end to end |
 | Qais → Rey | Full search space compiled; parallel servers; a clip per run | Search that reads results, failure report with clip |
-| Rey → Faris | Record shapes, the `proposals` collection, the assistance card fields (`AssistanceCase.objects`: draw `box_2d` on `image`, scaled from 0-1000), `TestRun.reason` (why the search tried each variant), `Scenario.failure_report` (conditions, measured, passes_when, likely_cause, suggested_fix, speed_fix, fix_check, clip_uri) | Dashboard screens |
+| Rey → Faris | Record shapes, the `proposals` collection, the assistance card fields (`AssistanceCase.objects`: draw `box_2d` on `image`, scaled from 0-1000), `TestRun.reason` (why the search tried each variant), `Scenario.failure_report` (conditions, measured, passes_when, likely_cause, suggested_fix, speed_fix, fix_check, clip_uri), the `releases` collection (`ReleaseReport`: passed, failed, newly failing/passing since `previous_release`, approved_by) | Dashboard screens |
 | Qais → Faris | Replay clips per run, a live camera | Video on the dashboard |
 | Rey → Qais | BehaviorAgent drives into static props: SC-0142 (scene 3's box) fails `no_contact` on CARLA. The stand-in needs to brake for objects in the lane, as the plant's driving system would | Scene 3 and its test passing |
 | Rey → Qais | The VM's `.env` (`~/marshal-app`) points `GOOGLE_APPLICATION_CREDENTIALS` at a laptop path; scripts that do not export it themselves (`run_carla_lab.sh`) cannot reach Gemini | Lab runs with Gemini on the VM |

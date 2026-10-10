@@ -11,6 +11,7 @@ readonly RUNTIME_PATH="$APP_ROOT/src:/opt/marshal-runtime/vendor:/opt/carla/Pyth
 readonly ADVERSARIAL="${MARSHAL_LAB_ADVERSARIAL:-0}"
 readonly REQUEST="${MARSHAL_LAB_REQUEST:-}"
 readonly SOURCE="${MARSHAL_LAB_SOURCE:-}"        # e.g. "assistance case AC-..." for an incident
+readonly RELEASE="${MARSHAL_LAB_RELEASE:-}"      # e.g. behavior-agent-1.0: run the release gate last
 viewer_was_active=false
 
 cd "$APP_ROOT"
@@ -61,6 +62,9 @@ if [[ -n "$REQUEST" ]]; then
 fi
 if [[ -n "$SOURCE" ]]; then
   args+=(--source "$SOURCE")
+fi
+if [[ -n "$RELEASE" ]]; then
+  args+=(--release "$RELEASE")
 fi
 
 python3 scripts/demo_carla_lab.py "${args[@]}"

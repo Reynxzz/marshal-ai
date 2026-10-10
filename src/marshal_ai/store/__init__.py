@@ -10,8 +10,8 @@ from typing import Protocol, TypeVar
 
 from pydantic import BaseModel
 
-from marshal_ai.records import (AssistanceCase, Car, CarReport, InspectionResult, Proposal, Scenario,
-                                 TestRun)
+from marshal_ai.records import (AssistanceCase, Car, CarReport, InspectionResult, Proposal, ReleaseReport,
+                                 Scenario, TestRun)
 
 M = TypeVar("M", bound=BaseModel)
 
@@ -24,6 +24,7 @@ COLLECTIONS: dict[type[BaseModel], tuple[str, str]] = {
     Scenario: ("scenarios", "id"),
     TestRun: ("test_runs", "run_id"),
     Proposal: ("proposals", "proposal_id"),
+    ReleaseReport: ("releases", "release"),
 }
 
 

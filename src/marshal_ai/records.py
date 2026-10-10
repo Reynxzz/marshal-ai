@@ -200,3 +200,37 @@ class Proposal(BaseModel):
     created_at: datetime = Field(default_factory=now)
     decided_at: datetime | None = None
 
+
+
+class ReleaseReport(BaseModel):
+    """A driving system release run against the whole regression suite (design, flow 7 "Closing
+    the loop"): tests run, passed, failed, and what changed since the release evaluated before it.
+    Marshal only produces it; an engineer approves, and only when nothing fails."""
+
+    release: str                                       # e.g. behavior-agent-1.0; re-evaluating replaces it
+    total: int
+    passed: list[str] = Field(default_factory=list)
+    failed: dict[str, list[str]] = Field(default_factory=dict)   # scenario id -> failed criteria
+    previous_release: str | None = None
+    newly_failing: list[str] = Field(default_factory=list)
+    newly_passing: list[str] = Field(default_factory=list)
+    approved_by: str | None = None
+    evaluated_at: datetime = Field(default_factory=now)
+
+    @property
+    def blocked(self) -> bool:
+        return bool(self.failed)
+
+    def summary(self) -> str:
+        head = (f"Release {self.release}: {self.total} tests, {len(self.passed)} passed, "
+                f"{len(self.failed)} failed.")
+        if self.blocked:
+            head += f" {len(self.failed)} failing test{'s' if len(self.failed) > 1 else ''}, release blocked."
+        else:
+            head += " Ready for engineer approval." if not self.approved_by else f" Approved by {self.approved_by}."
+        since = f"since {self.previous_release}" if self.previous_release else "since the last release"
+        if self.newly_failing:
+            head += f" Newly failing {since}: {', '.join(self.newly_failing)}."
+        if self.newly_passing:
+            head += f" Now passing {since}: {', '.join(self.newly_passing)}."
+        return head

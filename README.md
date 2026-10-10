@@ -391,6 +391,33 @@ with credentials to use the model.
 mode and ticks it, so concurrent runs corrupt each other and the first one to finish restores
 asynchronous mode under the others. The design's 8-way parallelism needs one server per slot.
 
+### Demo scenes 4 and 5 on CARLA (`scripts/run_carla_release.sh`)
+
+```
+bash scripts/run_carla_release.sh                    # MARSHAL_LAB_ADVERSARIAL=16, behavior-agent-1.0
+```
+
+One process on the host, Gemini throughout, BigQuery history on: the design's example scenario is
+generated, judged on CARLA and put in the library; the search varies it on CARLA until a variant
+fails, shrinks it and adds it to the library as a regression test with its failure report; then the
+release gate runs every library test against the driving system. Each `ReleaseReport` is stored
+(collection `releases`) and so becomes a history row; "what changed" is computed against the most
+recent other release, from the store or, when this process never saw one, from BigQuery
+(`History.latest`). Run on 2026-10-10:
+
+```
+SC-0142-v1 fails: at dusk, with the worker starting to move when the car is 9 m away at 1.3 m/s from
+behind a forklift, the car driving at 9 km/h, speed near person 9.55 km/h (limit <= 5 km/h). It
+passes with the car's speed back at 8 km/h. ... The fix was not tried: this runner cannot change the
+driving system.
+Release behavior-agent-1.0: 2 tests, 1 passed, 1 failed. 1 failing test, release blocked.
+```
+
+The search found the failure in 2 runs. A fresh process read the report back from BigQuery. It had
+no earlier release to compare with: the only release CARLA can run is 1.0 (`CarlaRunner.with_driver`
+returns the same BehaviorAgent), so "now passing since 1.0" for the fixed 1.1 is shown on the
+quick simulator (`scripts/demo.py`, tests), not on CARLA.
+
 ### Map points the lab needs
 
 Lab scenarios drive `line_end → finishing`, so the finishing branch is pinned to real Town05
@@ -721,7 +748,7 @@ with a worker beside the box.
 | 3 s clip per track step (flow 4) | Built, as a sampled run of frames from the camera's recent past. The steps that remain unconfirmed are limited by the asset and the simulation, not by the evidence. |
 | 10 s clip with the assistance request (flow 2) | Built: seven frames of the approach to the stop. Not an encoded video - a video file would need an encoder on the host and buys nothing for the judgement. |
 | 60 runs per scenario, 8 in parallel (flow 7) | **Serial only.** Parallel runs need one CARLA server per slot; the search works but takes the full budget serially. |
-| Release gate blocks a release on a failing test | Implemented in `lab/regression.py`; not yet exercised end to end against BigQuery-backed history. |
+| Release gate blocks a release on a failing test | Built and run on CARLA (`run_carla_release.sh`): the failure the search found joins the suite and the gate reports "1 failing test, release blocked"; reports go to BigQuery history and the previous release is read back from it. The fixed release 1.1 runs only on the quick simulator. |
 | Demo scene 2 uses a dead brake light | Built with a dead **headlight**: it is the fault the camera reads most clearly, and the disagreement is the point. |
 | Scratches and dents from a car-damage image set | Measured, not part of a live run: dataset v2-damage (see "Evaluating the flows"). gemini-2.5-flash finds 97% of damage, in the right zone every time; subtle kinds (paint, broken, missing parts) 21-40%. |
 | Assistance card with the object boxed (flow 2) | Built. A second call, `assist.locate`, runs beside the assessment with thinking off and boxes the object and every person near it ([ymin, xmin, ymax, xmax], 0-1000, on the frame it names, which is uploaded). On the scene 3 frame the worker's box overlaps the hand-labelled one 0.78; the cardboard box's is on the box but twice its width (0.25). Asked inside the assessment, both boxes landed beside the objects (0.17). A located person counts as "people near" even if the assessment missed them. |
