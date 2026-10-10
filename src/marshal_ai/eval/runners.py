@@ -63,6 +63,9 @@ async def run_gate(llm: LLM, case: GateCase, cache: MediaCache) -> dict:
                          location="inspection_gate"))
     # The gate reads the view name from the start of each label, as the cameras write it.
     images = [_jpeg(cache, ref, f"{view} camera") for view, ref in case.views.items()]
+    if case.reference:
+        app.visual.references = {view: ("EVAL-REFERENCE", _jpeg(cache, ref, f"{view} camera"))
+                                 for view, ref in case.reference.items()}
     result, seconds = await _timed(lambda: app.visual.inspect(vin, images=images))
     flagged = [m.split(":", 1)[0].strip().lower() for m in result.build_sheet_mismatches]
     return {"verdict": result.verdict.value,
@@ -113,7 +116,8 @@ async def run_assist(llm: LLM, case: AssistCase, cache: MediaCache) -> dict:
 async def run_damage(llm: LLM, case: DamageCase, cache: MediaCache) -> dict:
     app = fresh_app(llm)
     photo = _jpeg(cache, case.image, "inspection photo")
-    (findings, clear, verdict), seconds = await _timed(lambda: app.visual.assess_photo(photo))
+    reference = _jpeg(cache, case.reference, "reference photo") if case.reference else None
+    (findings, clear, verdict), seconds = await _timed(lambda: app.visual.assess_photo(photo, reference=reference))
     return {"verdict": verdict.value,
             "findings": [{"zone": f.zone, "type": f.type, "confidence": f.confidence,
                           "kinds": sorted(kinds_of(f.type))} for f in findings],

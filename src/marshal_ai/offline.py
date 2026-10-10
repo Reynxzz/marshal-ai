@@ -38,6 +38,12 @@ def visual_defects(call: LLMCall) -> dict:
     return {"findings": findings, "clear_confidence": 0.96}
 
 
+def visual_verify(call: LLMCall) -> dict:
+    """The offline findings come from the ground truth, so every one is real."""
+    n = len(re.findall(r"^#\d+:", call.prompt, re.M))
+    return {"checks": [{"index": i, "real": True, "reason": "in the ground truth"} for i in range(n)]}
+
+
 def visual_variant(call: LLMCall) -> dict:
     sheet = json.loads(re.search(r"Build sheet: (\{.*\})", call.prompt).group(1))
     truth = call.media[0].truth or {}
@@ -279,6 +285,7 @@ def adversarial_report(call: LLMCall) -> dict:
 def offline_llm() -> FakeLLM:
     return FakeLLM({
         "visual.defects": visual_defects,
+        "visual.verify": visual_verify,
         "visual.variant": visual_variant,
         "track.step": track_step,
         "assist.assess": assist_assess,

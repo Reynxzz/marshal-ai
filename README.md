@@ -242,6 +242,38 @@ right (scratches on the blue door, scuffs on the grey bumper, a missing front nu
 them after seeing the model's answers would bias the set, so the false-alarm rate needs panels known
 to be clean - new cars, such as the CARLA renders in v1, where it was 0.
 
+### The gate's false alarms on clean cars (dataset v6-gate)
+
+Qais's multi-car runs failed a clean car about one time in three, and v1 (one parked car, one light)
+could not show it. `scripts/capture_gate_set.py` photographs clean sedans in five colours on the gate
+under six suns, as the plant scene does (fixed gate cameras, loop running); with three of Qais's plant
+cars that drove onto the mark, that is v6-gate: 33 clean cases and 10 with a wrong-colour build sheet.
+
+The false findings all described the paint, not a mark: "a distinct pixelated or checkerboard pattern"
+across both left doors, "cloud-like, irregular red patterns", "rough texture along the lower edge of
+the door" - a low sun on glossy paint and the shading along the sills, reported at 0.6-0.9. Saying so
+in the defect prompt removed some and made Qais's P1 worse (it then failed 2 of 2 for "paint scraped
+off the lower door"), so it was reverted. Instead each view with a finding is checked against the
+same camera's photo of the latest car that passed (`visual.verify`): a finding stays only if it is a
+mark the passed car does not have, as flow 4 compares a lamp with a car that passed the step. The
+first car of the day has no reference, so its findings stand and go to a person.
+
+gemini-2.5-flash, 2 runs per case:
+
+| | Before | With the reference check |
+| --- | --- | --- |
+| 30 clean cars: runs with a false finding | 6.7% | **0%** |
+| 30 clean cars: passed first time | 0.93 | **0.97** |
+| Qais's plant car P1 (sill shading) | flagged 1 run in 3 | passed 2 of 2 |
+| Wrong colour caught | 10/10 | 10/10 |
+| v2-damage, damaged photos caught (reference: another car's clean crop) | 93.3% | 93.3% |
+| v1 gate | all correct | all correct |
+
+The one clean case still not passing (a red car, sun 15 along the road) has its findings refuted
+but goes to review because Gemini's all-clear for that view was below 0.9; that is left as it is, a
+review rather than a pass on doubt. v2-damage-ref uses a different car as the reference, a harder
+test than the gate's same-camera photo, and real damage survived it.
+
 ### A shift on the simulated plant: the operational KPIs
 
 ```

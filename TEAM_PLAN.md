@@ -108,6 +108,11 @@ simulation cannot yet show what the design describes. The target is the design's
   because `google-genai` misbehaved from five threads; retry with a current SDK or the async client.
   *Progress:* calls run at once again (lock removed, schema sent as JSON): 33 s → 12 s on
   gemini-2.5-flash, same answers. Under 5 s still open: the gate waits for its slowest call.
+- [x] **No false alarms on clean cars at the gate** (found in Qais's multi-car runs, about one in
+  three). *Done:* dataset v6-gate (`scripts/capture_gate_set.py`: five colours x six suns, plus
+  Qais's plant cars). Each finding is checked against the same camera's photo of the latest car that
+  passed: false findings on clean cars 6.7% -> 0%, first-pass yield 0.93 -> 0.97, wrong colour still
+  10/10, real damage still 93% on v2-damage. For Qais: the first car of a run has no reference yet.
 - [ ] **Brake-lamp fault judged** on Qais's asset, with the 3 s clip per step, so scene 2 can use the
   design's dead left brake light.
 - [x] **Rework loop on real runs**: the summary orders safety items first, picks the bay from the

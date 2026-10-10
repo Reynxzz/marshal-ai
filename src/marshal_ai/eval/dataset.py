@@ -28,6 +28,8 @@ class GateCase(BaseModel):
     expect_verdicts: list[Verdict] = Field(description="verdicts that count as correct")
     expect_mismatch_items: list[str] = Field(default_factory=list,
                                              description="build sheet items that should be flagged")
+    reference: dict[str, str] | None = Field(default=None, description="views of a car that passed this gate "
+                                             "in the same light, which findings are checked against")
     note: str = ""
 
 
@@ -74,6 +76,7 @@ class DamageCase(BaseModel):
                                     description="damage kinds present, of marshal_ai.eval.damage.KIND_WORDS")
     expect_zones: list[str] = Field(default_factory=list,
                                     description="gate zones the damage is in; empty when none applies")
+    reference: str | None = Field(default=None, description="a photo of an undamaged car to check findings against")
     note: str = ""
 
 
