@@ -138,6 +138,41 @@ The replay emits one status per simulated second, advances progress at each name
 `mission.done` at `yard.Y1`, restores asynchronous world mode, and removes its vehicle. The browser
 viewer is fixed over the start lane, so the vehicle is visible as it departs.
 
+## Dressing Town05 as a plant (`scripts/dress_plant.py`)
+
+Town05 is a city map, so every run now dresses the plant road before it starts recording
+(`carla_recording.sh` calls it; `MARSHAL_DRESS=0` skips it). Everything is placed from the map's own
+lanes, measured along road 34 at run time, and none of it on a lane the plant's cars use:
+
+- across the median, on the carriageway the plant does not use: a row of semi-trailer trucks along
+  the straight, which also hides the houses, and a lot of finished cars in the plant's colours at
+  the curve
+- beside every rework bay, on the sidewalk: barrels, boxes, an iron plank and a work sign
+- at the line end, stacked boxes and barrels; at the gate, two calibration boards and a warning board
+- cones along the outer edge of the shoulder at the gate and the test track, where no car parks
+
+63 actors, vehicles with physics off. The script then checks that nothing stands on a driving lane
+or shoulder of the plant's carriageway (the shoulder before the first bay excepted) and removes it
+all and exits 1 if anything does; it also removes the previous run's dressing first. CARLA's own
+props set the limits: its "container" is a 1.9 m bin, not a shipping container, and there are no
+factory buildings, so the trucks and the car lot carry the look. A fence along the sidewalk was
+tried and dropped (the road's stone railing hides it). Demo scene 1 ran dressed end to end: gate
+PASS with no finding, report PASS, shipped.
+
+Two faults found on the way. An early version walked the plant lane until it came within 4 m of the
+loading bay, missed it by a lane and dressed half of Town05; the walk now stops at the loading bay
+or as soon as the lane moves away from it. And replays left copies of the dressing behind: the
+recording holds it and the replayer re-creates it, and after two filmings 155 dressing actors had
+built up, some on the yard slots. The filmer now removes the live dressing before each replay pass
+and any left after it.
+
+The films are labelled (`scripts/film_labels.py`): the run at the top ("Demo scene 1 · One car, line
+to yard") and, in a lower third, where the car is and which car - the bay or slot it stops at, or
+else the plant zone it drives through, from the nearest named plant point. Driving past the bays is
+not labelled as being in one. Cameras sit 2 m higher, keeping the horizon, and the city, low in the
+frame. The labels need Pillow (`install_carla_mission_runtime.sh` installs it; until then
+`MARSHAL_EXTRA_PYTHONPATH` can point at a folder that has it); without it the film is unlabelled.
+
 ## Recording and replaying a run
 
 The viewer cannot show a run: every `run_carla_*.sh` stops it for the run, and it is a fixed

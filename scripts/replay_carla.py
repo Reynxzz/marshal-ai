@@ -28,6 +28,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from carla_recorder import DEFAULT_DIR, duration_s, recording_path  # noqa: E402
+from film_labels import Labeller, plant_points, run_title, zone_for  # noqa: E402
 
 SETTLE_TICKS = 10
 MOVING_M_PER_TICK = 0.01  # 0.2 m/s at 0.05 s ticks; a parked car jitters far less
@@ -152,7 +153,7 @@ def side_pose(points: list[Point], fov_deg: float = 90.0, side: str = "right"
     span = max(length, 8.0)
     back = span / 2 / math.tan(math.radians(fov_deg) / 2) + 6.0
     ahead = span * 0.25
-    up = 6.0 + 0.3 * back  # high enough to see over the medians' fences
+    up = 8.0 + 0.3 * back  # over the medians' fences, and the horizon (the city) low in the frame
     sign = 1.0 if side == "right" else -1.0
     # right of travel is (uy, -ux) in CARLA's left-handed x/y
     location = (cx + sign * uy * back + ux * ahead, cy - sign * ux * back + uy * ahead, cz + up)
@@ -198,8 +199,26 @@ def next_image(images: queue.Queue, frame: int):
             return image
 
 
+DRESSING_ROLE = "marshal-dressing"  # scripts/dress_plant.py tags the plant's scenery with it
+
+
+def purge_dressing(world) -> int:
+    """Remove the plant dressing from the live world.
+
+    The recording holds the dressing, and the replayer re-creates it. Left in place, the live copy
+    stood under the replayed one, and the replayer did not remove everything it had made: after two
+    filmings 155 dressing actors had built up, some drifted onto the yard slots.
+    """
+    tagged = [a for a in world.get_actors() if a.attributes.get("role_name") == DRESSING_ROLE]
+    for a in tagged:
+        a.destroy()
+    return len(tagged)
+
+
 def start_replay(client, world, path: str, args) -> None:
     client.set_replayer_ignore_spectator(True)
+    purge_dressing(world)
+    world.tick()
     client.replay_file(path, args.start, args.duration, 0, False)
     # Spawning a sensor while the replayer is still creating the recorded actors can segfault the
     # server, so let it settle first. Both passes do the same, so their ticks line up.
@@ -228,6 +247,8 @@ def scout(client, world, path: str, ticks: int, args) -> list[Shot]:
         samples.append((vin, keep, positions.get(vin) if vin else None))
         world.tick()
     client.stop_replayer(False)
+    world.tick()
+    purge_dressing(world)
     shots = plan_shots(samples)
     if opening is not None:
         shots = [s for s in shots if s.end > opening.start]
@@ -259,6 +280,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--height", type=int, default=720)
     ap.add_argument("--sun-altitude", type=float, default=45.0,
                     help="daylight for the replay; the recording does not restore the weather")
+    ap.add_argument("--title", default=None, help="label for the film (default: from the recording name)")
+    ap.add_argument("--no-labels", action="store_true", help="do not burn in the run and zone labels")
     ap.add_argument("--host", default="localhost")
     ap.add_argument("--port", type=int, default=2000)
     args = ap.parse_args(argv)
@@ -307,6 +330,18 @@ def main(argv: list[str] | None = None) -> int:
         bp.set_attribute("fov", "90")
         images: queue.Queue = queue.Queue()
         writer = ffmpeg_writer(out, args.width, args.height, 1.0 / args.delta)
+        labeller = Labeller(args.width, args.height)
+        if args.no_labels:
+            labeller.ok = False
+        elif not labeller.ok:
+            emit({"type": "replay.no_labels", "why": "Pillow is not installed"})
+        named, title = plant_points(), args.title or run_title(args.name)
+
+        def caption(s: Shot) -> tuple[str | None, str | None]:
+            if s.still:
+                return "Plant overview", None
+            who = s.vin if (s.vin or "").startswith("VIN-") else "Test-lab scenario car"
+            return zone_for(s.points, named), who
 
         start_replay(client, world, path, args)
         emit({"type": "replay.filming"})
@@ -336,13 +371,13 @@ def main(argv: list[str] | None = None) -> int:
             if camera is not None:
                 image = next_image(images, frame)  # always drained, or frames pile up in memory
                 if filming and shot.still:
-                    still = bytes(image.raw_data)
+                    still = labeller.draw(bytes(image.raw_data), title, *caption(shot))
                     held = round(args.opening_s / args.delta)
                     for _ in range(held):
                         writer.stdin.write(still)
                     written += held
                 elif filming and (tick - shot.start) % args.speed == 0:
-                    writer.stdin.write(bytes(image.raw_data))
+                    writer.stdin.write(labeller.draw(bytes(image.raw_data), title, *caption(shot)))
                     written += 1
             if shot is not None and tick >= shot.end:
                 shot_index += 1
@@ -360,6 +395,7 @@ def main(argv: list[str] | None = None) -> int:
         # Each step on its own: a failing one must not hide the error that got us here, and the
         # world must still go back to asynchronous mode, or every later run hangs.
         steps = [("stop_replayer", lambda: client.stop_replayer(False)),
+                 ("purge_dressing", lambda: (world.tick(), purge_dressing(world))),
                  ("restore_weather", lambda: world.set_weather(original_weather)),
                  ("restore_settings", lambda: world.apply_settings(original_settings))]
         if camera is not None:

@@ -12,7 +12,9 @@ readonly RECORDINGS=/var/lib/carla/recordings
 viewer_was_active=false
 
 cd "$APP_ROOT"
-export PYTHONPATH="$APP_ROOT/src:$APP_ROOT/scripts:/opt/marshal-runtime/vendor:/opt/carla/PythonAPI/carla"
+# MARSHAL_EXTRA_PYTHONPATH: e.g. a folder with Pillow, for the film's labels, on a host whose shared
+# runtime does not have it yet (prepare_carla_host.sh installs it there).
+export PYTHONPATH="$APP_ROOT/src:$APP_ROOT/scripts:/opt/marshal-runtime/vendor:/opt/carla/PythonAPI/carla${MARSHAL_EXTRA_PYTHONPATH:+:$MARSHAL_EXTRA_PYTHONPATH}"
 
 name="${1:-}"
 if [[ -z "$name" || "$name" == --* ]]; then

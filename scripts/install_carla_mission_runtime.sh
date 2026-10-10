@@ -24,7 +24,8 @@ sudo python3 -m pip install \
   'annotated-types==0.8.0' \
   'typing-inspection==0.4.4' \
   'typing-extensions==4.16.0' \
-  'PyYAML==6.0.2'
+  'PyYAML==6.0.2' \
+  'pillow==10.4.0'                                # labels in the filmed replays (scripts/film_labels.py)
 sudo chown -R root:root "$INSTALL_DIR"
 
 PYTHONPATH="$INSTALL_DIR/vendor:/opt/carla/PythonAPI/carla" python3 - <<'PY'

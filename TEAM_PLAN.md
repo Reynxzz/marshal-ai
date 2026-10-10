@@ -241,6 +241,7 @@ at a time, so the code work is parallel and the server time is shared.
 | Rey → Qais | BehaviorAgent drives into static props: SC-0142 (scene 3's box) fails `no_contact` on CARLA. The stand-in needs to brake for objects in the lane, as the plant's driving system would | Scene 3 and its test passing |
 | Rey → Qais | The VM's `.env` (`~/marshal-app`) points `GOOGLE_APPLICATION_CREDENTIALS` at a laptop path; scripts that do not export it themselves (`run_carla_lab.sh`) cannot reach Gemini | Lab runs with Gemini on the VM |
 | Rey → Qais | Small changes in your files: `repair()` in `carla_backend.py`, `--rework` in `demo_carla_day4.py`, `MARSHAL_LAB_SOURCE` in `run_carla_lab.sh`, the contact event in `lab/compiler.py` | Review |
+| Rey → Qais | Every run now dresses Town05 as a plant before recording (`dress_plant.py`, called from `carla_recording.sh`; `MARSHAL_DRESS=0` skips it; tagged `marshal-dressing`, none on a plant lane). Films are labelled (`film_labels.py`) and need Pillow: `install_carla_mission_runtime.sh` now installs it - please re-run it on the host | Plant scenes and filmed runs |
 
 ## Suggested first week
 
