@@ -52,14 +52,22 @@ class LLMError(RuntimeError):
 # Tasks that answer better without thinking, whatever the client's own budget. Boxing objects is
 # one: Google advises thinking off for detection on 2.5 models, and on the scene 3 frame the worker's
 # box overlapped the hand-labelled one 0.8 with it off and 0.22 with it on (assist.locate).
-TASK_THINKING_BUDGET = {"assist.locate": 0}
+#
+# The gate's three tasks think at most 512 tokens. Left to itself gemini-2.5-flash sometimes thought
+# for 10-20 s on one view, and the gate waits for its slowest call: on 16 v6-gate cases x 2 the gate
+# took median 5.6 s, slowest 22.8 s; capped, 5.2 s and 7.9 s, same answers. Damage found on v2-damage
+# held (93%, scratches 80%), and v1 stayed all correct. Thinking off failed most clean cars (first-pass
+# yield 0.31), and lower image resolution cost small damage (scratches 75% -> 60% at low).
+GATE_THINKING = 512
+TASK_THINKING_BUDGET = {"assist.locate": 0, "visual.defects": GATE_THINKING, "visual.variant": GATE_THINKING,
+                        "visual.verify": GATE_THINKING}
 
 
 class GeminiLLM:
     """google-genai client; reads Vertex AI or API key settings from the environment."""
 
     def __init__(self, model: str, temperature: float = 0.0, seed: int | None = 7,
-                 thinking_budget: int | None = None):
+                 thinking_budget: int | None = None, media_resolution: str | None = None):
         # temperature 0 and a fixed seed: the same plant situation gets (nearly) the same answer,
         # so demos and release decisions are repeatable
         self.model = model
@@ -68,6 +76,8 @@ class GeminiLLM:
         # None leaves the model's own default. Flash thinks by default and flash-lite does not;
         # on the gate, flash-lite without thinking flagged a clean car (python -m marshal_ai.eval).
         self.thinking_budget = thinking_budget
+        # "low", "medium" or "high": how many tokens Gemini spends reading each image (None: its default)
+        self.media_resolution = media_resolution
         self._local = threading.local()
 
     @property
@@ -119,6 +129,8 @@ class GeminiLLM:
             response_json_schema=schema.model_json_schema() if schema is not None else None,
             system_instruction=system or None,
             thinking_config=None if budget is None else types.ThinkingConfig(thinking_budget=budget),
+            media_resolution=(getattr(types.MediaResolution, f"MEDIA_RESOLUTION_{self.media_resolution.upper()}")
+                              if self.media_resolution and media else None),
         )
         response = self.client.models.generate_content(
             model=self.model,

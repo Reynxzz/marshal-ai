@@ -107,7 +107,10 @@ simulation cannot yet show what the design describes. The target is the design's
 - [ ] **Gate under 5 s** (design, "A car's journey"). Its five Gemini calls run one at a time
   because `google-genai` misbehaved from five threads; retry with a current SDK or the async client.
   *Progress:* calls run at once again (lock removed, schema sent as JSON): 33 s → 12 s on
-  gemini-2.5-flash, same answers. Under 5 s still open: the gate waits for its slowest call.
+  gemini-2.5-flash, same answers. Then thinking capped at 512 tokens for the gate's tasks and a
+  stalled call re-sent after 10 s: v6-gate median 5.6 → 5.3 s, 90% within 7.3 s (was 8.6), same
+  answers, damage recall unchanged. Under 5 s for every car still open: a single flash call on
+  1280x720 frames takes 4-6 s; lower resolution was faster but missed scratches.
 - [x] **No false alarms on clean cars at the gate** (found in Qais's multi-car runs, about one in
   three). *Done:* dataset v6-gate (`scripts/capture_gate_set.py`: five colours x six suns, plus
   Qais's plant cars). Each finding is checked against the same camera's photo of the latest car that
