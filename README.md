@@ -164,9 +164,13 @@ What still says "highway" is the map itself: the wide marked road, the speed sig
 the houses and the skyline. Town05_Opt has the same roads with its scenery in layers, so
 `MARSHAL_CARLA_MAP=Town05_Opt` loads it (every run script passes it to `ensure_carla_map.py`) and
 `dress_plant.py` then unloads the buildings, street lights, parked cars, props and decals
-(`MARSHAL_PLANT_UNLOAD` to change the list), leaving roads, ground and trees. Not yet tried on the
-server: loading another map there changes it for everyone, so it waits for a free window agreed
-with Qais. The default stays Town05. Films are shot closer (a shot covers at most 22 m of drive, was
+(`MARSHAL_PLANT_UNLOAD` to change the list), leaving roads, ground and trees. **Tried on the
+server on 2026-10-10 and not usable:** unloading Buildings removes the houses and StreetLights the
+tall lamps (Props, Decals and ParkedVehicles leave the speed sign and the stone railing), but CARLA
+0.9.16 at Epic crashed three times (signal 11) within a minute of layers being unloaded on
+Town05_Opt - after the photos, while idle, and while the dressing was spawned - even with only
+Buildings and StreetLights unloaded. The default stays Town05; the switch is kept for a later
+CARLA version. Films are shot closer (a shot covers at most 22 m of drive, was
 30), so the car is big and the road around it small. Demo scene 1 ran dressed end to end: gate
 PASS with no finding, report PASS, shipped.
 

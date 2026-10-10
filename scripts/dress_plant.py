@@ -48,8 +48,9 @@ PROP_TYPES = ("static.prop.chainbarrier", "static.prop.trafficcone01", "static.p
 # On the layered map (Town05_Opt, the same roads), the city's own scenery is in layers that can be
 # taken away: the houses and the skyline, the highway's lamp posts, its signs and street furniture,
 # parked cars. What is left is the roads, the ground and the trees, and the dressing becomes the only
-# built thing in view. MARSHAL_PLANT_UNLOAD overrides the list. Not yet checked on the server: loading
-# another map there changes it for everyone, so it waits for a free window.
+# built thing in view. MARSHAL_PLANT_UNLOAD overrides the list. Tried on 2026-10-10: CARLA 0.9.16 at
+# Epic crashed (signal 11) three times within a minute of layers being unloaded, even with only
+# Buildings and StreetLights, so this is kept for a later CARLA version and Town05 stays the default.
 CITY_LAYERS = ("Buildings", "StreetLights", "ParkedVehicles", "Props", "Decals")
 
 
