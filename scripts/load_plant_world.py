@@ -28,7 +28,9 @@ def emit(obj):
 
 def build(client, xodr: str):
     params = carla.OpendriveGenerationParameters(
-        vertex_distance=2.0, max_road_length=500.0, wall_height=1.6, additional_width=0.6,
+        # CARLA puts a wall along every road edge, the paving road across the middle included, so the
+        # walls are kerbs (0.5 m); the plant's perimeter fence comes from the dressing
+        vertex_distance=2.0, max_road_length=500.0, wall_height=0.5, additional_width=0.6,
         smooth_junctions=True, enable_mesh_visibility=True, enable_pedestrian_navigation=True)
     world = client.generate_opendrive_world(xodr, params)
     world.wait_for_tick(30.0)
@@ -73,7 +75,15 @@ def photo(world, loc, rot, path: Path, size=(1280, 720), fov=85):
     return img is not None
 
 
-def drive(world, m, pts: dict, out: Path, timeout_s: float = 240.0) -> dict:
+def ffmpeg(path: Path, w: int, h: int, fps: float):
+    import subprocess
+    import imageio_ffmpeg
+    return subprocess.Popen([imageio_ffmpeg.get_ffmpeg_exe(), "-loglevel", "error", "-y", "-f", "rawvideo",
+                             "-pix_fmt", "bgra", "-s", f"{w}x{h}", "-r", f"{fps:g}", "-i", "-", "-c:v", "libx264",
+                             "-preset", "veryfast", "-pix_fmt", "yuv420p", str(path)], stdin=subprocess.PIPE)
+
+
+def drive(world, m, pts: dict, out: Path, timeout_s: float = 240.0, film: Path | None = None) -> dict:
     from agents.navigation.behavior_agent import BehaviorAgent
 
     start, goal = pts["line_end"], pts["yard.Y5"]
@@ -85,15 +95,38 @@ def drive(world, m, pts: dict, out: Path, timeout_s: float = 240.0) -> dict:
     settings = world.get_settings()
     settings.synchronous_mode, settings.fixed_delta_seconds = True, 0.05
     world.apply_settings(settings)
+    cams, writer, frames = [], None, queue.Queue()
     try:
         world.tick()
+        if film is not None:
+            # a camera riding behind the car (attached, so it is never moved by hand), and an overview
+            # from above held for the first seconds
+            bp_cam = world.get_blueprint_library().find("sensor.camera.rgb")
+            bp_cam.set_attribute("image_size_x", "1280"); bp_cam.set_attribute("image_size_y", "720")
+            bp_cam.set_attribute("fov", "90")
+            chase = world.spawn_actor(bp_cam, carla.Transform(carla.Location(x=-9, z=4.5), carla.Rotation(pitch=-14)),
+                                      attach_to=car)
+            top = world.spawn_actor(bp_cam, carla.Transform(carla.Location(60, -52, 120), carla.Rotation(pitch=-90)))
+            for c in (chase, top):
+                c.listen(lambda img, name=("chase" if c is chase else "top"): frames.put((name, img)))
+            cams = [chase, top]
+            writer = ffmpeg(film, 1280, 720, 20.0)
         agent = BehaviorAgent(car, behavior="cautious")
         agent.set_destination(carla.Location(goal["x"], goal["y"], goal["z"]))
         ticks, reached, travelled, last = 0, False, 0.0, car.get_location()
         while ticks < timeout_s / 0.05:
             car.apply_control(agent.run_step())
-            world.tick()
+            frame = world.tick()
             ticks += 1
+            if writer is not None:
+                got = {}
+                while len(got) < 2:
+                    name, img = frames.get(timeout=10.0)
+                    if img.frame >= frame:
+                        got[name] = img
+                # overview for the first 4 s, then the chase camera, every other frame (2x speed)
+                if ticks % 2 == 0:
+                    writer.stdin.write(bytes((got["top"] if ticks <= 80 else got["chase"]).raw_data))
             here = car.get_location()
             travelled += here.distance(last)
             last = here
@@ -105,8 +138,14 @@ def drive(world, m, pts: dict, out: Path, timeout_s: float = 240.0) -> dict:
         # the car on the bend and in the yard, from above and behind
         photo(world, end + carla.Location(x=-14, z=9), carla.Rotation(pitch=-28, yaw=0), out / "car_in_yard.png")
         return {"reached": reached, "sim_s": round(ticks * 0.05, 1), "travelled_m": round(travelled, 1),
-                "end_off_goal_m": round(miss, 2)}
+                "end_off_goal_m": round(miss, 2), "film": str(film) if film else None}
     finally:
+        if writer is not None:
+            writer.stdin.close()
+            writer.wait()
+        for c in cams:
+            c.stop()
+            c.destroy()
         car.destroy()
         world.apply_settings(original)
 
@@ -117,6 +156,7 @@ def main() -> int:
     ap.add_argument("--out", type=Path, default=Path("/tmp/marshal-plant-world"))
     ap.add_argument("--check", action="store_true", help="drive a car round, photograph, watch stability")
     ap.add_argument("--restore", action="store_true", help="load Town05 again at the end")
+    ap.add_argument("--film", action="store_true", help="with --check: film the drive to OUT/drive.mp4")
     ap.add_argument("--host", default="localhost")
     ap.add_argument("--port", type=int, default=2000)
     args = ap.parse_args()
@@ -136,8 +176,9 @@ def main() -> int:
         world.set_weather(weather)
         g = pts["inspection_gate"]
         photo(world, carla.Location(g["x"] - 30, g["y"] + 12, 7), carla.Rotation(pitch=-12, yaw=-15), args.out / "along_south.png")
-        photo(world, carla.Location(82, -52, 135), carla.Rotation(pitch=-90), args.out / "top.png", (1000, 1000), 90)
-        emit({"type": "plant_world.drive", **drive(world, m, pts, args.out)})
+        photo(world, carla.Location(60, -52, 150), carla.Rotation(pitch=-90), args.out / "top.png", (1000, 1000), 90)
+        emit({"type": "plant_world.drive", **drive(world, m, pts, args.out,
+                                                   film=args.out / "drive.mp4" if args.film else None)})
         alive = 0
         for _ in range(6):
             time.sleep(10)
