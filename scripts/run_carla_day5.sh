@@ -49,7 +49,7 @@ if ! timeout 30 python3 scripts/check_carla.py >/dev/null 2>&1; then
   echo "CARLA not answering; restarting the service..." >&2
   sudo systemctl restart carla
 fi
-python3 scripts/ensure_carla_map.py --map Town05 --wait-seconds 600
+python3 scripts/ensure_carla_map.py --map "${MARSHAL_CARLA_MAP:-Town05}" --wait-seconds 600
 start_recording day5
 
 rm -rf "$OUTPUT"

@@ -136,7 +136,7 @@ def _new_driving(args: argparse.Namespace) -> CarlaDrivingSystem:
         fixed_delta_s=0.05,
         expected_version="0.9.16",
     )
-    if not driving.world.get_map().name.endswith("Town05"):
+    if not driving.world.get_map().name.endswith(("Town05", "Town05_Opt")):
         raise RuntimeError(f"Day 2 demo requires Town05, got {driving.world.get_map().name}")
     for actor in driving.world.get_actors().filter("vehicle.*"):
         if actor.attributes.get("role_name") == args.vin:

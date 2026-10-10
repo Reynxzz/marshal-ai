@@ -151,12 +151,23 @@ lanes, measured along road 34 at run time, and none of it on a lane the plant's 
 - at the line end, stacked boxes and barrels; at the gate, two calibration boards and a warning board
 - cones along the outer edge of the shoulder at the gate and the test track, where no car parks
 
-63 actors, vehicles with physics off. The script then checks that nothing stands on a driving lane
+About 90 actors, vehicles with physics off: along the straight the far carriageway is packed with
+finished cars and trucks behind its fence, so it reads as a vehicle compound and the plant's lanes
+are the only open road. The script then checks that nothing stands on a driving lane
 or shoulder of the plant's carriageway (the shoulder before the first bay excepted) and removes it
 all and exits 1 if anything does; it also removes the previous run's dressing first. CARLA's own
 props set the limits: its "container" is a 1.9 m bin, not a shipping container, and there are no
 factory buildings, so the trucks and the car lot carry the look. A fence along the sidewalk was
-tried and dropped (the road's stone railing hides it). Demo scene 1 ran dressed end to end: gate
+tried and dropped (the road's stone railing hides it).
+
+What still says "highway" is the map itself: the wide marked road, the speed sign, the tall lamps,
+the houses and the skyline. Town05_Opt has the same roads with its scenery in layers, so
+`MARSHAL_CARLA_MAP=Town05_Opt` loads it (every run script passes it to `ensure_carla_map.py`) and
+`dress_plant.py` then unloads the buildings, street lights, parked cars, props and decals
+(`MARSHAL_PLANT_UNLOAD` to change the list), leaving roads, ground and trees. Not yet tried on the
+server: loading another map there changes it for everyone, so it waits for a free window agreed
+with Qais. The default stays Town05. Films are shot closer (a shot covers at most 22 m of drive, was
+30), so the car is big and the road around it small. Demo scene 1 ran dressed end to end: gate
 PASS with no finding, report PASS, shipped.
 
 Two faults found on the way. An early version walked the plant lane until it came within 4 m of the

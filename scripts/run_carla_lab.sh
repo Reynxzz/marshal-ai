@@ -50,7 +50,7 @@ if ! carla_healthy; then
   echo "CARLA not answering; restarting the service..." >&2
   sudo systemctl restart carla
 fi
-python3 scripts/ensure_carla_map.py --map Town05 --wait-seconds 600
+python3 scripts/ensure_carla_map.py --map "${MARSHAL_CARLA_MAP:-Town05}" --wait-seconds 600
 start_recording lab
 
 rm -rf "$OUTPUT"

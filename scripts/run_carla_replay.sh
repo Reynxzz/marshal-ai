@@ -44,5 +44,5 @@ trap restore_viewer EXIT
 
 # Load the map up front: CARLA falls back to Town10 after a restart, and a map load inside the
 # replay outlasts the client timeout.
-python3 scripts/ensure_carla_map.py --map Town05 --wait-seconds 600
+python3 scripts/ensure_carla_map.py --map "${MARSHAL_CARLA_MAP:-Town05}" --wait-seconds 600
 python3 scripts/replay_carla.py --name "$name" "$@"

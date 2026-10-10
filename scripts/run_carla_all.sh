@@ -51,7 +51,7 @@ fresh_server() {
     sleep 5
   done
   sleep 10
-  python3 scripts/ensure_carla_map.py --map Town05 --wait-seconds 600 >/dev/null
+  python3 scripts/ensure_carla_map.py --map "${MARSHAL_CARLA_MAP:-Town05}" --wait-seconds 600 >/dev/null
 }
 
 summary="$OUT/summary.txt"

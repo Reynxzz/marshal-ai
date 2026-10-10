@@ -34,7 +34,7 @@ SETTLE_TICKS = 10
 MOVING_M_PER_TICK = 0.01  # 0.2 m/s at 0.05 s ticks; a parked car jitters far less
 TELEPORT_M_PER_TICK = 1.0  # 72 km/h; more is the replayer spawning or removing a car, not driving
 OPENING_AFTER_TICKS = 4  # let freshly replayed cars drop onto the road first
-SHOT_MAX_M = 30.0  # a longer drive is split, so the car stays big enough in each frame
+SHOT_MAX_M = 22.0  # a longer drive is split, so the car stays big and the road around it small
 SHOT_MIN_TICKS = 20  # 1 s; shorter is a car settling as the replayer spawns it, not a drive, and
                      # moving the camera about while cars are spawned is what crashes the server
 

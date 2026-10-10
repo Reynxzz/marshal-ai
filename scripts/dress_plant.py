@@ -10,8 +10,9 @@ lanes measured at run time:
     car parks (the bays and yard slots on the shoulder start further on)
   - at the line end, stacked boxes and barrels; at the gate, calibration boards and a warning board
   - beside every rework bay, on the sidewalk: barrels, boxes, an iron plank and a work sign
-  - on the unused carriageway: a row of semi-trailer trucks along the straight (hiding the houses)
-    and a lot of finished cars in the plant's colours at the curve
+  - on the unused carriageway: semi-trailer trucks and rows of finished cars along the straight
+    (hiding the houses, and leaving the plant's own lanes the only open road) and a lot of finished
+    cars in the plant's colours at the curve
 
 then checks that nothing stands on a lane the plant's cars drive or park on, and exits 1 if anything
 does. Everything is tagged role_name=marshal-dressing where the blueprint allows, and the dressing
@@ -42,6 +43,22 @@ PLANT_COLOURS = ["0,80,200", "230,230,230", "120,120,120", "20,20,20", "200,20,2
 PROP_TYPES = ("static.prop.chainbarrier", "static.prop.trafficcone01", "static.prop.box01", "static.prop.box02",
               "static.prop.box03", "static.prop.barrel", "static.prop.ironplank", "static.prop.warningconstruction",
               "static.prop.calibrator", "static.prop.trafficwarning", "static.prop.streetbarrier")
+
+
+# On the layered map (Town05_Opt, the same roads), the city's own scenery is in layers that can be
+# taken away: the houses and the skyline, the highway's lamp posts, its signs and street furniture,
+# parked cars. What is left is the roads, the ground and the trees, and the dressing becomes the only
+# built thing in view. MARSHAL_PLANT_UNLOAD overrides the list. Not yet checked on the server: loading
+# another map there changes it for everyone, so it waits for a free window.
+CITY_LAYERS = ("Buildings", "StreetLights", "ParkedVehicles", "Props", "Decals")
+
+
+def strip_city(world: carla.World) -> list[str]:
+    import os
+    names = [n.strip() for n in os.environ.get("MARSHAL_PLANT_UNLOAD", ",".join(CITY_LAYERS)).split(",") if n.strip()]
+    for n in names:
+        world.unload_map_layer(getattr(carla.MapLayer, n))
+    return names
 
 
 def emit(obj):
@@ -146,8 +163,19 @@ def dress(world: carla.World, m: carla.Map, samples: list[carla.Waypoint]) -> Dr
             outer = far
             while outer.get_right_lane() is not None and outer.get_right_lane().lane_type == carla.LaneType.Driving:
                 outer = outer.get_right_lane()
-            if y > -120 and i % 3 == 0:
-                d.put("vehicle.carlamotors.european_hgv", off(outer.transform, up=0.3), outer.transform.rotation.yaw)
+            if y > -120:
+                # the straight: trucks in the outer lane, finished cars in the inner two, so the far
+                # carriageway reads as a storage area and the only open road is the plant's own
+                if i % 3 == 0:
+                    d.put("vehicle.carlamotors.european_hgv", off(outer.transform, up=0.3), outer.transform.rotation.yaw)
+                if i % 2 == 0:
+                    lw = outer.get_left_lane()
+                    for k in range(2):
+                        if lw is None or lw.lane_type != carla.LaneType.Driving or lw.lane_id * outer.lane_id <= 0:
+                            break
+                        d.put("vehicle.lincoln.mkz_2020", off(lw.transform, up=0.3), lw.transform.rotation.yaw,
+                              PLANT_COLOURS[(i + k) % len(PLANT_COLOURS)])
+                        lw = lw.get_left_lane()
             elif y <= -128 and i % 2 == 0:
                 inner = outer.get_left_lane()
                 for k, lw in enumerate([outer, inner]):
@@ -211,9 +239,13 @@ def main() -> int:
     client = carla.Client(args.host, args.port)
     client.set_timeout(60.0)
     world = client.get_world()
-    if not world.get_map().name.endswith("Town05"):
-        emit({"type": "dress.skipped", "reason": f"map is {world.get_map().name}, not Town05"})
+    name = world.get_map().name
+    if not name.endswith(("Town05", "Town05_Opt")):
+        emit({"type": "dress.skipped", "reason": f"map is {name}, not Town05"})
         return 0
+    if name.endswith("_Opt"):
+        unloaded = strip_city(world)
+        emit({"type": "dress.layers_unloaded", "layers": unloaded})
     m = world.get_map()
     samples = route_samples(m)
     removed = clear(world, samples)

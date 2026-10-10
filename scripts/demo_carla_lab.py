@@ -76,7 +76,7 @@ def run(args: argparse.Namespace) -> dict:
     # compiled scenario subprocess, so the driving system stays out of the way.
     settings = Settings(driving="fake")
     rt = build_runtime(settings)
-    if not rt.map.carla_map or not rt.map.carla_map.endswith("Town05"):
+    if not rt.map.carla_map or not rt.map.carla_map.endswith(("Town05", "Town05_Opt")):
         raise RuntimeError(f"lab needs a Town05 plant map, got {rt.map.carla_map!r}")
 
     runner = CarlaRunner(rt.map, host=args.host, port=args.port, timeout_s=args.run_timeout)
