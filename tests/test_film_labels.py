@@ -38,3 +38,8 @@ def test_without_pillow_the_frame_is_left_as_it_is(monkeypatch):
     monkeypatch.setattr(f, "Image", None)
     raw = bytes(4 * 8 * 6)
     assert f.Labeller(8, 6).draw(raw, "t", "Test track", "VIN-1") is raw
+
+
+def test_a_pause_in_the_lane_beside_a_slot_is_not_parking_in_it():
+    beside_y1 = (203.3, -135.2, 0)                 # lane -3, next to yard.Y1 on the shoulder
+    assert "slot" not in f.zone_for(_stops_at((206, -120, 0), beside_y1), NAMED)

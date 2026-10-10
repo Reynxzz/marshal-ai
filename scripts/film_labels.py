@@ -64,7 +64,9 @@ def zone_for(points: list[tuple[float, float, float]], named: dict[str, tuple[fl
     stopped = math.dist(end[:2], points[-min(len(points), 10)][:2]) < 0.5
     if stops and stopped:
         stop = min(stops, key=lambda n: math.dist(stops[n], end[:2]))
-        if math.dist(stops[stop], end[:2]) < 4.0:
+        # on the mark: a car parked in a slot or bay is pulled onto it (within about a metre), while
+        # one pausing in the lane beside a slot on its way further is 3.3 m off it
+        if math.dist(stops[stop], end[:2]) < 2.0:
             return point_label(stop)
     road = {n: xy for n, xy in named.items() if not n.startswith(STOPS) and n != "lane_c"}
     name = min(road, key=lambda n: math.dist(road[n], mid[:2]))
