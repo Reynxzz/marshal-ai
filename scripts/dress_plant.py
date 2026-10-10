@@ -319,6 +319,29 @@ def detail_world(d: "Dresser", m: carla.Map, put, lengths: dict) -> None:
             put("static.prop.streetbarrier", 9, lane, float(s))
     for s in range(3, int(lengths[7]) - 2, 4):
         put("static.prop.streetbarrier", 7, 1, float(s))
+    # Markings. CARLA's OpenDRIVE world is one flat concrete colour with no painted lines, and it ignores
+    # lane heights and superelevation, so the ground cannot be shaped either (both tried). Its iron plate
+    # is a flat rust-brown 1.45 m square: laid as dashed lines along the parking rows they mark out the
+    # bays, and in patches they break up the open aprons. At the road's own height a plate is buried in
+    # it and invisible (the sidewalk lanes are raised like a kerb), so they sit 22 cm up.
+    plate = "static.prop.ironplank"
+    for s in range(2, int(lengths[7]) - 1, 3):           # the yard: both edges of the lot row, the inner rows
+        put(plate, 7, -5, float(s), right=-2.6, up=0.22)
+        put(plate, 7, -5, float(s), right=2.6, up=0.22)
+        put(plate, 7, 1, float(s), right=-7.0, up=0.22)
+        put(plate, 7, 1, float(s), right=7.0, up=0.22)
+    for s in range(4, int(lengths[9]) - 2, 3):           # the compound: the outer edge of each pair of rows
+        for lane in (1, -1):
+            put(plate, 9, lane, float(s), right=-8.0, up=0.22)
+            put(plate, 9, lane, float(s), right=8.0, up=0.22)
+    for _ in range(12):                                   # worn patches on the aprons
+        road = rng.choice(list(LOOP_ROADS))
+        s0 = rng.uniform(4.0, lengths[road] - 6.0)
+        lane, right0 = rng.choice([(-6, rng.uniform(-2.0, 2.0)), (-7, rng.uniform(-15.0, 15.0)),
+                                   (1, rng.uniform(-6.0, 6.0))])
+        for i in range(2):
+            for j in range(2):
+                put(plate, road, lane, s0 + 1.45 * i, right=right0 + 1.17 * j, up=0.22)
     # service vans on the apron beside the bays
     for s in (8.0, 28.0, 50.0):
         put("vehicle.mercedes.sprinter", 3, -5, s + 1.0, "230,230,230", up=0.3)
