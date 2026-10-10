@@ -24,6 +24,23 @@ class ScenarioStatus(str, Enum):
     REJECTED = "rejected"
 
 
+class TestRequest(TenantScopedModel, table=True):
+    __tablename__ = "test_requests"
+    __table_args__ = (
+        UniqueConstraint("request_id", name="uq_test_requests_request_id"),
+        Index("idx_test_requests_tenant_status", "tenant_id", "status"),
+    )
+
+    id: str = Field(default_factory=generate_ulid, primary_key=True, max_length=26)
+    request_id: str = Field(max_length=50, nullable=False)
+    source: str = Field(max_length=50, nullable=False)
+    text: str = Field(default="", nullable=False)
+    status: str = Field(default="new", max_length=20)
+    scenario_id: Optional[str] = Field(
+        default=None, foreign_key="scenarios.id", max_length=26
+    )
+
+
 class Scenario(TenantScopedModel, table=True):
     __tablename__ = "scenarios"
     __table_args__ = (

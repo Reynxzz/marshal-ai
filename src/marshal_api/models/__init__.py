@@ -20,6 +20,7 @@ from marshal_api.models.lab import (
     ReleaseEvalTest,
     Scenario,
     ScenarioStatus,
+    TestRequest,
     TestRun,
 )
 from marshal_api.models.ops import AsyncJob, EventLog, MediaArtifact
@@ -77,6 +78,7 @@ __all__ = [
     "ReworkTicket",
     # lab
     "ScenarioStatus",
+    "TestRequest",
     "Scenario",
     "TestRun",
     "Release",

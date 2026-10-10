@@ -37,8 +37,9 @@ EXPECTED_TABLES = {
     "trucks", "cars", "build_sheets", "missions", "assistance_cases",
     "assistance_options", "inspection_results", "visual_findings",
     "buildsheet_mismatches", "functional_step_checks", "car_reports",
-    "rework_tickets", "proposals", "scenarios", "test_runs", "releases",
-    "release_eval_tests", "async_jobs", "media_artifacts", "event_logs",
+    "rework_tickets", "proposals", "scenarios", "test_requests", "test_runs",
+    "releases", "release_eval_tests", "async_jobs", "media_artifacts",
+    "event_logs",
 }
 
 EXPECTED_INDEXES = {
@@ -53,6 +54,7 @@ EXPECTED_INDEXES = {
     "idx_bsm_result_id",
     "idx_options_case_id",
     "idx_scenarios_tenant_status",
+    "idx_test_requests_tenant_status",
     "idx_runs_scenario_id",
     "idx_jobs_tenant_status",
     "idx_events_stream",
@@ -74,6 +76,7 @@ EXPECTED_UNIQUES = {
     "uq_reports_car_id",
     "uq_rework_ticket_id",
     "uq_scenarios_scenario_id",
+    "uq_test_requests_request_id",
     "uq_test_runs_run_id",
     "uq_releases_release_id",
     "uq_jobs_job_id",

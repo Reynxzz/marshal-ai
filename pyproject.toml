@@ -16,6 +16,10 @@ dependencies = [
     "python-ulid>=3.0",
     "aiosqlite>=0.20",
     "greenlet>=3.0",
+    # Control Tower API (docs-be/BACKEND_SCAFFOLDING_PLAN.md)
+    "fastapi>=0.115",
+    "pydantic-settings>=2.2",
+    "sse-starlette>=2.1",
 ]
 
 [project.optional-dependencies]

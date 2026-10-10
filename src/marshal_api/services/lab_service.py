@@ -1,0 +1,12 @@
+"""Test lab: scenarios, adversarial search, releases (Flows 6-7)."""
+
+from __future__ import annotations
+
+from sqlmodel.ext.asyncio.session import AsyncSession
+
+
+class LabService:
+    """Scaffold: holds the request session; behaviour arrives in a later phase."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
