@@ -196,6 +196,10 @@ CAMERA_TICK_S = 0.2
 PRECISE_STOPS = {"inspection_gate"}
 STOP_TOLERANCE_M = 0.4
 CREEP_MAX_S = 30.0                 # give up creeping after this long, rather than wait forever
+# A pull_over point (plant_map.yaml) is off the driving lanes - a bay or yard slot on the shoulder -
+# and BehaviorAgent only routes on driving lanes. So the car is routed to the lane this far before
+# the spot, then steers onto it. 12 m is enough to move one lane over at walking pace.
+PULL_OVER_RUN_M = 12.0
 
 # Every sensor Marshal spawns carries this role_name, so leftovers can be found and cleared. Runs used
 # to leave cameras alive in the world - 28 built up in one session, each rendering every frame on the
@@ -488,8 +492,20 @@ class CarlaDrivingSystem:
                 v.assist_case = None
                 # day 3: translate the chosen option (wait / pass left / reroute) here
 
+    def _precise(self, point: str) -> bool:
+        spec = self.map.points[point].carla or {}
+        return point in PRECISE_STOPS or bool(spec.get("pull_over"))
+
     def _next_destination(self, v: _Vehicle) -> None:
-        v.agent.set_destination(self.transform(v.remaining[0]).location)
+        point = v.remaining[0]
+        target = self.transform(point).location
+        if (self.map.points[point].carla or {}).get("pull_over"):
+            # Off the driving lanes: route to the lane beside the spot, a run-up before it.
+            wp = self.world.get_map().get_waypoint(target, project_to_road=True,
+                                                   lane_type=carla.LaneType.Driving)
+            back = wp.previous(PULL_OVER_RUN_M) if wp is not None else []
+            target = (back[0] if back else wp).transform.location if wp is not None else target
+        v.agent.set_destination(target)
 
     async def start(self) -> None:
         settings = self.world.get_settings()
@@ -552,7 +568,7 @@ class CarlaDrivingSystem:
             await self._routine_step(v)
             return
         if v.agent.done():
-            if v.remaining[0] in PRECISE_STOPS and not self._creep(v):
+            if self._precise(v.remaining[0]) and not self._creep(v):
                 return                          # still edging onto the mark
             v.creep_s = 0.0
             v.location = v.remaining.pop(0)
@@ -582,13 +598,16 @@ class CarlaDrivingSystem:
         It brakes for anything in front, and gives up after CREEP_MAX_S rather than hold up the
         plant if something it cannot see is in the way.
         """
-        target = self.transform(v.remaining[0]).location
+        point = v.remaining[0]
+        target = self.transform(point).location
         here = v.actor.get_transform()
         forward = here.get_forward_vector()
         dx, dy = target.x - here.location.x, target.y - here.location.y
         along = dx * forward.x + dy * forward.y
+        pulling_over = bool((self.map.points[point].carla or {}).get("pull_over"))
         v.creep_s += self.fixed_delta_s
-        if along <= STOP_TOLERANCE_M or v.creep_s > CREEP_MAX_S:
+        close = math.hypot(dx, dy) <= 1.0
+        if along <= STOP_TOLERANCE_M or close or v.creep_s > CREEP_MAX_S:
             v.actor.apply_control(carla.VehicleControl(throttle=0.0, brake=1.0))
             if v.creep_s > CREEP_MAX_S:
                 log.warning("%s stopped %.1f m short of %s", v.vin, along, v.remaining[0])
@@ -602,9 +621,12 @@ class CarlaDrivingSystem:
         error = (bearing - heading + math.pi) % (2 * math.pi) - math.pi
         velocity = v.actor.get_velocity()
         speed = math.hypot(velocity.x, velocity.y)
+        # Pulling over is a lane's width sideways in a short run, so it may steer harder than the
+        # straight creep onto the gate mark, which only corrects a little.
+        limit = 0.6 if pulling_over else 0.3
         v.actor.apply_control(carla.VehicleControl(
             throttle=0.3 if speed < 1.0 else 0.0,          # about 3.6 km/h
-            steer=max(-0.3, min(0.3, 1.5 * error)),
+            steer=max(-limit, min(limit, 1.5 * error)),
             brake=0.0))
         return False
 
@@ -651,9 +673,17 @@ class CarlaDrivingSystem:
         return best, best_d
 
     def _is_plant_car(self, actor) -> bool:
-        """Whether an actor is one of the cars this plant is moving."""
-        return (actor.type_id.startswith("vehicle.")
-                and actor.attributes.get("role_name") in self.vehicles)
+        """Whether an actor is one of the plant's cars that is itself on its way somewhere.
+
+        Only a car with a mission is traffic to wait behind. A plant car with none is parked, and if
+        it is in the lane it is an obstruction like any other: waiting behind it is waiting for
+        ever, which is exactly what happened when a car stood in production control on the next
+        car's route to the yard. That has to come back as a request for help, not silence.
+        """
+        if not actor.type_id.startswith("vehicle."):
+            return False
+        other = self.vehicles.get(actor.attributes.get("role_name"))
+        return other is not None and other.mission is not None
 
     def assist_clip(self, v: _Vehicle) -> list[bytes]:
         """The seconds before the stop, from the camera on the car, oldest frame first."""

@@ -10,6 +10,8 @@ readonly APP_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 readonly RUNTIME_PATH="$APP_ROOT/src:/opt/marshal-runtime/vendor:/opt/carla/PythonAPI/carla"
 readonly STEPS="${MARSHAL_PLANT_STEPS:-1}"
 readonly CARS="${MARSHAL_PLANT_CARS:-3}"
+# MARSHAL_PLANT_WRONG_COLOUR=2: car 2 is painted red against a blue build sheet (demo scene 2)
+readonly WRONG="${MARSHAL_PLANT_WRONG_COLOUR:-0}"
 viewer_was_active=false
 
 cd "$APP_ROOT"
@@ -55,4 +57,4 @@ fi
 python3 scripts/ensure_carla_map.py --map Town05 --wait-seconds 600
 start_recording plant
 
-python3 scripts/demo_carla_plant.py --cars "$CARS" --steps "$STEPS"
+python3 scripts/demo_carla_plant.py --cars "$CARS" --steps "$STEPS" --wrong-colour "$WRONG"

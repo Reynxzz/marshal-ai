@@ -69,8 +69,21 @@ def _stall(backend, v, seconds: int = 5) -> list:
 def test_waiting_behind_another_plant_car_is_queuing_not_being_stuck():
     car_ahead = _actor("vehicle.lincoln.mkz_2020", role="VIN-2")
     backend, v = _stalled_backend(car_ahead, plant_vins=("VIN-1", "VIN-2"))
+    backend.vehicles["VIN-2"].mission = SimpleNamespace(mission_id="M-2")   # it is going somewhere
 
     assert _stall(backend, v) == [], "no assistance card for a car queued behind the gate"
+
+
+def test_a_parked_plant_car_in_the_lane_is_an_obstruction():
+    """A plant car with no mission is not going to move: waiting behind it is waiting for ever.
+
+    That is what happened when a car stood in production control on the next car's route to the
+    yard, and the next car sat behind it, silently, until the run timed out.
+    """
+    parked = _actor("vehicle.lincoln.mkz_2020", role="VIN-2")
+    backend, v = _stalled_backend(parked, plant_vins=("VIN-1", "VIN-2"))   # VIN-2: no mission
+
+    assert len(_stall(backend, v)) == 1
 
 
 def test_a_vehicle_that_is_not_one_of_ours_still_raises_a_request():
@@ -153,12 +166,30 @@ def test_the_gate_refuses_to_create_cameras_inside_a_running_loop():
 
 
 def test_the_nearest_slot_to_the_loading_bay_is_measured_where_the_cars_are():
+    """The schematic once ranked a slot 47 m from the bay as nearest; distance is now real."""
+    import math
+
     m = load_plant_map()
+    bay = m.points["loading_bay"].carla
     slots = [p for p in m.points if p.startswith("yard.Y")]
 
     nearest = min(slots, key=lambda p: m.distance(p, "loading_bay"))
+    real = math.hypot(m.points[nearest].carla["x"] - bay["x"], m.points[nearest].carla["y"] - bay["y"])
 
-    assert nearest == "yard.Y8", "7 m from the bay in CARLA; the schematic said Y7, 47 m away"
+    assert real < 10.0, f"{nearest} is {real:.0f} m from the loading bay in CARLA"
+    assert m.distance(nearest, "loading_bay") == min(m.distance(p, "loading_bay") for p in slots)
+
+
+def test_no_bay_or_slot_is_on_another_spot_s_route():
+    """Every parking spot is off the driving lanes, so a parked car never blocks a drive.
+
+    They used to be in the lanes, and ten of thirteen lay on another car's route. Checked against
+    the map here; the route check itself needs the CARLA map and was run on the server.
+    """
+    m = load_plant_map()
+    parking = [p for p in m.points if p.startswith(("yard.Y", "rework.")) or p == "production_control"]
+
+    assert all((m.points[p].carla or {}).get("pull_over") for p in parking)
 
 
 class _Loc(SimpleNamespace):
@@ -170,6 +201,7 @@ def _creeping(along_m: float, obstacle=None):
     controls: list = []
     backend = CarlaDrivingSystem.__new__(CarlaDrivingSystem)
     backend.fixed_delta_s = 0.05
+    backend.map = load_plant_map()
     backend.transform = lambda point: SimpleNamespace(location=_Loc(x=0.0, y=0.0))
     backend._obstacle_ahead = lambda v: (obstacle, 1.0) if obstacle else (None, 99.0)
     here = SimpleNamespace(location=_Loc(x=-along_m, y=0.0),

@@ -66,7 +66,7 @@ simulation cannot yet show what the design describes. The target is the design's
   cameras (flow 3). Today the car stops, because a capture and a running driving loop in one process
   deadlock (comment in `run_carla_scene1.sh`). Find a way: a capture process separate from the
   driving process, or sensors that stream into a buffer.
-- [ ] **A wrong-colour car** at the gate (scene 2): spawn a car whose colour or model differs from its
+- [x] **A wrong-colour car** at the gate (scene 2) (`qais`: `MARSHAL_PLANT_WRONG_COLOUR=2 run_carla_plant.sh`; flagged at 1.00 in 3 of 3 runs, booked to production control): spawn a car whose colour or model differs from its
   build sheet. The variant check is the stand-in the design names for CARLA (flow 3, "What is real").
 - [ ] **A brake-lamp fault the camera can see** (scene 2 wants a dead left brake light). This asset
   draws one continuous brake bar and no left blinker (README, "Flow 4 on the whole R-12 routine").

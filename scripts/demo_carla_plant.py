@@ -48,6 +48,19 @@ CAR_COLOUR = "0,80,200"
 # the roof (it only reports mismatches on fields the sheet states), which is the honest position.
 BUILD = dict(model="sedan", colour="blue", options=[])
 DONE = {CarState.YARD, CarState.SHIPPED, CarState.REWORK}
+WRONG_COLOUR = "200,20,20"          # red, on a car whose build sheet says blue
+
+
+def finished(car: Car) -> bool:
+    """A car is through the plant once it is parked in the yard, shipped, or standing in its bay.
+
+    A car sent to rework is marked REWORK the moment it is dispatched, before it has moved, so that
+    alone would end the run with the car still driving; it is finished once it has arrived.
+    """
+    if car.state is CarState.REWORK:
+        return car.mission_id is None and (car.location.startswith("rework.")
+                                           or car.location == "production_control")
+    return car.state in DONE
 
 
 def parser() -> argparse.ArgumentParser:
@@ -66,6 +79,8 @@ def parser() -> argparse.ArgumentParser:
     ap.add_argument("--sun-altitude", type=float, default=15.0,
                     help="one sun for the whole plant: low enough for lamps, high enough for the gate")
     ap.add_argument("--timeout", type=float, default=1200.0, help="wall-clock seconds")
+    ap.add_argument("--wrong-colour", type=int, default=0, metavar="N",
+                    help="paint car N (1-based) red while its build sheet says blue - demo scene 2")
     ap.add_argument("--no-supervisor", action="store_true",
                     help="leave reviews and rework proposals pending; cars wait where they are")
     return ap
@@ -140,7 +155,7 @@ class Watch:
                 emit({"type": "plant.car", "vin": car.vin, "state": car.state.value,
                       "location": car.location, "sim_s": self.sim_s()})
                 self.last[car.vin] = now
-            if car.vin in self.released_at and car.state not in DONE:
+            if car.vin in self.released_at and not finished(car):
                 in_plant += 1
                 if self.speed_kmh(car.vin) > 0.5:
                     moving += 1
@@ -172,6 +187,9 @@ async def supervise(app, rt) -> None:
         them quietly would hide exactly the number that says how much the gate can be trusted.
       - A gate result that FAILED is not touched, and neither is a lamp fault: those are real.
       - Rework proposals are confirmed as proposed, and the car drives to the bay they name.
+      - Yard re-plans are approved as proposed. They come up when a bay is full: in one run a car
+        wanting the body bay found it taken, Gemini proposed sending it on, and with nobody to
+        approve that the car sat on the gate and every car behind it waited.
     """
     for proposal in rt.pending("review"):
         vin = proposal.payload["vin"]
@@ -193,6 +211,10 @@ async def supervise(app, rt) -> None:
         decision = await app.router.decide(proposal.proposal_id, confirm=True, by=SUPERVISOR)
         emit({"type": "plant.supervisor", "decision": "rework confirmed", "vin": vin,
               "summary": report.summary if report else None, "result": decision})
+    for proposal in rt.pending("replan"):
+        decision = await app.yard.decide(proposal.proposal_id, approve=True, by=SUPERVISOR)
+        emit({"type": "plant.supervisor", "decision": "re-plan approved",
+              "summary": proposal.summary, "result": decision})
 
 
 async def run(args) -> dict:
@@ -226,12 +248,15 @@ async def run(args) -> dict:
     sun = set_sun(rt, args.sun_altitude)
     # Every camera is created before the loop starts: a camera spawned mid-tick segfaults the
     # server. That is the gate's four and each car's own three.
+    wrong = vins[args.wrong_colour - 1] if args.wrong_colour else None
     for i, vin in enumerate(vins):
         rt.driving.despawn(vin)
-        rt.driving.spawn(vin, at="line_end", colour=CAR_COLOUR, behind_m=i * args.queue_gap_m)
+        rt.driving.spawn(vin, at="line_end", colour=WRONG_COLOUR if vin == wrong else CAR_COLOUR,
+                         behind_m=i * args.queue_gap_m)
     rt.gate_camera.prewarm(fixed=True)
     emit({"type": "plant.start", "cars": vins, "trucks": {t: rt.plant.trucks[t].eta for t in trucks},
           "next_truck": rt.plant.next_truck().truck_id, "steps": steps or "all", "sun": sun,
+          "wrong_colour": wrong,
           "cameras": len(rt.driving._cameras) + 3 * len(vins)})
 
     watch = Watch(rt, vins)
@@ -252,7 +277,7 @@ async def run(args) -> dict:
             if not args.no_supervisor:
                 await supervise(app, rt)
             cars = watch.poll()
-            if cars and all(c.state in DONE for c in cars):
+            if cars and all(finished(c) for c in cars):
                 break
             await asyncio.sleep(1.0)
         else:
@@ -268,14 +293,21 @@ async def run(args) -> dict:
         rt.driving.despawn(vin)
 
     by_vin = {c.vin: c for c in cars}
+    visual = {vin: rt.store.get(InspectionResult, f"{vin}:visual") for vin in vins}
     reports = {vin: (r.verdict.value if (r := rt.store.get(CarReport, vin)) else None)
                for vin in vins}
+    bays = {vin: [t.bay for t in r.rework] if (r := rt.store.get(CarReport, vin)) else []
+            for vin in vins}
     line_to_yard = {vin: round(watch.yard_at[vin] - watch.released_at[vin], 1)
                     for vin in vins if vin in watch.yard_at and vin in watch.released_at}
     return {
-        "cars": {vin: {"state": by_vin[vin].state.value, "slot": by_vin[vin].yard_slot,
-                       "truck": by_vin[vin].build_sheet.truck_id, "report": reports[vin]}
+        "cars": {vin: {"state": by_vin[vin].state.value, "location": by_vin[vin].location,
+                       "truck": by_vin[vin].build_sheet.truck_id, "report": reports[vin],
+                       "gate": visual[vin].verdict.value if visual[vin] else None,
+                       "mismatches": visual[vin].build_sheet_mismatches if visual[vin] else [],
+                       "booked_bays": bays[vin]}
                  for vin in vins if vin in by_vin},
+        "wrong_colour": wrong,
         "shipped": shipped,
         "max_cars_in_plant_at_once": watch.max_in_plant,
         "max_cars_moving_at_once": watch.max_moving,
@@ -295,9 +327,25 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as exc:
         emit({"type": "plant.error", "error": f"{type(exc).__name__}: {exc}"})
         return 1
-    every_car_shipped = all(c["state"] == "shipped" for c in out["cars"].values())
+    wrong = out["wrong_colour"]
+    good = {vin: c for vin, c in out["cars"].items() if vin != wrong}
+    every_good_car_shipped = all(c["state"] == "shipped" for c in good.values())
     concurrent = out["max_cars_in_plant_at_once"] >= 2
-    ok = every_car_shipped and concurrent and len(out["cars"]) == args.cars
+    caught = True
+    if wrong:
+        # Scene 2's claim, as the design states it: the car is flagged at the gate for its colour,
+        # the report fails it, it is booked into production control - the design's bay for a wrong
+        # variant - and it does not ship. It need not be standing in production control yet: if
+        # anything else was found, an earlier bay comes first, and moving between bays waits for
+        # the bay to sign the repair off, which this scene does not simulate.
+        c = out["cars"].get(wrong, {})
+        caught = (c.get("gate") == "FAIL"
+                  and any(m.startswith("colour") for m in c.get("mismatches", []))
+                  and c.get("report") == "FAIL"
+                  and "production_control" in c.get("booked_bays", [])
+                  and c.get("state") != "shipped")
+        out["wrong_colour_caught"] = caught
+    ok = every_good_car_shipped and concurrent and caught and len(out["cars"]) == args.cars
     emit({"type": "plant.done", **out,
           "result": "success" if ok else "not demonstrated"})
     return 0 if ok else 2

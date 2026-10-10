@@ -81,6 +81,27 @@ The design is shaped by what failed along the way:
 when" (every flow three times in a row with no CARLA restart). The same check before the exit fix
 had 17 of 18: one day 4 run aborted on exit (134) after reporting success.
 
+### Gemini's judgements in the multi-car runs (for Rey)
+
+Measured on branch `qais` on real CARLA, with clean blue cars unless noted:
+
+- **Wrong colour is caught every time.** A red car with a blue build sheet:
+  `colour: build sheet says blue, car shows red (1.00)` in 3 of 3 runs, report FAIL, booked to
+  production control.
+- **The gate raises false alarms on clean cars.** Over the multi-car runs, a clean car came back
+  REVIEW or FAIL about one time in three. The findings were "panel gap", "paint loss" or "paint
+  defect" along the lower edge of the doors at 0.85-0.95, and a red car also got "irregular red
+  patterns on both right-side doors". The side photos show nothing there.
+- **The gate depends on where the sun is.** `scripts/probe_gate_lighting.py` parks a clean car on
+  the gate and inspects it twice per sun position. Sun at altitude 15 and the map's azimuth (170):
+  2/2 PASS. Altitude 15, 30 or 45 with the sun along the road (azimuth 0): 0/6, all REVIEW, all
+  with no finding (an all-clear view under 0.9). Altitude 45 at azimuth 170: 0/2. The plant runs
+  at 15 and 170 for this reason.
+- **A lit headlight was read as off.** In one run VIN-P3's frame shows both headlight strips lit,
+  as in the reference frame from VIN-P1, and Gemini answered "Both headlights are off in the frame
+  under test, matching the reference frame". That failed a clean car. At altitude 15 the strips are
+  thin but visible (photographed with each light state on its own).
+
 ### Known issues
 
 - ~~**A camera view that crashes the server.**~~ Found on `qais`: it is `-quality-level=Low`. At Low,
