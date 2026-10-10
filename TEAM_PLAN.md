@@ -129,8 +129,11 @@ simulation cannot yet show what the design describes. The target is the design's
   `src/marshal_ai/store/__init__.py`; Faris's `/proposals` page reads it.
 
 ### M3: the test lab story
-- [ ] **Incident → test on CARLA.** Scene 3's assistance case becomes a scenario spec, validated,
+- [x] **Incident → test on CARLA.** Scene 3's assistance case becomes a scenario spec, validated,
   compiled and run; the design's ops-to-lab loop ("The loop between operations and the test lab").
+  *Done:* `scripts/run_incident_to_test.sh`. Scene 3's case → SC-0142 first try → run on CARLA →
+  in the library, tagged from-incident. It fails `no_contact`: the car drives into the box (see
+  Qais hand-off). Generation went from 0/3 to 12/12 on dataset v4-scenario, 100% faithful.
 - [ ] **Search that reads results.** Gemini proposes each batch from the previous batch's scores and
   clips and says why ("gap shrinks at night; try tall occluders next"), within the 60-run budget.
 - [ ] **The failure report** in the design's form (flow 7 example): conditions, measured gap vs
@@ -202,6 +205,9 @@ at a time, so the code work is parallel and the server time is shared.
 | Qais → Rey | Full search space compiled; parallel servers; a clip per run | Search that reads results, failure report with clip |
 | Rey → Faris | Record shapes, the `proposals` collection, the assistance card fields (`AssistanceCase.objects`: draw `box_2d` on `image`, scaled from 0-1000) | Dashboard screens |
 | Qais → Faris | Replay clips per run, a live camera | Video on the dashboard |
+| Rey → Qais | BehaviorAgent drives into static props: SC-0142 (scene 3's box) fails `no_contact` on CARLA. The stand-in needs to brake for objects in the lane, as the plant's driving system would | Scene 3 and its test passing |
+| Rey → Qais | The VM's `.env` (`~/marshal-app`) points `GOOGLE_APPLICATION_CREDENTIALS` at a laptop path; scripts that do not export it themselves (`run_carla_lab.sh`) cannot reach Gemini | Lab runs with Gemini on the VM |
+| Rey → Qais | Small changes in your files: `repair()` in `carla_backend.py`, `--rework` in `demo_carla_day4.py`, `MARSHAL_LAB_SOURCE` in `run_carla_lab.sh`, the contact event in `lab/compiler.py` | Review |
 
 ## Suggested first week
 

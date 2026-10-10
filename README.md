@@ -490,6 +490,34 @@ the evaluation answers 13% of findings ("scratches", "scuff", "paint_damage", "c
 "headlight_haze") missed the table and went to the body bay. `bay_for` now reads the words against
 the design's table, lights before paint.
 
+**Incident → test on CARLA** (`scripts/run_incident_to_test.sh`): the design's loop between
+operations and the test lab. Scene 3 runs, the desk's case goes to the lab, Gemini writes a spec
+from the case, and it is validated, checked fair, dry-run, run and judged on CARLA and reviewed into
+the library tagged `from-incident`. `MARSHAL_INCIDENT_CASE=/tmp/marshal-day5/case.json` reuses a case.
+
+```
+AC-VIN-STUCK-1  "A cardboard box is in the lane 2.3m ahead, with a person walking further ahead..."
+SC-0142         route inspection_gate->test_track->report_point at 8 km/h; box at test_track,
+                worker walking at report_point; no_contact, min_gap_to_person_m >= 1.5,
+                speed_near_person_kmh <= 5        generated first try, in_library
+CARLA run       FAIL no_contact: "contact with static.prop.box01"; worker kept 20 m away (twice)
+```
+
+The test fails, and that is the finding: BehaviorAgent brakes for vehicles and walkers, not props,
+so the stand-in drives into the box. Scene 3's "2.3 m ahead" is measured from the car's centre,
+about half a car length, so its stop was most likely this contact too.
+
+It took three fixes. Generation failed on all three tries at scene 3's case (4 attempts, ~2 min, then
+rejected): Gemini placed the box and worker at `test_track`, where the car spawns, and, told only
+that "no_contact is not achievable", loosened the criteria instead of moving them. The validator now
+rejects an actor at the car's start and says how to fix it; the prompt says where the car starts,
+that only a forklift, pallet stack or parked car can hide a person (first tries wrote `behind:box`
+for "a person walking behind it"), and to use only the example's fields; and a request from an
+assistance case is shown an incident example beside the supervisor one. `run_carla_lab.sh` takes
+`MARSHAL_LAB_SOURCE`, so the case id reaches the scenario. Dataset `v4-scenario` (`--flows scenario`)
+scores it on the quick simulator: 4 requests x 3 runs, a runnable test 12/12 (first try 9/12),
+faithful to the request (zone, actors, where they stand, criteria, time of day) 100%, 13 s median.
+
 **Day 5 complete on real CARLA with real Gemini** (`scripts/run_carla_day5.sh`). Demo scene 3 runs
 end to end. `carla_backend` used to note that raising `assist.request` was unwired, so flow 2 only
 ever worked against the fake plant; the CARLA backend now raises it itself when the agent stalls

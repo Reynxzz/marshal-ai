@@ -6,6 +6,7 @@ Firestore and no CARLA server is needed: the evidence comes from the case, not f
 
 from __future__ import annotations
 
+import asyncio
 import time
 from typing import Callable
 
@@ -14,7 +15,8 @@ from marshal_ai.config import Settings
 from marshal_ai.driving.messages import AssistRequest
 from marshal_ai.driving.routines import routine_steps
 from marshal_ai.eval.damage import kinds_of
-from marshal_ai.eval.dataset import AssistCase, DamageCase, GateCase, MediaCache, ReportCase, TrackCase
+from marshal_ai.eval.dataset import (AssistCase, DamageCase, GateCase, MediaCache, ReportCase, ScenarioCase,
+                                     TrackCase)
 from marshal_ai.flows.functional import ROUTINE
 from marshal_ai.llm import LLM, Media
 from marshal_ai.records import Car, CarState, InspectionResult
@@ -144,5 +146,13 @@ async def run_report(llm: LLM, case: ReportCase, cache: MediaCache) -> dict:
             "seconds": round(seconds, 2)}
 
 
+async def run_scenario(llm: LLM, case: ScenarioCase, cache: MediaCache) -> dict:
+    """Generation on the quick simulator: validated, checked fair and dry-run, but no CARLA."""
+    app = fresh_app(llm)
+    result, seconds = await _timed(lambda: asyncio.to_thread(app.generator.generate, case.request, case.source))
+    return {"status": result.scenario.status.value, "attempts": result.attempts, "errors": result.errors,
+            "spec": result.scenario.spec, "seconds": round(seconds, 2)}
+
+
 RUNNERS = {"gate": run_gate, "track": run_track, "assist": run_assist, "damage": run_damage,
-           "report": run_report}
+           "report": run_report, "scenario": run_scenario}

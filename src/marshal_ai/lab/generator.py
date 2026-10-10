@@ -38,11 +38,32 @@ EXAMPLE_SPEC = {
     "pass_criteria": ["no_contact", "min_gap_to_person_m >= 1.5", "speed_near_person_kmh <= 5"],
 }
 
+# A case from the assistance desk (flow 2) recreated as a test: the design's ops-to-lab loop. Shown
+# beside the supervisor example when the request comes from a case; without it Gemini put the box
+# where the car starts on all three tries at scene 3's incident.
+INCIDENT_EXAMPLE_SPEC = {
+    "id": "SC-0150",
+    "source": "assistance case AC-VIN-123-1",
+    "description": "A box in the lane at the test track with a worker beside it; the car stopped and waited.",
+    "map_zone": "test_track",
+    "time_of_day": "noon",
+    "weather": "clear",
+    "ego": {"route": "inspection_gate->test_track->report_point", "speed_kmh": 8},
+    "actors": [
+        {"type": "box", "state": "stationary", "position": "test_track"},
+        {"type": "worker", "state": "stationary", "position": "test_track"},
+    ],
+    "pass_criteria": ["no_contact", "min_gap_to_person_m >= 1.5", "speed_near_person_kmh <= 5"],
+}
+
 SYSTEM = """You turn plain-language plant situations into scenario specs for simulation tests of a
 driverless car system. Output one JSON object only, never code. Use only the named map points, zones,
-actor types, times of day, weather and pass criteria you are given. Plant speed limit is 10 km/h.
+actor types, times of day, weather and pass criteria you are given, and only the fields the examples
+use. Plant speed limit is 10 km/h. The car starts at the first point of its route, so never place an
+actor there: to recreate something at point X, start the route at a point before X.
 A worker who steps out from behind something uses "start": "behind:<actor type>" and needs
-walk_speed_ms and a trigger. An unknown object blocking the lane (a dropped box, debris) is a "box"
+walk_speed_ms and a trigger; only a forklift, pallet stack or parked car can hide a person. A person
+near a smaller object, such as a box, stands at that object's point. An unknown object blocking the lane (a dropped box, debris) is a "box"
 actor with a position on the ego route; the car must stop before it, so do not require reached_goal.
 Always include pass criteria that capture what safe means here, and that a careful driver could meet:
 the car has to drive its route, so never limit its overall speed to near zero."""
@@ -86,9 +107,10 @@ class ScenarioGenerator:
     def generate(self, request: str, source: str = "supervisor request") -> GenerationResult:
         scenario_id = self._next_id()
         context = json.dumps(map_context(self.rt), indent=1)
+        examples = [EXAMPLE_SPEC] + ([INCIDENT_EXAMPLE_SPEC] if source.startswith("assistance") else [])
         prompt = (f"Situation: {request}\n\nPlant map and allowed values:\n{context}\n\n"
-                  f"Example of a valid spec:\n{json.dumps(EXAMPLE_SPEC, indent=1)}\n\n"
-                  f"Write the spec. Use id {scenario_id} and source {source!r}.")
+                  + "".join(f"Example of a valid spec:\n{json.dumps(e, indent=1)}\n\n" for e in examples)
+                  + f"Write the spec. Use id {scenario_id} and source {source!r}.")
         raw: dict = {}
         errors: list[str] = []
         attempts = 0

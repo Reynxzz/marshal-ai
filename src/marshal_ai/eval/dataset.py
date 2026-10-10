@@ -89,6 +89,22 @@ class ReportCase(BaseModel):
     note: str = ""
 
 
+class ScenarioCase(BaseModel):
+    """Flow 6: a request (often an assistance case) and what a test faithful to it must contain."""
+
+    id: str
+    request: str
+    source: str = "supervisor request"
+    expect_zone: str
+    expect_actors: list[str] = Field(description="actor types the test must have")
+    expect_at: dict[str, str] = Field(default_factory=dict,
+                                      description="actor type -> the map point it must be at")
+    expect_metrics: list[str] = Field(default_factory=list,
+                                      description="pass criteria the test must check, by name")
+    expect_time_of_day: str | None = None
+    note: str = ""
+
+
 class Dataset(BaseModel):
     name: str
     description: str = ""
@@ -97,6 +113,7 @@ class Dataset(BaseModel):
     assist: list[AssistCase] = Field(default_factory=list)
     damage: list[DamageCase] = Field(default_factory=list)
     report: list[ReportCase] = Field(default_factory=list)
+    scenario: list[ScenarioCase] = Field(default_factory=list)
 
 
 def load_dataset(path: str | Path) -> tuple[Dataset, Path]:

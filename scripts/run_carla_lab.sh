@@ -10,6 +10,7 @@ readonly OUTPUT="${MARSHAL_LAB_OUTPUT:-/tmp/marshal-lab}"
 readonly RUNTIME_PATH="$APP_ROOT/src:/opt/marshal-runtime/vendor:/opt/carla/PythonAPI/carla"
 readonly ADVERSARIAL="${MARSHAL_LAB_ADVERSARIAL:-0}"
 readonly REQUEST="${MARSHAL_LAB_REQUEST:-}"
+readonly SOURCE="${MARSHAL_LAB_SOURCE:-}"        # e.g. "assistance case AC-..." for an incident
 viewer_was_active=false
 
 cd "$APP_ROOT"
@@ -57,6 +58,9 @@ mkdir -p "$OUTPUT"
 args=(--output "$OUTPUT" --adversarial "$ADVERSARIAL")
 if [[ -n "$REQUEST" ]]; then
   args+=(--request "$REQUEST")
+fi
+if [[ -n "$SOURCE" ]]; then
+  args+=(--source "$SOURCE")
 fi
 
 python3 scripts/demo_carla_lab.py "${args[@]}"

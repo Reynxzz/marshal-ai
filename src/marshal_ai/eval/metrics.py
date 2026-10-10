@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections import Counter
 from statistics import median
 
-from marshal_ai.eval.dataset import AssistCase, DamageCase, GateCase, ReportCase, TrackCase
+from marshal_ai.eval.dataset import AssistCase, DamageCase, GateCase, ReportCase, ScenarioCase, TrackCase
 
 GATE_BUDGET_S = 5.0          # design, "A car's journey": under 5 s while the car rolls through
 CARD_BUDGET_S = 5.0          # design, flow 2: the card reaches the supervisor in about 5 s
@@ -179,5 +179,39 @@ def report_metrics(cases: list[ReportCase], results: dict[str, list[dict]]) -> d
     }
 
 
+def faithful(case: ScenarioCase, spec: dict) -> dict[str, bool]:
+    """Each thing the request asked for, and whether the test has it."""
+    actors = spec.get("actors") or []
+    types = [a.get("type") for a in actors]
+    criteria = " ".join(spec.get("pass_criteria") or [])
+    checks = {
+        "zone": spec.get("map_zone") == case.expect_zone,
+        "actors": all(t in types for t in case.expect_actors),
+        "placed": all(any(a.get("type") == t and point in (a.get("position"), a.get("start")) for a in actors)
+                      for t, point in case.expect_at.items()),
+        "criteria": all(name in criteria for name in case.expect_metrics),
+    }
+    if case.expect_time_of_day:
+        checks["time_of_day"] = spec.get("time_of_day") == case.expect_time_of_day
+    return checks
+
+
+def scenario_metrics(cases: list[ScenarioCase], results: dict[str, list[dict]]) -> dict:
+    runs = [(c, o) for c in cases for o in results.get(c.id, [])]
+    made = [(c, o) for c, o in runs if o["status"] == "dry_run_ok"]
+    checks = [faithful(c, o["spec"]) for c, o in made]
+    return {
+        # a runnable test came out of the fix loop (3 fixes), without an engineer
+        "generated": _rate([o["status"] == "dry_run_ok" for _, o in runs]),
+        "first_try": _rate([o["status"] == "dry_run_ok" and o["attempts"] == 1 for _, o in runs]),
+        "attempts_median": median([o["attempts"] for _, o in runs]) if runs else None,
+        # of the tests made, the ones that test what was asked: every check below holds
+        "faithful": _rate([all(c.values()) for c in checks]),
+        "faithful_by_check": {k: _rate([c[k] for c in checks if k in c]) for k in sorted({k for c in checks for k in c})},
+        "consistency": _consistency({c.id: [o["status"] for o in results.get(c.id, [])] for c in cases}),
+        "latency": _latency([o for _, o in runs]),
+    }
+
+
 METRICS = {"gate": gate_metrics, "track": track_metrics, "assist": assist_metrics,
-           "damage": damage_metrics, "report": report_metrics}
+           "damage": damage_metrics, "report": report_metrics, "scenario": scenario_metrics}

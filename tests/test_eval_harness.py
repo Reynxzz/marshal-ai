@@ -222,3 +222,26 @@ async def test_a_rework_plan_is_scored_before_and_after_the_router_checks_it():
 def test_the_report_dataset_loads():
     data, _ = load_dataset("eval/datasets/v3-report.json")
     assert len(data.report) == 6
+
+
+async def test_a_generated_test_is_scored_for_whether_it_tests_the_incident():
+    """The offline model's spec is valid; the score still says where it strays from the case."""
+    from marshal_ai.offline import offline_llm
+    data, base = load_dataset("eval/datasets/v4-scenario.json")
+    data.scenario = [c for c in data.scenario if c.id == "design-sc0142"]
+    m = (await evaluate(data, base, offline_llm(), flows=("scenario",), runs=1))["flows"]["scenario"]["metrics"]
+    assert m["generated"] == 1.0 and m["first_try"] == 1.0
+    assert m["faithful"] == 1.0
+
+
+def test_an_actor_where_the_car_starts_is_rejected_with_the_fix():
+    from marshal_ai.lab.generator import INCIDENT_EXAMPLE_SPEC
+    from marshal_ai.lab.reference import unfair_reasons
+    from marshal_ai.lab.validate import validate_spec
+    from marshal_ai.plant.map import load_plant_map
+    plant = load_plant_map()
+    good = validate_spec(INCIDENT_EXAMPLE_SPEC, plant)
+    assert good.ok and unfair_reasons(good.spec, plant) == []
+    bad = dict(INCIDENT_EXAMPLE_SPEC, ego={"route": "test_track->report_point", "speed_kmh": 8})
+    errors = validate_spec(bad, plant).errors
+    assert len(errors) == 2 and all("is where the car starts" in e for e in errors)
