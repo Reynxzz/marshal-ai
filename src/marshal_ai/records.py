@@ -66,6 +66,9 @@ class AssistanceCase(BaseModel):
     clip_uri: str | None = None
     options: list[str]                                 # offered by the driving system, never invented
     ranking: list[dict] = Field(default_factory=list)  # [{"option", "reason", "risk"}], best first
+    # What the dashboard boxes on the clip, the object in the way first:
+    # [{"label", "kind", "frame", "image", "box_2d": [ymin, xmin, ymax, xmax] 0-1000 or None, "distance_m"}]
+    objects: list[dict] = Field(default_factory=list)
     people_or_moving_equipment: bool = False
     recommended: str | None = None
     confidence: float | None = None

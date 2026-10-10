@@ -13,6 +13,7 @@ from statistics import median
 from marshal_ai.eval.dataset import AssistCase, DamageCase, GateCase, TrackCase
 
 GATE_BUDGET_S = 5.0          # design, "A car's journey": under 5 s while the car rolls through
+CARD_BUDGET_S = 5.0          # design, flow 2: the card reaches the supervisor in about 5 s
 
 
 def _rate(hits: list[bool]) -> float | None:
@@ -30,6 +31,20 @@ def _latency(outcomes: list[dict]) -> dict:
         return {}
     p95 = seconds[min(len(seconds) - 1, int(0.95 * len(seconds)))]
     return {"median_s": round(median(seconds), 2), "p95_s": p95, "max_s": seconds[-1]}
+
+
+def iou(a: list[int] | None, b: list[int] | None) -> float:
+    """Overlap of two [ymin, xmin, ymax, xmax] boxes: 1 the same box, 0 apart."""
+    if not a or not b:
+        return 0.0
+    h = max(0, min(a[2], b[2]) - max(a[0], b[0]))
+    w = max(0, min(a[3], b[3]) - max(a[1], b[1]))
+    area = lambda r: (r[2] - r[0]) * (r[3] - r[1])
+    inter = h * w
+    return inter / (area(a) + area(b) - inter) if inter else 0.0
+
+
+BOX_HIT_IOU = 0.5            # the usual bar for a detection to count as on the object
 
 
 def gate_metrics(cases: list[GateCase], results: dict[str, list[dict]]) -> dict:
@@ -69,6 +84,12 @@ def track_metrics(cases: list[TrackCase], results: dict[str, list[dict]]) -> dic
     }
 
 
+def _box_scores(ious: list[float]) -> dict:
+    if not ious:
+        return {"box_iou": None, "box_hit_rate": None}
+    return {"box_iou": round(median(ious), 3), "box_hit_rate": _rate([v >= BOX_HIT_IOU for v in ious])}
+
+
 def assist_metrics(cases: list[AssistCase], results: dict[str, list[dict]]) -> dict:
     runs = [(c, o) for c in cases for o in results.get(c.id, [])]
     return {
@@ -77,9 +98,17 @@ def assist_metrics(cases: list[AssistCase], results: dict[str, list[dict]]) -> d
                                             for c, o in runs]),
         # design rule: a high-risk option is never recommended (target 0)
         "high_risk_recommended": sum(o["recommended_risk"] == "high" for _, o in runs),
+        # the card boxes what is in the scene: each expected kind located with a usable box
+        "object_recall": _rate([any(x["kind"] == e.kind and x["box_2d"] for x in o["objects"])
+                                for c, o in runs for e in c.expect_objects]),
+        # and boxes it where it is: the best overlap with the hand-labelled box (frame 0)
+        **_box_scores([max([iou(x["box_2d"], e.box_2d) for x in o["objects"]
+                            if x["kind"] == e.kind and x["frame"] == 0] or [0.0])
+                       for c, o in runs for e in c.expect_objects if e.box_2d]),
         "consistency": _consistency({c.id: [o["recommended"] for o in results.get(c.id, [])]
                                      for c in cases}),
         "latency": _latency([o for _, o in runs]),
+        "within_budget": _rate([o["seconds"] <= CARD_BUDGET_S for _, o in runs]),
     }
 
 

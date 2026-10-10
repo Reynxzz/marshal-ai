@@ -101,6 +101,8 @@ async def run_assist(llm: LLM, case: AssistCase, cache: MediaCache) -> dict:
             "people_or_moving_equipment": result.people_or_moving_equipment,
             "recommended_risk": risk.get(result.recommended),
             "confidence": result.confidence, "situation": result.situation,
+            "objects": [{"label": o["label"], "kind": o["kind"], "frame": o["frame"],
+                         "box_2d": o["box_2d"]} for o in result.objects],
             "seconds": round(seconds, 2)}
 
 

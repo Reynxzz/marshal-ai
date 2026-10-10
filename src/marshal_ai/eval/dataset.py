@@ -43,6 +43,13 @@ class TrackCase(BaseModel):
     note: str = ""
 
 
+class ExpectedObject(BaseModel):
+    """Something the assistance card should box, and where it really is, labelled by hand."""
+
+    kind: str = Field(description="obstacle, person, vehicle, moving_equipment")
+    box_2d: list[int] | None = Field(default=None, description="[ymin, xmin, ymax, xmax], 0-1000 of frame 0")
+
+
 class AssistCase(BaseModel):
     """Flow 2: the frames from a stopped car, its request, and the answer the desk should give."""
 
@@ -53,6 +60,7 @@ class AssistCase(BaseModel):
     options: list[str]
     expect_people: bool
     expect_recommended: str
+    expect_objects: list[ExpectedObject] = Field(default_factory=list, description="what the card should box")
     note: str = ""
 
 

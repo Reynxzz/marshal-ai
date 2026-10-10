@@ -29,7 +29,9 @@ DATASET = {
     "assist": [
         {"id": "box-and-worker", "frames": ["stuck.jpg"], "reason": "unknown object in lane",
          "options": ["wait_for_removal", "pass_left_3kmh", "reroute_lane_c"],
-         "expect_people": True, "expect_recommended": "wait_for_removal"},
+         "expect_people": True, "expect_recommended": "wait_for_removal",
+         "expect_objects": [{"kind": "obstacle", "box_2d": [500, 400, 700, 600]},
+                            {"kind": "person", "box_2d": [100, 100, 200, 200]}]},
     ],
 }
 
@@ -63,7 +65,10 @@ def honest_model(confirm_dark: bool = False) -> FakeLLM:
                 "ranking": [{"option": "wait_for_removal", "reason": "a person is near", "risk": "low"},
                             {"option": "pass_left_3kmh", "reason": "passes the worker", "risk": "high"},
                             {"option": "reroute_lane_c", "reason": "longer", "risk": "medium"}],
-                "recommended": "wait_for_removal", "confidence": 0.9}))
+                "recommended": "wait_for_removal", "confidence": 0.9})
+            .on("assist.locate", lambda call: {"objects": [
+                {"label": "box", "kind": "obstacle", "frame": 0, "box_2d": [500, 400, 700, 600]},
+                {"label": "worker", "kind": "person", "frame": 0, "box_2d": [300, 650, 700, 720]}]}))
 
 
 async def test_a_correct_model_scores_full_marks(dataset):
@@ -78,6 +83,8 @@ async def test_a_correct_model_scores_full_marks(dataset):
     assert track["accuracy"] == 1.0 and track["false_confirm_rate"] == 0.0
     assist = report["flows"]["assist"]["metrics"]
     assert assist["recommendation_accuracy"] == 1.0 and assist["high_risk_recommended"] == 0
+    assert assist["object_recall"] == 1.0 and assist["within_budget"] == 1.0
+    assert assist["box_hit_rate"] == 0.5            # the box is on the box; the worker's box is elsewhere
     assert report["flows"]["gate"]["cases"]["clean"]["outcomes"][0]["verdict"] == "PASS"
 
 
@@ -185,3 +192,11 @@ def test_finding_types_read_as_damage_kinds():
     assert kinds_of("missing_part") == {"missing_part"}
     assert kinds_of("cracked bumper") == {"broken_part"}
     assert kinds_of("panel_gap") == set()
+
+
+def test_box_overlap():
+    from marshal_ai.eval.metrics import iou
+    assert iou([0, 0, 100, 100], [0, 0, 100, 100]) == 1.0
+    assert iou([0, 0, 100, 100], [0, 100, 100, 200]) == 0.0
+    assert iou([0, 0, 100, 100], [0, 50, 100, 150]) == pytest.approx(1 / 3)
+    assert iou(None, [0, 0, 1, 1]) == 0.0

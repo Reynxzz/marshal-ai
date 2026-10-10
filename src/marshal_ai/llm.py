@@ -49,6 +49,12 @@ class LLMError(RuntimeError):
     pass
 
 
+# Tasks that answer better without thinking, whatever the client's own budget. Boxing objects is
+# one: Google advises thinking off for detection on 2.5 models, and on the scene 3 frame the worker's
+# box overlapped the hand-labelled one 0.8 with it off and 0.22 with it on (assist.locate).
+TASK_THINKING_BUDGET = {"assist.locate": 0}
+
+
 class GeminiLLM:
     """google-genai client; reads Vertex AI or API key settings from the environment."""
 
@@ -105,14 +111,14 @@ class GeminiLLM:
             else:
                 raise LLMError(f"{task}: media {m.label!r} has no data or uri")
         parts.append(types.Part.from_text(text=prompt))
+        budget = TASK_THINKING_BUDGET.get(task, self.thinking_budget)
         config = types.GenerateContentConfig(
             temperature=self.temperature,
             seed=self.seed,
             response_mime_type="application/json",
             response_json_schema=schema.model_json_schema() if schema is not None else None,
             system_instruction=system or None,
-            thinking_config=(None if self.thinking_budget is None
-                             else types.ThinkingConfig(thinking_budget=self.thinking_budget)),
+            thinking_config=None if budget is None else types.ThinkingConfig(thinking_budget=budget),
         )
         response = self.client.models.generate_content(
             model=self.model,

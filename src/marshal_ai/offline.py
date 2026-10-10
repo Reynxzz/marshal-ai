@@ -90,6 +90,17 @@ def assist_assess(call: LLMCall) -> dict:
             "recommended": ranking[0]["option"] if ranking else None, "confidence": 0.86}
 
 
+def assist_locate(call: LLMCall) -> dict:
+    """Boxes where a stopped car's camera would see them: the object ahead, people to its side."""
+    scene = (call.media[0].truth if call.media else None) or {}
+    objects = [{"label": scene.get("object", "object"), "kind": "obstacle", "frame": 0,
+                "box_2d": [520, 430, 700, 570], "distance_m": scene.get("distance_m")}]
+    objects += [{"label": "worker", "kind": "person", "frame": 0,
+                 "box_2d": [300, 620 + 120 * i, 720, 700 + 120 * i], "distance_m": p.get("distance_m")}
+                for i, p in enumerate(scene.get("people", []))]
+    return {"objects": objects}
+
+
 # ---------- reasoning ----------
 
 def yard_exception(call: LLMCall) -> dict:
@@ -265,6 +276,7 @@ def offline_llm() -> FakeLLM:
         "visual.variant": visual_variant,
         "track.step": track_step,
         "assist.assess": assist_assess,
+        "assist.locate": assist_locate,
         "yard.exception": yard_exception,
         "report.write": report_write,
         "scenario.spec": scenario_spec,

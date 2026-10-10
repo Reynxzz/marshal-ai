@@ -175,7 +175,8 @@ python -m marshal_ai.eval eval/datasets/v1.json --flows track --runs 10 --model 
 It prints the design's KPIs per flow (gate: first-pass yield, review share, false alarms,
 build-sheet mismatches caught, latency against the 5 s budget; track: dark lamps confirmed as lit,
 lit lamps rejected, unconfirmed; assistance: recommendation, people detected, high-risk
-recommendations) plus consistency across runs, and writes the full answers to `eval/results/`.
+recommendations, objects boxed and how well the boxes overlap hand-labelled ones, time to the card
+against the design's ~5 s) plus consistency across runs, and writes the full answers to `eval/results/`.
 
 A dataset is JSON (`eval/datasets/v1.json`): each case names its frames and the right answer. Frames
 point at a frozen copy in the artifacts bucket, because the run scripts overwrite evidence for the
@@ -633,7 +634,9 @@ with a worker beside the box.
 | 60 runs per scenario, 8 in parallel (flow 7) | **Serial only.** Parallel runs need one CARLA server per slot; the search works but takes the full budget serially. |
 | Release gate blocks a release on a failing test | Implemented in `lab/regression.py`; not yet exercised end to end against BigQuery-backed history. |
 | Demo scene 2 uses a dead brake light | Built with a dead **headlight**: it is the fault the camera reads most clearly, and the disagreement is the point. |
-| Scratches and dents from a car-damage image set | Not wired in; the gate currently finds real colour and variant mismatches only. |
+| Scratches and dents from a car-damage image set | Measured, not part of a live run: dataset v2-damage (see "Evaluating the flows"). gemini-2.5-flash finds 97% of damage, in the right zone every time; subtle kinds (paint, broken, missing parts) 21-40%. |
+| Assistance card with the object boxed (flow 2) | Built. A second call, `assist.locate`, runs beside the assessment with thinking off and boxes the object and every person near it ([ymin, xmin, ymax, xmax], 0-1000, on the frame it names, which is uploaded). On the scene 3 frame the worker's box overlaps the hand-labelled one 0.78; the cardboard box's is on the box but twice its width (0.25). Asked inside the assessment, both boxes landed beside the objects (0.17). A located person counts as "people near" even if the assessment missed them. |
+| Card in about 5 s (flow 2) | **8-14 s** on gemini-2.5-flash, set by the assessment's thinking. With thinking off it took 3.6 s with the same recommendation on all 5 runs, but that is one case; the safety rules are enforced in code either way. |
 | Gate decides in under 5 s (flow 3) | **12 s**, down from 33 s: its five model calls run at once again, with the schema sent as plain JSON so `google-genai` no longer mixes calls up. The gate waits for the slowest call, and single calls take ~3 s with tails of 5-9 s, so under 5 s needs fewer calls or a faster model. gemini-2.5-flash-lite with a 1024-token thinking budget measured 6 s with the same answers on dataset v1; without thinking it flags clean cars. |
 
 ## Demo scene 1 on real CARLA (`scripts/run_carla_scene1.sh`)

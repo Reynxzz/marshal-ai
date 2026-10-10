@@ -112,9 +112,13 @@ simulation cannot yet show what the design describes. The target is the design's
   design's dead left brake light.
 - [ ] **Rework loop on real runs**: the summary orders safety items first, picks the bay from the
   design's table, and re-inspection after repair turns the report to PASS.
-- [ ] **Assistance card content** (design, flow 2): the one-line situation, the object located in the
+- [x] **Assistance card content** (design, flow 2): the one-line situation, the object located in the
   clip (for the dashboard to box), ranked options with reasons, confidence, and never recommending a
   high-risk option.
+  *Done:* `AssistanceCase.objects` holds each box (label, kind, frame, `image` URI, `box_2d`
+  [ymin, xmin, ymax, xmax] 0-1000, distance), from a separate `assist.locate` call; the boxed frame is
+  uploaded. Scene 3: right recommendation 5/5, worker boxed well (IoU 0.78), box loosely (0.25).
+  The card takes 8-14 s against ~5 s; thinking off gives 3.6 s, untested beyond one case.
 - [x] **Persist proposals.** Supervisor proposals (e.g. the late-truck re-plan) live only in the
   running app; there is no Firestore collection for them. Add one beside `COLLECTIONS` in
   `src/marshal_ai/store/__init__.py`; Faris's `/proposals` page reads it.
@@ -191,7 +195,7 @@ at a time, so the code work is parallel and the server time is shared.
 | Qais → Rey | Wrong-colour car, brake-lamp asset | Scene 2 judgements |
 | Qais → Rey | Assistance options executed in CARLA | Scene 3 end to end |
 | Qais → Rey | Full search space compiled; parallel servers; a clip per run | Search that reads results, failure report with clip |
-| Rey → Faris | Record shapes, the `proposals` collection, the assistance card fields | Dashboard screens |
+| Rey → Faris | Record shapes, the `proposals` collection, the assistance card fields (`AssistanceCase.objects`: draw `box_2d` on `image`, scaled from 0-1000) | Dashboard screens |
 | Qais → Faris | Replay clips per run, a live camera | Video on the dashboard |
 
 ## Suggested first week
