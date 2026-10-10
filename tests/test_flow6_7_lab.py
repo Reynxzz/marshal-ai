@@ -113,6 +113,13 @@ def test_search_finds_shrinks_explains_and_adds_a_regression_test(library):
     assert result.explanation and result.explanation.suggested_fix
     reg = app.rt.store.get(Scenario, result.regression_id)
     assert reg.status == ScenarioStatus.IN_LIBRARY and "regression" in reg.tags
+    # every run says why it was tried: the base case, the model's reasoning, or a shrinking step
+    reasons = [r.run.reason for r in result.runs]
+    assert reasons[0] == "the passing case the search starts from"
+    assert reasons[1] == result.reasoning[0]
+    assert all(r for r in reasons)
+    shrinks = [r for r in reasons if r.startswith("shrinking")]
+    assert len(shrinks) == (len(result.failure.changes) if len(result.failure.changes) > 1 else 0)
 
 
 def test_search_keeps_going_when_the_model_is_unavailable(library):

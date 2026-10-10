@@ -7,6 +7,7 @@ Firestore and no CARLA server is needed: the evidence comes from the case, not f
 from __future__ import annotations
 
 import asyncio
+import random
 import time
 from typing import Callable
 
@@ -16,10 +17,11 @@ from marshal_ai.driving.messages import AssistRequest
 from marshal_ai.driving.routines import routine_steps
 from marshal_ai.eval.damage import kinds_of
 from marshal_ai.eval.dataset import (AssistCase, DamageCase, GateCase, MediaCache, ReportCase, ScenarioCase,
-                                     TrackCase)
+                                     SearchCase, TrackCase)
 from marshal_ai.flows.functional import ROUTINE
-from marshal_ai.llm import LLM, Media
-from marshal_ai.records import Car, CarState, InspectionResult
+from marshal_ai.lab.spec import ScenarioSpec
+from marshal_ai.llm import LLM, FakeLLM, Media
+from marshal_ai.records import Car, CarState, InspectionResult, Scenario, ScenarioStatus
 from marshal_ai.runtime import build_runtime
 
 ISOLATED = Settings(bus="memory", store="memory", history="none", artifacts="none", driving="fake",
@@ -154,5 +156,37 @@ async def run_scenario(llm: LLM, case: ScenarioCase, cache: MediaCache) -> dict:
             "spec": result.scenario.spec, "seconds": round(seconds, 2)}
 
 
+def _search(llm: LLM, case: SearchCase, seed: int = 7) -> dict:
+    """One adversarial search from the case's passing scenario, on the quick simulator."""
+    app = fresh_app(llm)
+    spec = ScenarioSpec.model_validate(case.spec)
+    app.rt.store.put(Scenario(id=spec.id, spec=spec.model_dump(mode="json"), source="evaluation",
+                              status=ScenarioStatus.IN_LIBRARY))
+    app.adversarial.budget = case.budget
+    app.adversarial.random = random.Random(seed)
+    start = time.perf_counter()
+    result = app.adversarial.search(spec.id)
+    seconds = time.perf_counter() - start
+    first = result.runs.index(result.failure) + 1 if result.failure else None
+    return {"found": result.failure is not None, "runs_to_failure": first, "runs": len(result.runs),
+            "minimal": result.minimal.changes if result.minimal else None,
+            "failed_criteria": result.minimal.run.failed_criteria if result.minimal else [],
+            "unavoidable": len(result.unavoidable), "reasoning": result.reasoning,
+            "explanation": result.explanation.model_dump() if result.explanation else None,
+            "seconds": round(seconds, 2)}
+
+
+async def run_search(llm: LLM, case: SearchCase, cache: MediaCache) -> dict:
+    """Gemini's search, and random search on the same scenario and budget as the baseline.
+
+    With no model answering, the tester samples variations at random (its fallback), so the
+    baseline is the same code with the steering removed: the only difference is Gemini.
+    """
+    guided = await asyncio.to_thread(_search, llm, case)
+    baseline = [await asyncio.to_thread(_search, FakeLLM(), case, seed) for seed in range(1, case.random_seeds + 1)]
+    return {**guided, "random": [{k: b[k] for k in ("found", "runs_to_failure", "runs", "minimal", "unavoidable")}
+                                 for b in baseline]}
+
+
 RUNNERS = {"gate": run_gate, "track": run_track, "assist": run_assist, "damage": run_damage,
-           "report": run_report, "scenario": run_scenario}
+           "report": run_report, "scenario": run_scenario, "search": run_search}

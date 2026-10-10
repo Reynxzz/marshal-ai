@@ -245,3 +245,15 @@ def test_an_actor_where_the_car_starts_is_rejected_with_the_fix():
     bad = dict(INCIDENT_EXAMPLE_SPEC, ego={"route": "test_track->report_point", "speed_kmh": 8})
     errors = validate_spec(bad, plant).errors
     assert len(errors) == 2 and all("is where the car starts" in e for e in errors)
+
+
+async def test_a_search_is_scored_against_random_search_on_the_same_scenario():
+    from marshal_ai.offline import offline_llm
+    data, base = load_dataset("eval/datasets/v5-search.json")
+    data.search = [c.model_copy(update={"random_seeds": 2}) for c in data.search if c.id == "design-sc0142"]
+    report = await evaluate(data, base, offline_llm(), flows=("search",), runs=1)
+    m = report["flows"]["search"]["metrics"]
+    [outcome] = report["flows"]["search"]["cases"]["design-sc0142"]["outcomes"]
+    assert outcome["found"] and outcome["runs_to_failure"] <= 60 and len(outcome["random"]) == 2
+    assert m["model"]["found"] == 1.0 and m["explained"] == 1.0
+    assert set(m["random"]) == set(m["model"])

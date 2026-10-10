@@ -10,7 +10,8 @@ from __future__ import annotations
 from collections import Counter
 from statistics import median
 
-from marshal_ai.eval.dataset import AssistCase, DamageCase, GateCase, ReportCase, ScenarioCase, TrackCase
+from marshal_ai.eval.dataset import (AssistCase, DamageCase, GateCase, ReportCase, ScenarioCase, SearchCase,
+                                     TrackCase)
 
 GATE_BUDGET_S = 5.0          # design, "A car's journey": under 5 s while the car rolls through
 CARD_BUDGET_S = 5.0          # design, flow 2: the card reaches the supervisor in about 5 s
@@ -213,5 +214,41 @@ def scenario_metrics(cases: list[ScenarioCase], results: dict[str, list[dict]]) 
     }
 
 
+def _search_scores(searches: list[dict]) -> dict:
+    found = [s for s in searches if s["found"]]
+    return {
+        "found": _rate([s["found"] for s in searches]),
+        # the design's "time to first failure", in runs: lower is a better search
+        "runs_to_failure_median": median([s["runs_to_failure"] for s in found]) if found else None,
+        # the design's "failures found per 100 runs": a search stops at its first failure
+        "failures_per_100_runs": round(100 * len(found) / sum(s["runs"] for s in searches), 1) if searches else None,
+        # changes from the passing case left after shrinking: fewer is easier to explain
+        "minimal_changes_median": median([len(s["minimal"]) for s in found]) if found else None,
+        # proposals a careful driver fails too, skipped: wasted proposals
+        "unavoidable_per_search": round(sum(s["unavoidable"] for s in searches) / len(searches), 1) if searches else None,
+    }
+
+
+def search_metrics(cases: list[SearchCase], results: dict[str, list[dict]]) -> dict:
+    runs = [o for c in cases for o in results.get(c.id, [])]
+    model = _search_scores(runs)
+    baseline = _search_scores([b for o in runs for b in o["random"]])
+    per_case = {}
+    for c in cases:
+        outs = results.get(c.id, [])
+        g = _search_scores(outs)["runs_to_failure_median"]
+        b = _search_scores([b for o in outs for b in o["random"]])["runs_to_failure_median"]
+        per_case[c.id] = f"model {g} vs random {b}"
+    return {
+        "model": model,
+        "random": baseline,
+        "runs_to_failure_by_case": per_case,
+        "explained": _rate([o["explanation"] is not None for o in runs if o["found"]]),
+        "consistency": _consistency({c.id: [str(o["minimal"]) for o in results.get(c.id, [])] for c in cases}),
+        "latency": _latency(runs),
+    }
+
+
 METRICS = {"gate": gate_metrics, "track": track_metrics, "assist": assist_metrics,
-           "damage": damage_metrics, "report": report_metrics, "scenario": scenario_metrics}
+           "damage": damage_metrics, "report": report_metrics, "scenario": scenario_metrics,
+           "search": search_metrics}

@@ -23,6 +23,16 @@ def _commit() -> str | None:
         return None
 
 
+# The field that is each flow's answer, in the order the flows were added.
+ANSWER_FIELDS = ("verdict", "camera_ok", "recommended", "final_bays", "status", "runs_to_failure")
+
+
+def _answer(outcome: dict):
+    if "found" in outcome:                       # search: runs to the first failure, None if robust
+        return outcome["runs_to_failure"]
+    return next((outcome[k] for k in ANSWER_FIELDS if k in outcome), None)
+
+
 def _summary(report: dict) -> str:
     budget = report.get("thinking_budget")
     lines = [f"dataset {report['dataset']}, model {report.get('model')}"
@@ -34,8 +44,7 @@ def _summary(report: dict) -> str:
                 value = ", ".join(f"{k} {v}" for k, v in value.items())
             lines.append(f"  {name:<28} {value}")
         for case_id, case in body["cases"].items():
-            answers = [o.get("final_bays", o.get("status", o.get("verdict", o.get("camera_ok", o.get("recommended")))))
-                       for o in case["outcomes"]]
+            answers = [_answer(o) for o in case["outcomes"]]
             lines.append(f"    {case_id:<34} {answers}")
     return "\n".join(lines)
 
@@ -63,8 +72,7 @@ def main(argv: list[str] | None = None) -> int:
             setattr(dataset, flow, getattr(dataset, flow)[: args.limit])
 
     def progress(flow: str, case_id: str, run: int, outcome: dict) -> None:
-        answer = outcome.get("error") or outcome.get("final_bays", outcome.get("status", outcome.get(
-            "verdict", outcome.get("camera_ok", outcome.get("recommended")))))
+        answer = outcome.get("error") or _answer(outcome)
         print(f"  {flow} {case_id} run {run}: {answer} ({outcome.get('seconds', '-')} s)",
               file=sys.stderr, flush=True)
 

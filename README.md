@@ -199,6 +199,25 @@ that reaches the supervisor, Gemini's own plan before the router checks it (righ
 bays first), and whether the summary names the safety defect before the cosmetic one. On
 gemini-2.5-flash, 3 runs: every score 1.0, 2.8 s median.
 
+`eval/datasets/v5-search.json` asks whether Gemini's steering earns its place in flow 7
+(`--flows search`). Each case is a passing scenario; the search runs on the quick simulator against
+`behavior-agent-1.0`, once with Gemini choosing each batch from the scores so far and five times with
+no model, where the tester falls back to random variations: the same code with the steering
+removed. On gemini-2.5-flash, 4 scenarios x 3 runs, 60-run budget:
+
+| | Gemini | Random |
+| --- | --- | --- |
+| Runs to the first failure (median) | **11** | 19 |
+| Failures per 100 runs | **2.9** | 2.0 |
+| Scenarios with a failure found | 3 of 4 | 3 of 4 (one seed missed one) |
+| Proposals skipped as unfair, per search | 0.5 | 1.6 |
+
+By scenario: the design's example 3 vs 7 runs, a worker behind a parked car 16 vs 23.5, behind a
+pallet stack 11 vs 31. Neither finds a failure in scene 3's incident in 60 runs: its worker stands
+20 m beyond the box, out of reach of the parameters the search varies. Every run now keeps the reason
+it was tried (`TestRun.reason`): the batch's reasoning, e.g. "speed near the person is consistently
+at the 5 km/h limit, so the system is at its edge", or the shrinking step.
+
 **Its clean cases do not measure false alarms.** They are crops of used cars whose wear was never
 labelled: on gemini-2.5-flash the gate flagged 7 of 16, and at full size at least three findings are
 right (scratches on the blue door, scuffs on the grey bumper, a missing front number plate). Relabelling

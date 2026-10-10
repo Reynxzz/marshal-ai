@@ -105,6 +105,16 @@ class ScenarioCase(BaseModel):
     note: str = ""
 
 
+class SearchCase(BaseModel):
+    """Flow 7: a passing scenario to search from, against the quick simulator's driving system."""
+
+    id: str
+    spec: dict = Field(description="a ScenarioSpec the driving system under test passes")
+    budget: int = 60
+    random_seeds: int = Field(default=5, description="random-search runs, the baseline Gemini must beat")
+    note: str = ""
+
+
 class Dataset(BaseModel):
     name: str
     description: str = ""
@@ -114,6 +124,7 @@ class Dataset(BaseModel):
     damage: list[DamageCase] = Field(default_factory=list)
     report: list[ReportCase] = Field(default_factory=list)
     scenario: list[ScenarioCase] = Field(default_factory=list)
+    search: list[SearchCase] = Field(default_factory=list)
 
 
 def load_dataset(path: str | Path) -> tuple[Dataset, Path]:

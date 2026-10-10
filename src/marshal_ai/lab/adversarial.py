@@ -244,13 +244,15 @@ class AdversarialTester:
                 out[k] = self.random.choice([c for c in CHOICES[k] if c != base.get(k)])
         return clamp(out)
 
-    def _run(self, base_spec: ScenarioSpec, changes_list: list[dict], start_index: int) -> list[SearchRun]:
+    def _run(self, base_spec: ScenarioSpec, changes_list: list[dict], start_index: int,
+             reason: str) -> list[SearchRun]:
         specs = [apply_variation(base_spec, c, f"{base_spec.id}-v{start_index + i}")
                  for i, c in enumerate(changes_list)]
         outcomes = run_batch(self.runner, specs, self.batch)
         runs = []
         for c, spec, outcome in zip(changes_list, specs, outcomes):
-            run = to_test_run(spec, outcome, scenario_id=base_spec.id, params=c)
+            run = to_test_run(spec, outcome, scenario_id=base_spec.id, params=c).model_copy(
+                update={"reason": reason})
             self.rt.store.put(run)
             runs.append(SearchRun(c, spec, run))
         return runs
@@ -264,7 +266,8 @@ class AdversarialTester:
             trial = {k: v for k, v in current.changes.items() if k != key}
             if not trial or not self._fair(base_spec, trial, result):
                 continue
-            [r] = self._run(base_spec, [trial], len(result.runs))
+            [r] = self._run(base_spec, [trial], len(result.runs),
+                            reason=f"shrinking {current.spec.id}: undo {key}, to see whether it still fails")
             result.runs.append(r)
             if not r.run.passed:
                 current = r
@@ -275,7 +278,7 @@ class AdversarialTester:
         base_spec = ScenarioSpec.model_validate(scenario.spec)
         base = base_params(base_spec)
         result = SearchResult(scenario_id)
-        [base_run] = self._run(base_spec, [{}], 0)
+        [base_run] = self._run(base_spec, [{}], 0, reason="the passing case the search starts from")
         if not base_run.run.passed:
             raise ValueError(f"{scenario_id} already fails; the search starts from a passing scenario")
         result.runs.append(base_run)
@@ -285,7 +288,7 @@ class AdversarialTester:
             result.reasoning.append(reasoning)
             if not proposals:
                 break                   # nothing fair left to try
-            runs = self._run(base_spec, proposals, len(result.runs))
+            runs = self._run(base_spec, proposals, len(result.runs), reason=reasoning)
             result.runs.extend(runs)
             failures = [r for r in runs if not r.run.passed]
             if failures:

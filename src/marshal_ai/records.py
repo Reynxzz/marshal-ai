@@ -174,6 +174,9 @@ class TestRun(BaseModel):
     passed: bool
     failed_criteria: list[str] = Field(default_factory=list)
     clip_uri: str | None = None
+    # Why this variant was run: the search's reasoning for its batch, or a shrinking step. The
+    # design has Gemini say why it searches where it does; kept here, the dashboard can show it.
+    reason: str | None = None
     created_at: datetime = Field(default_factory=now)
 
 
