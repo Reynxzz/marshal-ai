@@ -152,8 +152,12 @@ simulation cannot yet show what the design describes. The target is the design's
   joined the suite, and the gate reported "2 tests, 1 passed, 1 failed. 1 failing test, release
   blocked." Release reports are stored (`releases`) and written to BigQuery; the previous release is
   read back from there. Release 1.1 (the fix) runs only on the quick simulator.
-- [ ] **A retrieval library for generation**: validated specs as examples for new requests, as in
+- [x] **A retrieval library for generation**: validated specs as examples for new requests, as in
   ChatScene (design, flow 6 "The method Marshal keeps").
+  *Done:* `lab/library.py`: five checked seeds plus every reviewed library scenario; a request is
+  shown the two most like it. Dataset v4-scenario (8 requests, both ways): first try 18/24 vs 15/24
+  with the fixed examples, mean attempts 1.33 vs 1.58, all generated and faithful. Small gain; the
+  previous run tied. The fix loop now sees all earlier errors.
 
 ### M4: measured against the design
 - [ ] **Evaluation harness.** Run each flow N times and compute the design's KPIs:

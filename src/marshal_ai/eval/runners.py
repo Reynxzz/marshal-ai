@@ -148,12 +148,23 @@ async def run_report(llm: LLM, case: ReportCase, cache: MediaCache) -> dict:
             "seconds": round(seconds, 2)}
 
 
-async def run_scenario(llm: LLM, case: ScenarioCase, cache: MediaCache) -> dict:
-    """Generation on the quick simulator: validated, checked fair and dry-run, but no CARLA."""
+async def _generate(llm: LLM, case: ScenarioCase, retrieval: bool) -> dict:
     app = fresh_app(llm)
+    app.generator.retrieval = retrieval
     result, seconds = await _timed(lambda: asyncio.to_thread(app.generator.generate, case.request, case.source))
     return {"status": result.scenario.status.value, "attempts": result.attempts, "errors": result.errors,
-            "spec": result.scenario.spec, "seconds": round(seconds, 2)}
+            "spec": result.scenario.spec, "examples": app.generator.last_examples,
+            "retried_for": result.retried_for, "seconds": round(seconds, 2)}
+
+
+async def run_scenario(llm: LLM, case: ScenarioCase, cache: MediaCache) -> dict:
+    """Generation on the quick simulator: validated, checked fair and dry-run, but no CARLA.
+
+    With examples retrieved from the library, and with the fixed examples as the baseline: the same
+    generator with retrieval switched off, so the only difference is which examples Gemini sees.
+    """
+    out = await _generate(llm, case, retrieval=True)
+    return {**out, "fixed": await _generate(llm, case, retrieval=False)}
 
 
 def _search(llm: LLM, case: SearchCase, seed: int = 7) -> dict:

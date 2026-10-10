@@ -582,6 +582,32 @@ assistance case is shown an incident example beside the supervisor one. `run_car
 scores it on the quick simulator: 4 requests x 3 runs, a runnable test 12/12 (first try 9/12),
 faithful to the request (zone, actors, where they stand, criteria, time of day) 100%, 13 s median.
 
+**Retrieval library for generation** (`lab/library.py`), the design's ChatScene method: a new request
+is shown the two reviewed tests most like it, as request-and-spec pairs, instead of the same design
+example every time. The library is five hand-checked seeds (the design example, scene 3's box, a car
+braking ahead, a forklift crossing, a worker crossing at night in rain) plus every scenario an
+engineer puts in the library; regression variants are left out. Ranking is by shared words, weighted
+by rarity, after folding plant synonyms (pedestrian -> worker, evening -> dusk); a request from the
+assistance desk always gets an incident example. Each seed passes the generator's own validation,
+fairness and dry-run checks (`tests/test_flow6_library.py`). `generator.retrieval = False` shows the
+old fixed examples, and v4-scenario, now 8 requests, runs every case both ways. gemini-2.5-flash,
+3 runs each:
+
+| | Retrieval | Fixed examples |
+| --- | --- | --- |
+| Runnable test | 24/24 | 24/24 |
+| Right on the first try | **18/24** | 15/24 |
+| Attempts, mean | **1.33** | 1.58 |
+| Faithful to the request | 100% | 100% |
+
+The gain is small and from two requests (a forklift crossing at the corner 3/3 vs 1/3, a box with
+nobody near 1/3 vs 0/3); the run before tied at 18/24, so read it as no worse and probably better.
+Building it fixed two things that helped both: the dry run no longer asks a car behind a braking car
+to reach its goal (the car-braking request went from rejected every time to generated every time),
+and each fix attempt now sees all earlier errors, because shown only the latest, Gemini removed
+`reached_goal`, added an unmeetable speed limit, then put `reached_goal` back. Each attempt's errors
+are kept (`GenerationResult.retried_for`).
+
 **Day 5 complete on real CARLA with real Gemini** (`scripts/run_carla_day5.sh`). Demo scene 3 runs
 end to end. `carla_backend` used to note that raising `assist.request` was unwired, so flow 2 only
 ever worked against the fake plant; the CARLA backend now raises it itself when the agent stalls

@@ -197,11 +197,34 @@ def faithful(case: ScenarioCase, spec: dict) -> dict[str, bool]:
     return checks
 
 
+def _generation_scores(runs: list[tuple[ScenarioCase, dict]]) -> dict:
+    made = [(c, o) for c, o in runs if o["status"] == "dry_run_ok"]
+    return {
+        "generated": _rate([o["status"] == "dry_run_ok" for _, o in runs]),
+        "first_try": _rate([o["status"] == "dry_run_ok" and o["attempts"] == 1 for _, o in runs]),
+        "attempts_median": median([o["attempts"] for _, o in runs]) if runs else None,
+        "attempts_mean": round(sum(o["attempts"] for _, o in runs) / len(runs), 2) if runs else None,
+        "faithful": _rate([all(faithful(c, o["spec"]).values()) for c, o in made]),
+    }
+
+
 def scenario_metrics(cases: list[ScenarioCase], results: dict[str, list[dict]]) -> dict:
     runs = [(c, o) for c in cases for o in results.get(c.id, [])]
     made = [(c, o) for c, o in runs if o["status"] == "dry_run_ok"]
     checks = [faithful(c, o["spec"]) for c, o in made]
-    return {
+    compared = [(c, o) for c, o in runs if "fixed" in o]
+    comparison = {}
+    if compared:
+        # retrieval against the fixed examples, on the same requests; per case, first-try rate
+        comparison = {
+            "retrieval": _generation_scores(compared),
+            "fixed_examples": _generation_scores([(c, o["fixed"]) for c, o in compared]),
+            "first_try_by_case": {
+                c.id: f"retrieval {_rate([o['attempts'] == 1 and o['status'] == 'dry_run_ok' for o in results[c.id]])}"
+                      f" vs fixed {_rate([o['fixed']['attempts'] == 1 and o['fixed']['status'] == 'dry_run_ok' for o in results[c.id]])}"
+                for c in cases if results.get(c.id)},
+        }
+    return {**comparison,
         # a runnable test came out of the fix loop (3 fixes), without an engineer
         "generated": _rate([o["status"] == "dry_run_ok" for _, o in runs]),
         "first_try": _rate([o["status"] == "dry_run_ok" and o["attempts"] == 1 for _, o in runs]),
