@@ -27,6 +27,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
+from pathlib import Path
 import sys
 
 import carla
@@ -231,6 +233,86 @@ def check(m: carla.Map, samples: list[carla.Waypoint], actors) -> list[str]:
     return bad
 
 
+# ---- the plant's own world (scripts/plant_xodr.py): placed by (road, lane, s) ----
+# Roads 1-8 are the loop: 1 south straight (line end to report point), 3 east (the bays), 5 north,
+# 7 west (the yard); 2, 4, 6, 8 the bends. Lanes -1, -2 are driven, -3 holds the bays and slots,
+# -4 is a walkway, -5 an apron or (road 7) the lot row, -6 the outer apron; lane 1 the inner apron.
+# Road 9 paves the middle.
+LOOP_ROADS = range(1, 9)
+
+
+def at(m: carla.Map, road: int, lane: int, s: float, right: float = 0.0, ahead: float = 0.0, up: float = 0.1):
+    wp = m.get_waypoint_xodr(road, lane, s)
+    return (off(wp.transform, right=right, ahead=ahead, up=up), wp.transform.rotation.yaw) if wp else (None, 0.0)
+
+
+def road_lengths() -> dict[int, float]:
+    """From the plant's own road file: the paving road has no driving lane, so no waypoints to measure."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import plant_xodr as px
+    lengths = {rid: (length if kind == "line" else math.pi / 2 * length) for rid, kind, length in px.ROADS}
+    lengths[9] = px.STRAIGHT_LONG + 4.0
+    return lengths
+
+
+def dress_world(world: carla.World, m: carla.Map) -> Dresser:
+    d = Dresser(world)
+
+    def put(bp, road, lane, s, colour=None, yaw_add=0.0, **kw):
+        loc, yaw = at(m, road, lane, s, **kw)
+        if loc is not None:
+            d.put(bp, loc, yaw + yaw_add, colour)
+
+    lengths = road_lengths()
+    for road in LOOP_ROADS:                            # the perimeter fence on the outer apron's edge
+        s = 1.0
+        while s < lengths[road] - 1.0:
+            put("static.prop.streetbarrier", road, -6, s, right=3.2)
+            s += 4.0
+    # the yard: the lot row beside the slots, and rows on the inner apron opposite
+    for k, s in enumerate(range(4, int(lengths[7]) - 2, 6)):
+        put("vehicle.lincoln.mkz_2020", 7, -5, float(s), PLANT_COLOURS[k % 5], up=0.3)
+        for row, right in enumerate((-4.0, 4.0)):             # two rows across the 20 m inner apron
+            put("vehicle.lincoln.mkz_2020", 7, 1, float(s), PLANT_COLOURS[(k + row + 1) % 5], up=0.3, right=right)
+    # the loading area: trucks along the north straight's inner apron
+    for s in range(8, int(lengths[5]) - 6, 13):
+        put("vehicle.carlamotors.european_hgv", 5, 1, float(s), up=0.3, right=4.0)
+    # the middle: the storage compound, rows of finished cars
+    for k, s in enumerate(range(10, int(lengths[9]) - 6, 9)):
+        for row, (lane, right) in enumerate(((1, -5.0), (1, 5.0), (-1, -5.0), (-1, 5.0))):   # two rows a side
+            put("vehicle.lincoln.mkz_2020", 9, lane, float(s), PLANT_COLOURS[(k + row) % 5], up=0.3, right=right)
+    # the line end: stock waiting to go out
+    for ahead, prop in [(2, "static.prop.box01"), (3, "static.prop.box02"), (4, "static.prop.box03"),
+                        (6, "static.prop.barrel"), (6.7, "static.prop.barrel")]:
+        put(prop, 1, -4, float(ahead))
+    # the gate: calibration boards either side, a warning board before it
+    for s in (28.0, 36.0):
+        put("static.prop.calibrator", 1, -4, s, yaw_add=90.0, up=0.6)
+    put("static.prop.trafficwarning", 1, -5, 22.0)
+    # the test track: cones along the walkway
+    for s in range(40, 96, 5):
+        put("static.prop.trafficcone01", 1, -4, float(s), right=-0.8, up=0.05)
+    # the rework bays: workshop clutter on the walkway beside each
+    for s in (8.0, 18.0, 28.0, 38.0, 50.0):
+        put("static.prop.barrel", 3, -4, s - 2.5, right=0.4)
+        put("static.prop.barrel", 3, -4, s - 1.8, right=0.7)
+        put("static.prop.box02", 3, -4, s + 2.0, right=0.5)
+        put("static.prop.ironplank", 3, -5, s + 0.3)
+        put("static.prop.warningconstruction", 3, -5, s + 3.5, yaw_add=180.0)
+    return d
+
+
+def check_world(m: carla.Map, actors) -> list[str]:
+    """Nothing on a driven lane of the loop, or on the bays' and slots' shoulder."""
+    bad = []
+    for a in actors:
+        loc = a.get_location()
+        wp = m.get_waypoint(loc, project_to_road=False, lane_type=carla.LaneType.Any)
+        if wp is not None and wp.road_id in LOOP_ROADS and wp.lane_id in (-1, -2, -3):
+            bad.append(f"{a.type_id} at ({loc.x:.1f}, {loc.y:.1f}) is on road {wp.road_id} lane {wp.lane_id}")
+    return bad
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--host", default="localhost")
@@ -241,13 +323,34 @@ def main() -> int:
     client.set_timeout(60.0)
     world = client.get_world()
     name = world.get_map().name
-    if not name.endswith(("Town05", "Town05_Opt")):
+    if not name.endswith(("Town05", "Town05_Opt", "OpenDriveMap")):
         emit({"type": "dress.skipped", "reason": f"map is {name}, not Town05"})
         return 0
     if name.endswith("_Opt"):
         unloaded = strip_city(world)
         emit({"type": "dress.layers_unloaded", "layers": unloaded})
     m = world.get_map()
+    if name.endswith("OpenDriveMap"):
+        removed = clear(world, [])
+        if args.clear:
+            emit({"type": "dress.cleared", "removed": removed})
+            return 0
+        d = dress_world(world, m)
+        try:
+            world.wait_for_tick(10.0)
+        except RuntimeError:
+            pass
+        bad = check_world(m, d.spawned)
+        counts: dict[str, int] = {}
+        for a in d.spawned:
+            counts[a.type_id] = counts.get(a.type_id, 0) + 1
+        emit({"type": "dress.done", "world": "plant", "removed_first": removed, "placed": len(d.spawned),
+              "not_placed": d.failed, "by_type": counts, "on_a_plant_lane": bad})
+        if bad:
+            for a in d.spawned:
+                a.destroy()
+            return 1
+        return 0
     samples = route_samples(m)
     removed = clear(world, samples)
     if args.clear:

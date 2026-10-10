@@ -54,7 +54,9 @@ ARC = math.pi / 2 * RADIUS
 POINTS = {
     "line_end": (1, -2, 8.0), "buffer_zone_b": (1, -2, 18.0), "inspection_gate": (1, -2, 32.0),
     "test_track": (1, -2, 62.0), "report_point": (1, -2, 100.0), "lane_c": (1, -1, 100.0),
-    "rework.electrical": (3, -3, 8.0), "rework.mechanical": (3, -3, 18.0), "rework.body": (3, -3, 28.0),
+    # in the order rework visits them (report.SAFETY_ORDER): on a one-way loop the next bay must be
+    # ahead, or the car drives the whole loop to reach it
+    "rework.mechanical": (3, -3, 8.0), "rework.electrical": (3, -3, 18.0), "rework.body": (3, -3, 28.0),
     "rework.paint": (3, -3, 38.0), "production_control": (3, -3, 50.0),
     "finishing_corner.p1": (4, -2, ARC * 0.15), "finishing_corner.p2": (4, -2, ARC * 0.5),
     "finishing_corner.p3": (4, -2, ARC * 0.85), "finishing": (5, -2, 30.0),

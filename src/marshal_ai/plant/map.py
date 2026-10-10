@@ -11,6 +11,15 @@ from pathlib import Path
 import yaml
 
 DEFAULT_MAP_PATH = Path(__file__).with_name("plant_map.yaml")
+# The plant's own world (scripts/plant_xodr.py), chosen with MARSHAL_CARLA_MAP=MarshalPlant: the same
+# points, zones and segments, with CARLA transforms on the OpenDRIVE plant instead of Town05.
+WORLD_MAP_PATH = Path(__file__).with_name("plant_map_world.yaml")
+PLANT_WORLD = "MarshalPlant"
+
+
+def default_map_path() -> Path:
+    import os
+    return WORLD_MAP_PATH if os.environ.get("MARSHAL_CARLA_MAP") == PLANT_WORLD else DEFAULT_MAP_PATH
 
 
 @dataclass(frozen=True)
@@ -107,6 +116,10 @@ def _parse(raw: dict) -> PlantMap:
     return PlantMap(zones, points, edges, raw.get("carla_map"))
 
 
+def load_plant_map(path: Path | None = None) -> PlantMap:
+    return _load(Path(path) if path is not None else default_map_path())
+
+
 @lru_cache(maxsize=4)
-def load_plant_map(path: Path = DEFAULT_MAP_PATH) -> PlantMap:
-    return _parse(yaml.safe_load(Path(path).read_text()))
+def _load(path: Path) -> PlantMap:
+    return _parse(yaml.safe_load(path.read_text()))
