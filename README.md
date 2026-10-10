@@ -256,7 +256,9 @@ in the defect prompt removed some and made Qais's P1 worse (it then failed 2 of 
 off the lower door"), so it was reverted. Instead each view with a finding is checked against the
 same camera's photo of the latest car that passed (`visual.verify`): a finding stays only if it is a
 mark the passed car does not have, as flow 4 compares a lamp with a car that passed the step. The
-first car of the day has no reference, so its findings stand and go to a person.
+first car of a run has no reference, so its findings stand and go to a person; once the person clears
+it, it becomes the reference (a car a person cleared is a clean car in the current light), and a
+confirmed defect never does.
 
 gemini-2.5-flash, 2 runs per case:
 

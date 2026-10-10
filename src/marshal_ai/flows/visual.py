@@ -128,6 +128,10 @@ class VisualInspector:
         # The latest car that passed, per view: what a clean car looks like to that camera in the
         # current light. Findings are checked against it (see _confirm).
         self.references: dict[str, tuple[str, Media]] = {}
+        # Photos of cars waiting on a review card. A car a person clears is a clean car in the current
+        # light, as good a reference as one that passed; without this the first car of a run, which
+        # has no reference, left the next ones without one too whenever it went to review.
+        self.awaiting_review: dict[str, list[tuple[str, Media]]] = {}
 
     async def _confirm(self, reference: Media, image: Media, findings: list[Finding]) -> list[Finding]:
         """Keep only findings that are on this car and not on a car that passed this camera.
@@ -267,6 +271,7 @@ class VisualInspector:
                                   created_at=self.rt.clock())
         self.rt.store.put(result)
         if verdict == Verdict.REVIEW:
+            self.awaiting_review[vin] = list(zip(view_names, images))
             update_car(self.rt, vin, state=CarState.REVIEW, location="inspection_gate")
             self.rt.propose("review", f"Visual review for {vin}",
                             {"vin": vin, "findings": [f.model_dump() for f in findings],
@@ -281,11 +286,14 @@ class VisualInspector:
         p = self.rt.decide(proposal_id, "review", confirm_defect, by, what="visual review")
         vin = p.payload["vin"]
         result = self.rt.store.get(InspectionResult, f"{vin}:visual")
+        photos = self.awaiting_review.pop(vin, [])
         if confirm_defect:
             result = result.model_copy(update={"verdict": Verdict.FAIL})
         else:
             result = result.model_copy(update={"verdict": Verdict.PASS, "findings": [],
                                                "build_sheet_mismatches": []})
+            for name, img in photos:          # a person says this car is clean: compare the next ones with it
+                self.references[name] = (vin, img)
         self.rt.store.put(result)
         await self.rt.bus.publish(Topic.INSPECTION_RESULTS, result)
         return result

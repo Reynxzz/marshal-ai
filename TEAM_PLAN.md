@@ -104,18 +104,19 @@ simulation cannot yet show what the design describes. The target is the design's
   *Done:* dataset v2-damage (Humans in the Loop, CC0): 30 damaged photos, 16 clean crops.
   gemini-2.5-flash finds 97% of damage, right kind 95%, right zone 100%, 13.7 s a photo;
   flash-lite (thinking 1024) 89%, 4.9 s. False alarms need truly clean panels (see README).
-- [ ] **Gate under 5 s** (design, "A car's journey"). Its five Gemini calls run one at a time
+- [x] **Gate under 5 s** (design, "A car's journey"). Its five Gemini calls run one at a time
   because `google-genai` misbehaved from five threads; retry with a current SDK or the async client.
   *Progress:* calls run at once again (lock removed, schema sent as JSON): 33 s → 12 s on
   gemini-2.5-flash, same answers. Then thinking capped at 512 tokens for the gate's tasks and a
   stalled call re-sent after 10 s: v6-gate median 5.6 → 5.3 s, 90% within 7.3 s (was 8.6), same
-  answers, damage recall unchanged. Under 5 s for every car still open: a single flash call on
-  1280x720 frames takes 4-6 s; lower resolution was faster but missed scratches.
+  answers, damage recall unchanged. *Accepted at 5.3 s median* (Rey, 2026-10-10): a single flash
+  call on 1280x720 frames takes 4-6 s, and lower resolution was faster but missed scratches.
 - [x] **No false alarms on clean cars at the gate** (found in Qais's multi-car runs, about one in
   three). *Done:* dataset v6-gate (`scripts/capture_gate_set.py`: five colours x six suns, plus
   Qais's plant cars). Each finding is checked against the same camera's photo of the latest car that
   passed: false findings on clean cars 6.7% -> 0%, first-pass yield 0.93 -> 0.97, wrong colour still
-  10/10, real damage still 93% on v2-damage. For Qais: the first car of a run has no reference yet.
+  10/10, real damage still 93% on v2-damage. The first car of a run has no reference; once a
+  supervisor clears it, it becomes one.
 - [ ] **Brake-lamp fault judged** on Qais's asset, with the 3 s clip per step, so scene 2 can use the
   design's dead left brake light.
 - [x] **Rework loop on real runs**: the summary orders safety items first, picks the bay from the

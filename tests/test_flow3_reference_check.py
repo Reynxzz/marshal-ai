@@ -67,3 +67,27 @@ async def test_without_a_reference_findings_stand(app):
     _car(app, "VIN-B")
     result = await app.visual.inspect("VIN-B", images=_views("b"))
     assert result.verdict == Verdict.REVIEW and result.findings and not calls
+
+
+async def test_a_car_a_supervisor_clears_becomes_the_reference(app):
+    """The first car has no reference, so its false finding goes to a person; once cleared, the next
+    car with the same sheen is compared with it and passes."""
+    _gemini(app, [SHEEN], real=False)
+    _car(app, "VIN-A")
+    first = await app.visual.inspect("VIN-A", images=_views("a"))
+    assert first.verdict == Verdict.REVIEW and not app.visual.references
+    [card] = app.rt.pending("review")
+    await app.visual.decide_review(card.proposal_id, confirm_defect=False, by="supervisor-ana")
+    assert app.visual.references["left"][0] == "VIN-A"
+    _car(app, "VIN-B")
+    second = await app.visual.inspect("VIN-B", images=_views("b"))
+    assert second.verdict == Verdict.PASS
+
+
+async def test_a_car_a_supervisor_confirms_is_not_a_reference(app):
+    _gemini(app, [SHEEN], real=False)
+    _car(app, "VIN-A")
+    await app.visual.inspect("VIN-A", images=_views("a"))
+    [card] = app.rt.pending("review")
+    await app.visual.decide_review(card.proposal_id, confirm_defect=True, by="supervisor-ana")
+    assert not app.visual.references and "VIN-A" not in app.visual.awaiting_review
