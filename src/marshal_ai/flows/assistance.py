@@ -50,7 +50,8 @@ class Located(BaseModel):
 
 
 class AssistAssessment(BaseModel):
-    situation: str = Field(description="one line: what is in the way, where, how far the car is from it")
+    situation: str = Field(description="one line in your own words: what is in the way, where, how far the car "
+                                       "is from it, and every person or moving vehicle in view and where they are")
     people_or_moving_equipment: bool
     ranking: list[RankedOption] = Field(description="the offered options, best first")
     recommended: str | None

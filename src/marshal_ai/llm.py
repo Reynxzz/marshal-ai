@@ -59,8 +59,15 @@ class LLMError(RuntimeError):
 # held (93%, scratches 80%), and v1 stayed all correct. Thinking off failed most clean cars (first-pass
 # yield 0.31), and lower image resolution cost small damage (scratches 75% -> 60% at low).
 GATE_THINKING = 512
-TASK_THINKING_BUDGET = {"assist.locate": 0, "visual.defects": GATE_THINKING, "visual.variant": GATE_THINKING,
-                        "visual.verify": GATE_THINKING}
+#
+# The assistance card's assessment does not think either. It was the card's slow call, 13 s median and
+# up to 20 s; without thinking the card took 4.3 s median (19 of 22 under 5 s) on dataset v7-assist
+# (11 stops, 8 with a person in view, x 2) with the same answers: right recommendation, wait whenever
+# a person was in view, no high-risk option - and the desk's rules are enforced in code whatever the
+# model says. Capped at 512 it took 7.0 s. Without thinking it first wrote a thinner situation line
+# that left the people out (2 of 16), so the field now asks for them (16 of 16, against 12 before).
+TASK_THINKING_BUDGET = {"assist.locate": 0, "assist.assess": 0, "visual.defects": GATE_THINKING,
+                        "visual.variant": GATE_THINKING, "visual.verify": GATE_THINKING}
 
 
 class GeminiLLM:

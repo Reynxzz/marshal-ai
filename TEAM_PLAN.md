@@ -131,7 +131,9 @@ simulation cannot yet show what the design describes. The target is the design's
   *Done:* `AssistanceCase.objects` holds each box (label, kind, frame, `image` URI, `box_2d`
   [ymin, xmin, ymax, xmax] 0-1000, distance), from a separate `assist.locate` call; the boxed frame is
   uploaded. Scene 3: right recommendation 5/5, worker boxed well (IoU 0.78), box loosely (0.25).
-  The card takes 8-14 s against ~5 s; thinking off gives 3.6 s, untested beyond one case.
+  Card time: 13 s -> 4.3 s median (19 of 22 under 5 s) on dataset v7-assist (11 CARLA stops, 8 with
+  a person in view) with the assessment's thinking off, same answers; the situation line now names
+  every person in view (16 of 16).
 - [x] **Persist proposals.** Supervisor proposals (e.g. the late-truck re-plan) live only in the
   running app; there is no Firestore collection for them. Add one beside `COLLECTIONS` in
   `src/marshal_ai/store/__init__.py`; Faris's `/proposals` page reads it.

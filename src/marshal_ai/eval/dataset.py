@@ -62,6 +62,8 @@ class AssistCase(BaseModel):
     options: list[str]
     expect_people: bool
     expect_recommended: str
+    accept_recommended: list[str] = Field(default_factory=list, description="other answers that are also right, "
+                                          "e.g. any option when nobody is near")
     expect_objects: list[ExpectedObject] = Field(default_factory=list, description="what the card should box")
     note: str = ""
 
