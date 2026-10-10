@@ -211,4 +211,8 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    # Skips interpreter shutdown, where the CARLA client intermittently aborts; see
+    # exit_without_teardown.
+    from marshal_ai.carla_connection import exit_without_teardown
+
+    exit_without_teardown(main())

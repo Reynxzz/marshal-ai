@@ -40,7 +40,17 @@ class PlantMap:
         return [p.name for p in self.points.values() if p.zone == zone]
 
     def distance(self, a: str, b: str) -> float:
+        """Straight-line metres between two points, measured where the cars actually are.
+
+        The schematic x/y in plant_map.yaml are a diagram, not a survey, and they ranked the yard
+        slots wrongly: "nearest the loading bay" came out as Y7, which is 47 m from the bay in
+        CARLA, while Y8 is 7 m from it. Cars for the next truck were being parked across the yard
+        from where it loads. So when both points have a CARLA transform, that is what is measured;
+        the schematic is the fallback for points that have none.
+        """
         pa, pb = self.points[a], self.points[b]
+        if pa.carla and pb.carla:
+            return math.hypot(pa.carla["x"] - pb.carla["x"], pa.carla["y"] - pb.carla["y"])
         return math.hypot(pa.x - pb.x, pa.y - pb.y)
 
     def route(self, start: str, goal: str) -> list[str]:

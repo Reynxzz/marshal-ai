@@ -34,6 +34,7 @@ class _Backend:
     _check_blocked = _Real._check_blocked
     raise_assist = _Real.raise_assist
     assist_media = _Real.assist_media
+    _is_plant_car = _Real._is_plant_car
 
     def __init__(self, speed_kmh: float, obstacle=None, distance: float = 4.0):
         self.fixed_delta_s = 1.0

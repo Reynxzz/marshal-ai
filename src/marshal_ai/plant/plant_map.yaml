@@ -28,20 +28,25 @@ points:
   finishing:           {zone: finishing,        x: 160, y: 40,  carla: {x: 177.72, y: -170.54, z: 0.50, yaw: -133.0}}
   lane_c:              {zone: finishing,        x: 130, y: 40,  carla: {x: 203.01, y: -73.89, z: 0.50, yaw: -90.7}}
   buffer_zone_b:       {zone: buffer_zone_b,    x: 20,  y: 40,  carla: {x: 207.07, y: -25.93, z: 0.50, yaw: -90.7}}
-  rework.paint:        {zone: rework,           x: 100, y: -40, carla: {x: 203.01, y: -73.89, z: 0.50, yaw: -90.7}}
-  rework.body:         {zone: rework,           x: 115, y: -40, carla: {x: 210.01, y: -73.97, z: 0.50, yaw: -90.7}}
-  rework.electrical:   {zone: rework,           x: 130, y: -40, carla: {x: 202.65, y: -101.93, z: 0.50, yaw: -92.1}}
-  rework.mechanical:   {zone: rework,           x: 145, y: -40, carla: {x: 209.64, y: -102.19, z: 0.50, yaw: -92.1}}
-  production_control:  {zone: rework,           x: 160, y: -40, carla: {x: 197.69, y: -129.89, z: 0.50, yaw: -108.0}}
+# Bays and yard slots are on the road's 3.5 m shoulder (Town05 road 34, lane -4), in the order a car
+# reaches them after the report point, 9 m apart. They used to be in the driving lanes, and ten of the
+# thirteen lay on another car's route: with several cars, a car parked in production control blocked
+# the next car's drive to the yard, and it waited behind it for good. No route uses the shoulder. A car
+# reaches a pull_over point by driving to the lane beside it and then pulling over (carla_backend).
+  rework.paint:        {zone: rework,           x: 100, y: -40, carla: {x: 211.67, y: -116.81, z: 0.50, yaw: -99.5, pull_over: true}}
+  rework.body:         {zone: rework,           x: 115, y: -40, carla: {x: 212.89, y: -106.80, z: 0.50, yaw: -94.4, pull_over: true}}
+  rework.electrical:   {zone: rework,           x: 130, y: -40, carla: {x: 213.34, y: -88.01, z: 0.50, yaw: -90.7, pull_over: true}}
+  rework.mechanical:   {zone: rework,           x: 145, y: -40, carla: {x: 213.24, y: -97.01, z: 0.50, yaw: -90.7, pull_over: true}}
+  production_control:  {zone: rework,           x: 160, y: -40, carla: {x: 209.56, y: -126.68, z: 0.50, yaw: -104.6, pull_over: true}}
   yard.entry:          {zone: yard,             x: 200, y: 40,  carla: {x: 204.34, y: -132.05, z: 0.50, yaw: -108.0}}
-  yard.Y1:             {zone: yard,             x: 210, y: 30,  carla: {x: 206.27, y: -93.92, z: 0.50, yaw: -90.7}}
-  yard.Y2:             {zone: yard,             x: 210, y: 36,  carla: {x: 185.26, y: -155.42, z: 0.50, yaw: -123.9}}
-  yard.Y3:             {zone: yard,             x: 210, y: 42,  carla: {x: 191.07, y: -159.32, z: 0.50, yaw: -123.9}}
-  yard.Y4:             {zone: yard,             x: 210, y: 48,  carla: {x: 200.76, y: -118.08, z: 0.50, yaw: -101.2}}
-  yard.Y5:             {zone: yard,             x: 220, y: 30,  carla: {x: 207.63, y: -119.44, z: 0.50, yaw: -101.2}}
-  yard.Y6:             {zone: yard,             x: 220, y: 36,  carla: {x: 194.07, y: -139.39, z: 0.50, yaw: -113.7}}
-  yard.Y7:             {zone: yard,             x: 220, y: 42,  carla: {x: 200.48, y: -142.20, z: 0.50, yaw: -113.7}}
-  yard.Y8:             {zone: yard,             x: 220, y: 48,  carla: {x: 167.87, y: -175.25, z: 0.50, yaw: -138.6}}
+  yard.Y1:             {zone: yard,             x: 210, y: 30,  carla: {x: 206.59, y: -136.32, z: 0.50, yaw: -109.7, pull_over: true}}
+  yard.Y2:             {zone: yard,             x: 210, y: 36,  carla: {x: 202.76, y: -145.65, z: 0.50, yaw: -114.8, pull_over: true}}
+  yard.Y3:             {zone: yard,             x: 210, y: 42,  carla: {x: 198.13, y: -154.61, z: 0.50, yaw: -119.9, pull_over: true}}
+  yard.Y4:             {zone: yard,             x: 210, y: 48,  carla: {x: 192.71, y: -163.12, z: 0.50, yaw: -125.0, pull_over: true}}
+  yard.Y5:             {zone: yard,             x: 220, y: 30,  carla: {x: 186.56, y: -171.12, z: 0.50, yaw: -130.1, pull_over: true}}
+  yard.Y6:             {zone: yard,             x: 220, y: 36,  carla: {x: 179.72, y: -178.54, z: 0.50, yaw: -135.2, pull_over: true}}
+  yard.Y7:             {zone: yard,             x: 220, y: 42,  carla: {x: 172.25, y: -185.31, z: 0.50, yaw: -140.3, pull_over: true}}
+  yard.Y8:             {zone: yard,             x: 220, y: 48,  carla: {x: 164.20, y: -191.40, z: 0.50, yaw: -145.4, pull_over: true}}
   loading_bay:         {zone: yard,             x: 240, y: 40,  carla: {x: 172.49, y: -180.50, z: 0.50, yaw: -138.6}}
 
 # Drivable segments, both directions unless one_way is set.

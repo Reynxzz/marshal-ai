@@ -46,19 +46,19 @@ simulation cannot yet show what the design describes. The target is the design's
 ## Qais: simulation
 
 ### M1: dependable runs
-- [ ] **Fix the camera sensor leak.** Runs leave cameras alive in the world; 28 built up in one
+- [x] **Fix the camera sensor leak.** (`qais/m1-sensor-leak`: 11 left per scene 1 run → 0) Runs leave cameras alive in the world; 28 built up in one
   session, all rendering every frame. Destroy them when each phase ends. Scene 1's gate deliberately
   skips teardown (see `capture_gate_views`), so handle that one with care.
-- [ ] **`scripts/run_carla_all.sh`**: every flow in order, CARLA health-checked and restarted between
+- [x] **`scripts/run_carla_all.sh`** (`qais`): every flow in order, CARLA health-checked and restarted between
   flows, each recording filmed at the end. One command to verify any change.
-- [ ] **Find what crashes the renderer.** A camera west of the yard lane looking west
+- [x] **Find what crashes the renderer.** (`qais`: `-quality-level=Low` itself; the server now runs at Epic) A camera west of the yard lane looking west
   (`(221, -27, 7)`, yaw 163°) segfaults the server even with no replay. Grid-probe to the asset or
   area, then try `-quality-level` (now `Low`). May also be what crashed scene 1's gate.
-- [ ] **Crash-on-exit of the CARLA client** (`terminate called without an active exception` after a
+- [x] **Crash-on-exit of the CARLA client** (`qais`: demos exit via `exit_without_teardown`) (`terminate called without an active exception` after a
   phase finished). Scene 1 tolerates it; fix the cause so other flows don't need the workaround.
 
 ### M2: the plant behaves as the design describes
-- [ ] **Several cars at once** (scene 1). Cars leave the line on the design's rules: fewer than 2 in
+- [x] **Several cars at once** (scene 1). (`qais`: `run_carla_plant.sh`, 3 cars to 2 trucks, all shipped) Cars leave the line on the design's rules: fewer than 2 in
   the gate queue, 25 m apart, slots by truck nearest the loading bay (design, flow 1).
 - [ ] **Missions that move cars.** Yard re-slotting after a late truck changes only the records
   today; the cars should drive to their new slots (design, flow 1 "Send missions").
@@ -66,7 +66,7 @@ simulation cannot yet show what the design describes. The target is the design's
   cameras (flow 3). Today the car stops, because a capture and a running driving loop in one process
   deadlock (comment in `run_carla_scene1.sh`). Find a way: a capture process separate from the
   driving process, or sensors that stream into a buffer.
-- [ ] **A wrong-colour car** at the gate (scene 2): spawn a car whose colour or model differs from its
+- [x] **A wrong-colour car** at the gate (scene 2) (`qais`: `MARSHAL_PLANT_WRONG_COLOUR=2 run_carla_plant.sh`; flagged at 1.00 in 3 of 3 runs, booked to production control): spawn a car whose colour or model differs from its
   build sheet. The variant check is the stand-in the design names for CARLA (flow 3, "What is real").
 - [ ] **A brake-lamp fault the camera can see** (scene 2 wants a dead left brake light). This asset
   draws one continuous brake bar and no left blinker (README, "Flow 4 on the whole R-12 routine").
