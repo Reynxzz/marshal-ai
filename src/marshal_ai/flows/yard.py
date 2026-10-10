@@ -26,6 +26,7 @@ GATE_SPEED_KMH = 5.0
 YARD_SPEED_KMH = 10.0
 TRUCK_DELAY_THRESHOLD_MIN = 15.0
 LINE_BACKLOG_LIMIT = 6
+SLOT_BACKLOG_LIMIT = 3          # passed cars waiting for a yard slot: the yard is not keeping up
 ZONE_LEVEL = {"track_closed", "line_outpacing_yard"}
 
 
@@ -168,7 +169,12 @@ class YardTraffic:
             raise ValueError(f"{vin} has no PASS report; it cannot go to a shipping slot")
         slot = self.pick_slot(car)
         if slot is None:
-            await self.handle_exception("yard_full", {"vin": vin})
+            # A full yard is not a judgement: the car waits where it is and the tick sends it on
+            # when a slot frees (waiting_for_slot). This used to ask Gemini for a "yard_full" plan
+            # every time, about 22 calls in a 40-car shift (python -m marshal_ai.shift), none of
+            # which changed anything. A backlog of them is the design's "line running faster than
+            # the yard", raised once by detect_exceptions.
+            log.info("yard: no free slot for %s; it waits for one", vin)
             return None
         mission = MissionGo(mission_id=self.rt.next_id("M", 4), vin=vin, waypoints=[slot],
                             max_speed_kmh=YARD_SPEED_KMH)
@@ -222,11 +228,18 @@ class YardTraffic:
             found.append(("track_closed", "track_closed", {"cars_waiting": [c.vin for c in waiting]}))
         elif "test_track" not in self.rt.plant.closed_zones:
             self.handled.discard("track_closed")
-        if len(waiting) >= LINE_BACKLOG_LIMIT or \
-                self.rt.plant.line_rate_per_h > 1.1 * self.rt.plant.yard_rate_per_h:
+        for_slot = self.waiting_for_slot()
+        outpacing = len(waiting) >= LINE_BACKLOG_LIMIT or len(for_slot) >= SLOT_BACKLOG_LIMIT \
+            or self.rt.plant.line_rate_per_h > 1.1 * self.rt.plant.yard_rate_per_h
+        if outpacing:
             found.append(("line_outpacing_yard", "line_outpacing_yard",
-                          {"cars_waiting": len(waiting), "line_rate_per_h": self.rt.plant.line_rate_per_h,
+                          {"cars_waiting": len(waiting), "cars_waiting_for_a_yard_slot": len(for_slot),
+                           "line_rate_per_h": self.rt.plant.line_rate_per_h,
                            "yard_rate_per_h": self.rt.plant.yard_rate_per_h}))
+        elif not for_slot and len(waiting) < LINE_BACKLOG_LIMIT // 2:
+            # Over only once the yard has caught up, not the moment the count dips under the bar:
+            # a backlog hovering at it would otherwise be asked about again and again.
+            self.handled.discard("line_outpacing_yard")
         return [f for f in found if f[0] not in self.handled]
 
     def state_for_prompt(self) -> dict:

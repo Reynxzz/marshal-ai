@@ -317,9 +317,11 @@ What it found:
   the real line means sampling shipped cars, or the design's human review for small findings.
 - **A car that found the yard full was never shipped.** `send_to_slot` raised `yard_full` and left
   the car where its report finished; nothing tried again when a truck freed slots. The yard now
-  re-tries every tick (`YardTraffic.waiting_for_slot`, tested). Each `yard_full` is still a
-  Gemini call that the offline plan answers with no action - about 22 per 40-car shift - which on
-  the real model is cost for nothing; it should be asked once per car, or not at all.
+  re-tries every tick (`YardTraffic.waiting_for_slot`, tested). It also asked Gemini for a
+  `yard_full` plan every time, about 22 calls in a 40-car shift that changed nothing; the design
+  lists no such exception. Now the car simply waits, and a backlog of 3 or more cars waiting for a
+  slot is the design's "line running faster than the yard", asked once per episode. Over the 10
+  shifts, `yard.exception` calls went from 320 to 108 with every KPI unchanged.
 - **The simulated plant was blind to lamp faults after the first car.** Once a passed car became
   the reference frame, the frame under test was rebuilt without its simulated ground truth, and the
   offline judge read the reference's. Every later dead lamp passed. Real CARLA runs were not

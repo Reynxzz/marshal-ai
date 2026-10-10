@@ -115,3 +115,47 @@ async def test_a_car_that_found_the_yard_full_gets_a_slot_once_one_frees(plant):
     assert app.yard.ship("T-07")                      # the truck takes its cars and frees their slots
     await app.yard.tick()
     assert car(app, "VIN-LATE").yard_slot in slots and not app.yard.waiting_for_slot()
+
+
+def _fill_yard(app, truck="T-07"):
+    for i, slot in enumerate(app.yard.slots_by_distance()):
+        vin = f"VIN-F{i}"
+        app.rt.store.put(Car(vin=vin, build_sheet=BuildSheet(model="sedan", colour="blue", truck_id=truck),
+                             state=CarState.YARD, location=slot, yard_slot=slot))
+        app.rt.store.put(CarReport(vin=vin, verdict=Verdict.PASS))
+
+
+def _passed_car(app, vin):
+    app.rt.store.put(Car(vin=vin, build_sheet=BuildSheet(model="sedan", colour="blue", truck_id="T-08"),
+                         state=CarState.REPORT, location="report_point"))
+    app.rt.driving.spawn(vin, "report_point")
+    app.rt.store.put(CarReport(vin=vin, verdict=Verdict.PASS))
+
+
+def _yard_calls(app):
+    return [c for c in app.rt.llm.calls if c.task == "yard.exception"]
+
+
+async def test_a_full_yard_is_waited_out_without_asking_gemini(plant):
+    app = plant([])
+    _fill_yard(app)
+    _passed_car(app, "VIN-W1")
+    assert await app.yard.send_to_slot("VIN-W1") is None
+    await app.yard.tick()
+    assert not _yard_calls(app) and app.yard.waiting_for_slot()[0].vin == "VIN-W1"
+
+
+async def test_a_backlog_for_slots_is_raised_once_as_the_line_outpacing_the_yard(plant):
+    app = plant([])
+    _fill_yard(app)
+    for vin in ("VIN-W1", "VIN-W2", "VIN-W3"):
+        _passed_car(app, vin)
+    for _ in range(5):
+        await app.yard.tick()
+    calls = _yard_calls(app)
+    assert len(calls) == 1 and "line_outpacing_yard" in calls[0].prompt
+    assert app.yard.decisions[-1]["kind"] == "line_outpacing_yard"
+    app.yard.ship("T-07")                          # the yard catches up
+    for _ in range(3):
+        await app.yard.tick()
+    assert not app.yard.waiting_for_slot() and "line_outpacing_yard" not in app.yard.handled
