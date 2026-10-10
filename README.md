@@ -193,6 +193,12 @@ undamaged parts as the clean cases. Every clean crop was checked by eye; those r
 in the script with the reason. The set is mostly salvage-auction crash damage, far heavier than what
 a finishing line sees, so read it as an upper bound on recall.
 
+`eval/datasets/v3-report.json` scores flow 5 (`--flows report`): six failing cars as gate and track
+records, no media, each with the bays the design's table gives, safety first. It scores the plan
+that reaches the supervisor, Gemini's own plan before the router checks it (right bays, safety
+bays first), and whether the summary names the safety defect before the cosmetic one. On
+gemini-2.5-flash, 3 runs: every score 1.0, 2.8 s median.
+
 **Its clean cases do not measure false alarms.** They are crops of used cars whose wear was never
 labelled: on gemini-2.5-flash the gate flagged 7 of 16, and at full size at least three findings are
 right (scratches on the blue door, scuffs on the grey bumper, a missing front number plate). Relabelling
@@ -467,6 +473,23 @@ with no failed checks reached the rework path and crashed on `tickets[0]`; propo
 before the router's own Gemini call had written the report; and confirming a rework after the car
 was cleaned up failed with `KeyError`, because dispatch drives the car to the bay.
 
+**The rework loop closes on CARLA** (`MARSHAL_DAY4_REWORK=1 bash scripts/run_carla_day4.sh`). After
+the car reaches `rework.electrical`, the bay reports the repair done; the CARLA backend's `repair`
+relights the lamp (the electrical bay clears the car's fault, as the fake world's repair does), the
+router sends the car back for the failed step only, and the report turns to PASS. Twice in a row:
+
+```
+VIN-DARK  headlights  telemetry_ok=true  camera_ok=false  FAIL  -> rework.electrical (confirmed, arrived)
+          repair_done -> faults_left=[] -> step 1 re-run only -> camera_ok=true -> report PASS (20 s)
+          summary (Gemini): "The car failed its functional inspection because the headlights were not
+                             operating correctly. ... Re-inspection passed."
+```
+
+The bay used to come from an exact lookup on the finding's type, but Gemini writes free text: in
+the evaluation answers 13% of findings ("scratches", "scuff", "paint_damage", "chip", "corrosion",
+"headlight_haze") missed the table and went to the body bay. `bay_for` now reads the words against
+the design's table, lights before paint.
+
 **Day 5 complete on real CARLA with real Gemini** (`scripts/run_carla_day5.sh`). Demo scene 3 runs
 end to end. `carla_backend` used to note that raising `assist.request` was unwired, so flow 2 only
 ever worked against the fake plant; the CARLA backend now raises it itself when the agent stalls
@@ -560,6 +583,7 @@ real Gemini rather than assumed:
 | 3 visual | `run_carla_scene1.sh`, `run_carla_day2.sh` | `PASS` on a matching car; 4 gate views ~150 KB each |
 | 4 functional | `run_carla_day4.sh` | healthy `PASS`, dark lamp `FAIL` on the telemetry/camera disagreement → `rework.electrical` |
 | 5 report | `run_carla_scene1.sh` | `PASS` merged from both results → car parked in `yard.Y1` |
+| 5 rework | `MARSHAL_DAY4_REWORK=1 run_carla_day4.sh` | `success` — dark lamp → electrical bay → repaired → failed step only re-run → report `PASS` |
 | 6 generate | `run_carla_lab.sh` | `SC-0142` generated in 1 attempt, dry run clean, judged `passed: true`, moved to `in_library` |
 | 7 adversarial | `run_carla_lab.sh` | search shrinks the failure to one parameter (`trigger_distance_m` 9 → 7) |
 

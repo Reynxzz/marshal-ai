@@ -110,8 +110,13 @@ simulation cannot yet show what the design describes. The target is the design's
   gemini-2.5-flash, same answers. Under 5 s still open: the gate waits for its slowest call.
 - [ ] **Brake-lamp fault judged** on Qais's asset, with the 3 s clip per step, so scene 2 can use the
   design's dead left brake light.
-- [ ] **Rework loop on real runs**: the summary orders safety items first, picks the bay from the
+- [x] **Rework loop on real runs**: the summary orders safety items first, picks the bay from the
   design's table, and re-inspection after repair turns the report to PASS.
+  *Done:* `MARSHAL_DAY4_REWORK=1 run_carla_day4.sh` closes the loop on CARLA (dark lamp → electrical
+  bay → repair relights it → step 1 only re-run → PASS, twice). Bays now come from the defect's
+  words (`bay_for`): 13% of real findings used to miss the table. Dataset v3-report: right bays,
+  safety first, summary leads with safety, all 1.0 on gemini-2.5-flash. For Qais: `repair()` in
+  `carla_backend.py` and the `--rework` flag in `demo_carla_day4.py` are new.
 - [x] **Assistance card content** (design, flow 2): the one-line situation, the object located in the
   clip (for the dashboard to box), ranked options with reasons, confidence, and never recommending a
   high-risk option.

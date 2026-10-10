@@ -77,6 +77,18 @@ class DamageCase(BaseModel):
     note: str = ""
 
 
+class ReportCase(BaseModel):
+    """Flow 5: a car's gate and track results, and the rework the design's bay table gives them."""
+
+    id: str
+    build_sheet: BuildSheet
+    visual: dict = Field(description="the gate's InspectionResult, without vin and kind")
+    functional: dict = Field(description="the track's InspectionResult, without vin and kind")
+    expect_bays: list[str] = Field(description="bays to visit, safety first (mechanical, electrical, body, paint, "
+                                               "production_control)")
+    note: str = ""
+
+
 class Dataset(BaseModel):
     name: str
     description: str = ""
@@ -84,6 +96,7 @@ class Dataset(BaseModel):
     track: list[TrackCase] = Field(default_factory=list)
     assist: list[AssistCase] = Field(default_factory=list)
     damage: list[DamageCase] = Field(default_factory=list)
+    report: list[ReportCase] = Field(default_factory=list)
 
 
 def load_dataset(path: str | Path) -> tuple[Dataset, Path]:

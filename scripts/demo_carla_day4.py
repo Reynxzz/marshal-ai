@@ -50,6 +50,9 @@ def parser() -> argparse.ArgumentParser:
     ap.add_argument("--sun-altitude", type=float, default=-8.0,
                     help="lamps do not read at noon; a low sun is what makes the camera half work")
     ap.add_argument("--timeout", type=float, default=300.0)
+    ap.add_argument("--rework", action="store_true",
+                    help="go on through flow 5: repair at the bay, re-inspect the failed step only, "
+                         "and expect the report to turn to PASS")
     return ap
 
 
@@ -57,8 +60,43 @@ def emit(obj: dict) -> None:
     print(json.dumps(obj, sort_keys=True, default=str), flush=True)
 
 
+async def repair_and_reinspect(app: MarshalApp, vin: str, timeout: float) -> dict:
+    """The bay reports the repair done; the car goes back for the failed step only.
+
+    Flow 5's loop, on the simulator: the electrical bay relights the dead lamp (`repair` clears
+    the car's fault), the router sends the car to the track for just the failed step, and the
+    report is rewritten from the new result. The design's promise is that it then reads PASS.
+    """
+    rt = app.rt
+    loop = asyncio.get_event_loop()
+    before = rt.store.get(InspectionResult, f"{vin}:functional").created_at
+    calls = len(getattr(rt.llm, "calls", []))
+    started = loop.time()
+    outcome = await app.router.repair_done(vin, by="electrician-joe")
+    emit({"type": "flow5.repair_done", "vin": vin, "outcome": outcome,
+          "faults_left": sorted(rt.driving.faults.get(vin, set()))})
+    deadline = loop.time() + timeout
+    while loop.time() < deadline:
+        result = rt.store.get(InspectionResult, f"{vin}:functional")
+        report = rt.store.get(CarReport, vin)
+        if result.created_at != before and report is not None and report.reinspection:
+            break
+        await asyncio.sleep(2.0)
+    result = rt.store.get(InspectionResult, f"{vin}:functional")
+    report = rt.store.get(CarReport, vin)
+    reinspected = result.created_at != before
+    out = {"vin": vin, "reinspected": reinspected,
+           "steps_rerun": [i.step for i in result.checklist] if reinspected else [],
+           "functional": result.verdict.value if reinspected else None,
+           "report": report.verdict.value, "summary": report.summary,
+           "bays": [{"bay": t.bay, "done": t.done_at is not None} for t in report.rework],
+           "seconds": round(loop.time() - started, 1)}
+    emit({"type": "flow5.reinspected", **out})
+    return out
+
+
 async def check_one(app: MarshalApp, vin: str, steps: list[int], fault: str | None,
-                    timeout: float) -> dict:
+                    timeout: float, rework: bool = False) -> dict:
     rt = app.rt
     rt.store.put(Car(vin=vin, build_sheet=BuildSheet(model="sedan", colour="black"),
                      state=CarState.TEST_TRACK))
@@ -121,6 +159,7 @@ async def check_one(app: MarshalApp, vin: str, steps: list[int], fault: str | No
     # flow 5: confirm the bay while the car is still in the driving system. Confirming after
     # cleanup failed with KeyError because dispatch sends the car a mission to drive there.
     confirmed = []
+    reinspection = None
     for proposal in rt.pending("rework"):
         if proposal.payload.get("vin") != vin:
             continue
@@ -141,6 +180,10 @@ async def check_one(app: MarshalApp, vin: str, steps: list[int], fault: str | No
                 emit({"type": "flow5.arrived", "vin": vin, "bay": car.location})
                 break
             await asyncio.sleep(2.0)
+        else:
+            emit({"type": "flow5.warning", "vin": vin, "error": "car did not reach its bay in 180s"})
+        if rework:
+            reinspection = await repair_and_reinspect(app, vin, timeout)
 
     # Remove the car before the next one runs: a finished car left standing on the track
     # blocks the following car's route, which shows up as a mission that never completes.
@@ -149,7 +192,7 @@ async def check_one(app: MarshalApp, vin: str, steps: list[int], fault: str | No
             actor.destroy()
     rt.driving.vehicles.pop(vin, None)
     return {"vin": vin, "verdict": result.verdict.value, "checklist": items,
-            "disagreements": len(disagreements), "confirmed": confirmed}
+            "disagreements": len(disagreements), "confirmed": confirmed, "reinspection": reinspection}
 
 
 async def run(args: argparse.Namespace) -> dict:
@@ -175,7 +218,8 @@ async def run(args: argparse.Namespace) -> dict:
     await rt.driving.start()
     try:
         out["healthy"] = await check_one(app, args.healthy_vin, steps, None, args.timeout)
-        out["faulty"] = await check_one(app, args.faulty_vin, steps, args.fault_step, args.timeout)
+        out["faulty"] = await check_one(app, args.faulty_vin, steps, args.fault_step, args.timeout,
+                                        rework=args.rework)
     finally:
         await rt.driving.stop()
         for actor in rt.driving.world.get_actors().filter("vehicle.*"):
@@ -217,16 +261,22 @@ def main(argv: list[str] | None = None) -> int:
     healthy, faulty = out["healthy"], out["faulty"]
     faulty_report = out["reports"].get(args.faulty_vin, {})
     healthy_report = out["reports"].get(args.healthy_vin, {})
+    reinspection = faulty.get("reinspection") or {}
     ok = (healthy["verdict"] == "PASS" and faulty["verdict"] == "FAIL"
           and faulty["disagreements"] >= 1
           and healthy_report.get("verdict") == "PASS"
-          and faulty_report.get("verdict") == "FAIL"
           and any("electrical" in b for b in faulty_report.get("bays", [])))
+    if args.rework:          # the repaired car was re-run on the failed step only, and passed
+        ok = (ok and faulty_report.get("verdict") == "PASS" and reinspection.get("report") == "PASS"
+              and reinspection.get("steps_rerun") == [int(s) for s in args.steps.split(",") if s.strip()])
+    else:                    # without rework the faulty car's report stays FAIL
+        ok = ok and faulty_report.get("verdict") == "FAIL"
     emit({"type": "day4.done", "healthy": healthy["verdict"], "faulty": faulty["verdict"],
           "faulty_disagreements": faulty["disagreements"],
           "healthy_report": healthy_report.get("verdict"),
           "faulty_report": faulty_report.get("verdict"),
           "faulty_bays": faulty_report.get("bays"),
+          "after_rework": reinspection.get("report") if args.rework else None,
           "result": "success" if ok else "not demonstrated"})
     print(json.dumps(out, indent=2, sort_keys=True, default=str))
     return 0 if ok else 2

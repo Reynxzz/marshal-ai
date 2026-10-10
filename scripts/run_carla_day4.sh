@@ -4,6 +4,7 @@
 #
 #   bash scripts/run_carla_day4.sh
 #   MARSHAL_DAY4_STEPS=1,3 bash scripts/run_carla_day4.sh
+#   MARSHAL_DAY4_REWORK=1 bash scripts/run_carla_day4.sh    # and on through repair to PASS
 set -Eeuo pipefail
 
 readonly APP_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -52,4 +53,5 @@ fi
 python3 scripts/ensure_carla_map.py --map Town05 --wait-seconds 600
 start_recording day4
 
-python3 scripts/demo_carla_day4.py --steps "$STEPS"
+# MARSHAL_DAY4_REWORK=1 goes on through flow 5: repair, re-inspection, report PASS
+python3 scripts/demo_carla_day4.py --steps "$STEPS" ${MARSHAL_DAY4_REWORK:+--rework}

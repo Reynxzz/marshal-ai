@@ -455,6 +455,16 @@ class CarlaDrivingSystem:
         """Upload evidence and return the URI to record. Never raises."""
         return self.artifacts.put(uri, data, "image/jpeg")
 
+    def repair(self, vin: str, defect_types: list[str]) -> None:
+        """Rework fixed the car: the electrical bay replaces a dead lamp, so it lights again.
+
+        The only fault this backend can put on a car is a dark lamp (`faults`), so that is the only
+        repair it has to model; the fake world's `repair` is the same rule. Without it a repaired
+        car kept its dead bulb and re-inspection could never pass.
+        """
+        if any(t in defect_types for t in ("brake_light", "lamp", "indicator", "headlight", "electrical")):
+            self.faults.pop(vin, None)
+
     # ---------- flow 2: the driving system asks for help ----------
 
     def _obstacle_ahead(self, v: _Vehicle):

@@ -1,4 +1,6 @@
-from marshal_ai.flows.report import ReworkStepDraft, complete_plan
+import pytest
+
+from marshal_ai.flows.report import ReworkStepDraft, bay_for, complete_plan
 from marshal_ai.records import Car, CarReport, CarState, InspectionResult, Verdict
 
 
@@ -96,3 +98,27 @@ def test_dispatch_refuses_a_rework_with_no_bays(app):
 
     with pytest.raises(ValueError, match="no bays to visit"):
         asyncio.run(app.router.dispatch("VIN-EMPTY"))
+
+
+@pytest.mark.parametrize("defect, bay", [
+    # the words Gemini wrote for findings in the evaluation runs, not the table's own spelling
+    ("scratch", "paint"), ("scratches", "paint"), ("scuff", "paint"), ("dent", "paint"),
+    ("paint_damage", "paint"), ("paint_transfer", "paint"), ("chip", "paint"), ("paint_peeling", "paint"),
+    ("corrosion", "paint"), ("paint_run", "paint"),
+    ("panel_gap", "body"), ("misalignment", "body"), ("missing_part", "body"), ("missing_badge", "body"),
+    ("crack", "body"), ("body_damage", "body"),
+    ("headlight_haze", "electrical"), ("brake_light", "electrical"), ("indicator", "electrical"),
+    ("brakes", "mechanical"), ("steering", "mechanical"),
+])
+def test_a_defect_goes_to_the_bay_the_design_names(defect, bay):
+    assert bay_for(defect) == bay
+
+
+def test_the_electrical_bay_relights_a_dead_lamp_on_carla():
+    from marshal_ai.driving.carla_backend import CarlaDrivingSystem
+    ds = CarlaDrivingSystem.__new__(CarlaDrivingSystem)    # no server: only the fault table
+    ds.faults = {"VIN-DARK": {"headlights"}, "VIN-OTHER": {"headlights"}}
+    ds.repair("VIN-DARK", ["scratch"])
+    assert ds.faults["VIN-DARK"] == {"headlights"}        # the paint bay does not touch lamps
+    ds.repair("VIN-DARK", ["headlight", "electrical"])
+    assert "VIN-DARK" not in ds.faults and ds.faults["VIN-OTHER"] == {"headlights"}

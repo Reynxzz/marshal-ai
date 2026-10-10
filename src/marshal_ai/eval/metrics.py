@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections import Counter
 from statistics import median
 
-from marshal_ai.eval.dataset import AssistCase, DamageCase, GateCase, TrackCase
+from marshal_ai.eval.dataset import AssistCase, DamageCase, GateCase, ReportCase, TrackCase
 
 GATE_BUDGET_S = 5.0          # design, "A car's journey": under 5 s while the car rolls through
 CARD_BUDGET_S = 5.0          # design, flow 2: the card reaches the supervisor in about 5 s
@@ -141,5 +141,43 @@ def damage_metrics(cases: list[DamageCase], results: dict[str, list[dict]]) -> d
     }
 
 
+SAFETY_BAYS = {"mechanical", "electrical"}
+# words a summary uses for a safety defect, and for everything else, to see which it leads with
+SAFETY_WORDS = ("brake", "steering", "light", "lamp", "indicator", "blinker")
+OTHER_WORDS = ("scratch", "scuff", "dent", "paint", "chip", "gap", "badge", "colour", "color", "variant")
+
+
+def _first(text: str, words: tuple[str, ...]) -> int | None:
+    hits = [i for w in words if (i := text.find(w)) >= 0]
+    return min(hits) if hits else None
+
+
+def leads_with_safety(summary: str) -> bool | None:
+    """Whether the summary names the safety defect before the cosmetic one; None if it lacks either."""
+    text = summary.lower()
+    safety, other = _first(text, SAFETY_WORDS), _first(text, OTHER_WORDS)
+    return None if safety is None or other is None else safety < other
+
+
+def report_metrics(cases: list[ReportCase], results: dict[str, list[dict]]) -> dict:
+    runs = [(c, o) for c in cases for o in results.get(c.id, [])]
+    mixed = [(c, o) for c, o in runs if SAFETY_BAYS & set(c.expect_bays) and set(c.expect_bays) - SAFETY_BAYS]
+    drafted = [(c, o) for c, o in runs if o["draft_bays"] is not None]
+    # the design's rule is safety items first; the order among cosmetic bays is the router's own
+    in_order = lambda bays: bays == sorted(bays, key=lambda b: b not in SAFETY_BAYS)
+    return {
+        # what reaches the supervisor: Gemini's plan after the router checks it against the bay table
+        "bays_right": _rate([o["final_bays"] == c.expect_bays for c, o in runs]),
+        # Gemini's own plan, before that check: the bays the table gives, and safety first
+        "gemini_bays_right": _rate([set(o["draft_bays"]) == set(c.expect_bays) for c, o in drafted]),
+        "gemini_safety_first": _rate([in_order(o["draft_bays"]) for c, o in drafted]),
+        # with a safety and a cosmetic defect, the summary leads with the safety one
+        "summary_safety_first": _rate([v for _, o in mixed if (v := leads_with_safety(o["summary"])) is not None]),
+        "summary_names_both": _rate([leads_with_safety(o["summary"]) is not None for _, o in mixed]),
+        "consistency": _consistency({c.id: [o["final_bays"] for o in results.get(c.id, [])] for c in cases}),
+        "latency": _latency([o for _, o in runs]),
+    }
+
+
 METRICS = {"gate": gate_metrics, "track": track_metrics, "assist": assist_metrics,
-           "damage": damage_metrics}
+           "damage": damage_metrics, "report": report_metrics}

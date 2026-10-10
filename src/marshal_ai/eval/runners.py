@@ -14,10 +14,10 @@ from marshal_ai.config import Settings
 from marshal_ai.driving.messages import AssistRequest
 from marshal_ai.driving.routines import routine_steps
 from marshal_ai.eval.damage import kinds_of
-from marshal_ai.eval.dataset import AssistCase, DamageCase, GateCase, MediaCache, TrackCase
+from marshal_ai.eval.dataset import AssistCase, DamageCase, GateCase, MediaCache, ReportCase, TrackCase
 from marshal_ai.flows.functional import ROUTINE
 from marshal_ai.llm import LLM, Media
-from marshal_ai.records import Car, CarState
+from marshal_ai.records import Car, CarState, InspectionResult
 from marshal_ai.runtime import build_runtime
 
 ISOLATED = Settings(bus="memory", store="memory", history="none", artifacts="none", driving="fake",
@@ -116,4 +116,33 @@ async def run_damage(llm: LLM, case: DamageCase, cache: MediaCache) -> dict:
             "clear_confidence": clear, "seconds": round(seconds, 2)}
 
 
-RUNNERS = {"gate": run_gate, "track": run_track, "assist": run_assist, "damage": run_damage}
+class _Recording:
+    """Passes calls through and keeps each task's answer: the router corrects Gemini's rework plan
+    against the bay table, so the plan Gemini itself wrote is only visible on the way in."""
+
+    def __init__(self, llm: LLM):
+        self.llm, self.answers = llm, {}
+
+    def generate(self, task, prompt, schema=None, media=None, system=""):
+        self.answers[task] = self.llm.generate(task, prompt, schema, media, system)
+        return self.answers[task]
+
+
+async def run_report(llm: LLM, case: ReportCase, cache: MediaCache) -> dict:
+    recording = _Recording(llm)
+    app = fresh_app(recording)
+    vin = f"EVAL-{case.id}"
+    app.rt.store.put(Car(vin=vin, build_sheet=case.build_sheet, state=CarState.REPORT, location="report_point"))
+    for kind, result in (("visual", case.visual), ("functional", case.functional)):
+        app.rt.store.put(InspectionResult.model_validate({**result, "vin": vin, "kind": kind}))
+    report, seconds = await _timed(lambda: app.router.finalize(vin))
+    draft = recording.answers.get("report.write")
+    [proposal] = app.rt.pending("rework") or [None]
+    return {"verdict": report.verdict.value, "summary": report.summary,
+            "draft_bays": [s.bay for s in draft.steps] if draft else None,
+            "final_bays": [s["bay"] for s in proposal.payload["steps"]] if proposal else [],
+            "seconds": round(seconds, 2)}
+
+
+RUNNERS = {"gate": run_gate, "track": run_track, "assist": run_assist, "damage": run_damage,
+           "report": run_report}

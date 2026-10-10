@@ -200,3 +200,25 @@ def test_box_overlap():
     assert iou([0, 0, 100, 100], [0, 100, 100, 200]) == 0.0
     assert iou([0, 0, 100, 100], [0, 50, 100, 150]) == pytest.approx(1 / 3)
     assert iou(None, [0, 0, 1, 1]) == 0.0
+
+
+async def test_a_rework_plan_is_scored_before_and_after_the_router_checks_it():
+    """A model that puts paint before the brake light and writes the scratch first: the
+    supervisor still gets the right plan, but the scores say whose work that was."""
+    data, base = load_dataset("eval/datasets/v3-report.json")
+    data.report = [c for c in data.report if c.id == "brake-light-and-scratch"]
+    paint_first = FakeLLM().on("report.write", lambda call: {
+        "summary": "A scratch on the rear left door. The left brake light is dark.",
+        "steps": [{"bay": "paint", "defect_type": "scratch", "reason": "scratch on the door"},
+                  {"bay": "electrical", "defect_type": "brake_light", "reason": "dark lamp"}]})
+
+    m = (await evaluate(data, base, paint_first, flows=("report",), runs=1))["flows"]["report"]["metrics"]
+
+    assert m["bays_right"] == 1.0                 # the router put electrical first
+    assert m["gemini_bays_right"] == 1.0 and m["gemini_safety_first"] == 0.0
+    assert m["summary_safety_first"] == 0.0 and m["summary_names_both"] == 1.0
+
+
+def test_the_report_dataset_loads():
+    data, _ = load_dataset("eval/datasets/v3-report.json")
+    assert len(data.report) == 6
