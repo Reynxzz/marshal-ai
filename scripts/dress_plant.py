@@ -140,6 +140,22 @@ class Dresser:
         self.spawned.append(actor)
         return actor
 
+    def put_mesh(self, mesh: str, centre: carla.Location, yaw: float, pivot: tuple[float, float]):
+        """A static mesh from CARLA's own content (static.prop.mesh), placed by its centre: a mesh's
+        pivot is not at its middle, `pivot` is where the middle sits from the pivot (bounding box)."""
+        bp = self.lib.find("static.prop.mesh")
+        bp.set_attribute("mesh_path", f"{mesh}.{mesh.rsplit('/', 1)[-1]}")
+        bp.set_attribute("role_name", TAG)
+        c, sn = math.cos(math.radians(yaw)), math.sin(math.radians(yaw))
+        loc = carla.Location(centre.x - (c * pivot[0] - sn * pivot[1]), centre.y - (sn * pivot[0] + c * pivot[1]),
+                             centre.z)
+        actor = self.world.try_spawn_actor(bp, carla.Transform(loc, carla.Rotation(yaw=yaw)))
+        if actor is None:
+            self.failed += 1
+            return None
+        self.spawned.append(actor)
+        return actor
+
 
 def clear(world: carla.World, samples: list[carla.Waypoint]) -> int:
     """Remove an earlier run's dressing: tagged actors, and our prop types along the plant road."""
@@ -295,6 +311,7 @@ def dress_world(world: carla.World, m: carla.Map) -> Dresser:
     for s in range(40, 96, 5):
         put("static.prop.trafficcone01", 1, -4, float(s), right=-0.8, up=0.05)
     detail_world(d, m, put, lengths)
+    buildings_world(d, m, lengths)
     # the rework bays: workshop clutter on the walkway beside each
     for s in (8.0, 18.0, 28.0, 38.0, 50.0):
         put("static.prop.barrel", 3, -4, s - 2.5, right=0.4)
@@ -360,6 +377,35 @@ def detail_world(d: "Dresser", m: carla.Map, put, lengths: dict) -> None:
     for k, (road, lane, s, right) in enumerate([(7, 1, 20.0, 0.0), (7, 1, 44.0, 0.0), (9, 1, 40.0, 0.0),
                                                  (9, -1, 82.0, 0.0), (3, -5, 20.0, 1.5), (3, -5, 42.0, 1.5)]):
         put(walkers[(k * 7) % len(walkers)], road, lane, s, right=right, up=1.0, yaw_add=90.0 * k)
+
+
+# CARLA's factory halls (Town05's industrial estate), each about 50 m long: mesh -> (yaw to lay its
+# long side along the road, where its middle sits from its pivot), measured from their bounding boxes
+FACTORY = "/Game/Carla/Static/Building/Factory/SM_Factory_v0{}_Merged"
+HALLS = {1: (90.0, (-7.5, 20.0)), 2: (0.0, (20.0, 11.7)), 3: (90.0, (11.5, -20.1))}
+# road, s of the hall's middle, which hall: two along each long straight, one along each short one
+HALL_SITES = [(1, 32.0, 2), (1, 90.0, 3), (3, 30.0, 1), (5, 30.0, 3), (5, 88.0, 2), (7, 30.0, 1)]
+
+
+def buildings_world(d: "Dresser", m: carla.Map, lengths: dict) -> None:
+    """Factory halls beyond the perimeter fence, on the 40 m of paving there (lane -7), along every
+    straight and across every bend, so the loop runs between buildings like a plant's internal road
+    rather than across an open lot; and trucks in front of the corner halls, as at loading docks."""
+    for road, s, hall in HALL_SITES:
+        loc, yaw = at(m, road, -7, s, up=0.2)
+        if loc is not None:
+            turn, pivot = HALLS[hall]
+            d.put_mesh(FACTORY.format(hall), loc, yaw + turn, pivot)
+    for road in (2, 4, 6, 8):
+        # the corners: the slimmest hall across each bend, set back, trucks parked in front of it
+        loc, yaw = at(m, road, -7, lengths[road] / 2, right=6.0, up=0.2)
+        if loc is not None:
+            turn, pivot = HALLS[1]
+            d.put_mesh(FACTORY.format(1), loc, yaw + turn, pivot)
+        for ahead in (-9.0, 9.0):
+            loc, yaw = at(m, road, -7, lengths[road] / 2, right=-12.0, ahead=ahead, up=0.3)
+            if loc is not None:
+                d.put("vehicle.carlamotors.european_hgv", loc, yaw)
 
 
 def check_world(m: carla.Map, actors) -> list[str]:
