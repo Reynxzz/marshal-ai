@@ -242,6 +242,61 @@ right (scratches on the blue door, scuffs on the grey bumper, a missing front nu
 them after seeing the model's answers would bias the set, so the false-alarm rate needs panels known
 to be clean - new cars, such as the CARLA renders in v1, where it was 0.
 
+### A shift on the simulated plant: the operational KPIs
+
+```
+python -m marshal_ai.shift --cars 40 --seeds 10
+python -m marshal_ai.shift --cars 40 --seeds 10 --damage-recall eval/results/v2-damage-20261009-234019.json
+```
+
+The eval datasets score Gemini's judgements. The design's other KPIs (cars per hour, line-to-yard
+time, time to resolution, rework turnaround, cars shipped with an open finding) are about the
+operation, so `marshal_ai.shift` runs one: cars leave the line every 2 min, each with a fault
+drawn from a mix (dead headlight or brake lamp, wrong colour, missing badge, scratch, dent, panel
+gap) or none; 8% stop at a box on the way to the yard, half with a worker; one truck runs 40 min
+late. A simulated supervisor makes every human decision after 45 s, judging review cards by the
+car's real state; bays repair in the design's minutes; a truck loads what is ready at its ETA and
+waits up to 15 min only for passed cars on their way. Judgements come from the offline stand-ins,
+which read the ground truth, so this measures the rules and hand-offs; `--damage-recall` drops the
+gate's findings at the miss rate Gemini showed per kind on v2-damage, and the shift shows where
+those misses go. Every car is checked against its real faults when it ships.
+
+10 shifts of 40 cars (seeds 7-16):
+
+| KPI | Perfect gate | Gate missing as on v2-damage |
+| --- | --- | --- |
+| Cars with a scratch, dent or panel gap | 68 | 68 |
+| **Shipped with a real fault** | **0** | **16** |
+| Shipped with an open finding (design target 0) | 0 | 0 |
+| Gate first-pass yield / review share | 0.76 / 0.08 | 0.79 / 0.05 |
+| Telemetry-camera disagreements / cars with a dead lamp | 47 / 47 | 47 / 47 |
+| Rework rate | 0.37 | 0.33 |
+| Rework turnaround, median | 43 min | 43 min |
+| Line to yard, clean car, median | 14.7 min | 14.7 min |
+| Assistance cases / with a worker / wait recommended | 34 / 13 / 13 | 34 / 13 / 13 |
+| Time to resolution | 45 s (the supervisor's delay) | 45 s |
+| Clean cars sent to rework | 0 | 0 |
+
+What it found:
+
+- **"Shipped with an open finding" cannot see a miss.** It reads the records, and a defect the gate
+  never reported is not in them: with Gemini's measured recall (scratches 72%, dents 87%), 16 of 68
+  damaged cars shipped and the KPI still read 0. Only checking against the car shows it, which on
+  the real line means sampling shipped cars, or the design's human review for small findings.
+- **A car that found the yard full was never shipped.** `send_to_slot` raised `yard_full` and left
+  the car where its report finished; nothing tried again when a truck freed slots. The yard now
+  re-tries every tick (`YardTraffic.waiting_for_slot`, tested). Each `yard_full` is still a
+  Gemini call that the offline plan answers with no action - about 22 per 40-car shift - which on
+  the real model is cost for nothing; it should be asked once per car, or not at all.
+- **The simulated plant was blind to lamp faults after the first car.** Once a passed car became
+  the reference frame, the frame under test was rebuilt without its simulated ground truth, and the
+  offline judge read the reference's. Every later dead lamp passed. Real CARLA runs were not
+  affected (they send image bytes); the offline demo and tests were. Fixed and tested.
+- **The 8-slot yard is the constraint.** Clean cars take 2.8 min from line to yard when a slot is
+  free and 14.7 min in a full shift. Flow 1's numbers here depend on the truck schedule assumed (a
+  truck is due 10 min after its last car), which the design does not give, so read them as how the
+  yard behaves, not as the plant's figures.
+
 ## Real Gemini via Vertex AI
 
 `GeminiLLM` uses `google-genai` with no explicit credentials, so it reads the environment. With a

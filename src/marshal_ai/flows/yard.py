@@ -329,9 +329,27 @@ class YardTraffic:
         moved = await self.execute(YardPlan.model_validate(p.payload["plan"])) if approve else []
         return {"proposal_id": proposal_id, "status": p.status.value, "moved": moved}
 
+    def waiting_for_slot(self) -> list[Car]:
+        """Cars with a PASS report that found the yard full, still where their report finished."""
+        waiting = []
+        for car in self.rt.store.list(Car):
+            if car.state in (CarState.YARD, CarState.SHIPPED) or car.mission_id or car.yard_slot \
+                    or car.do_not_ship:
+                continue
+            report = self.rt.store.get(CarReport, car.vin)
+            if report is not None and report.verdict == Verdict.PASS:
+                waiting.append(car)
+        return sorted(waiting, key=lambda c: c.updated_at)
+
     async def tick(self) -> None:
         for key, kind, details in self.detect_exceptions():
             await self.handle_exception(kind, details, key)
+        # A car that found the yard full used to wait for good: nothing tried again when a truck
+        # freed slots, so it was never shipped (found by a 40-car shift, python -m marshal_ai.shift).
+        for car in self.waiting_for_slot():
+            if not self.free_slots(car.vin):
+                break
+            await self.send_to_slot(car.vin)
         await self.release_next()
 
     def kpis(self) -> dict:

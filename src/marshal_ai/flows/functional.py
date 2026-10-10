@@ -172,10 +172,12 @@ class FunctionalChecker:
             # Both frames reach Gemini prefixed with their label, so they must be labelled
             # differently: sent as two identical "[track camera]" images the model could not
             # tell which was the reference and confirmed a dark lamp.
+            # truth goes along too: dropping it left the simulated plant comparing every later car
+            # with nothing, so a dead lamp after the first passing car was never caught there
             first = Media(mime=reference.mime, data=reference.data, uri=reference.uri,
-                          label=f"reference frame: a car that passed step {step.step}")
+                          label=f"reference frame: a car that passed step {step.step}", truth=reference.truth)
             second = Media(mime=clip.mime, data=clip.data, uri=clip.uri,
-                           label="frame under test: the car being checked now")
+                           label="frame under test: the car being checked now", truth=clip.truth)
             prompt = (f"Step {step.step}: {step.command}.\n"
                       f"Expected in the frame under test: {step.expected_on_camera}.")
             seen, _ = await ask_or(self.rt, "track.step", prompt, StepSeen, NOT_JUDGED,

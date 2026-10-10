@@ -1,6 +1,6 @@
 from datetime import timedelta
 
-from marshal_ai.records import Car, CarReport, CarState, Verdict
+from marshal_ai.records import BuildSheet, Car, CarReport, CarState, Verdict
 
 
 def car(app, vin):
@@ -95,3 +95,23 @@ async def test_plan_with_unknown_point_is_rejected_not_sent(app):
     plan = YardPlan(summary="x", reasoning="y", actions=[
         YardAction(vin="VIN-999", action="go", waypoints=["moon"], reason="z")])
     assert app.yard.check_plan(plan)
+
+
+async def test_a_car_that_found_the_yard_full_gets_a_slot_once_one_frees(plant):
+    """It used to wait where its report finished for good, and was never shipped."""
+    app = plant([])
+    slots = app.yard.slots_by_distance()
+    for i, slot in enumerate(slots):
+        vin = f"VIN-P{i}"
+        app.rt.store.put(Car(vin=vin, build_sheet=BuildSheet(model="sedan", colour="blue", truck_id="T-07")))
+        await park(app, vin, slot)
+    late = Car(vin="VIN-LATE", build_sheet=BuildSheet(model="sedan", colour="blue", truck_id="T-08"),
+               state=CarState.REPORT, location="report_point")
+    app.rt.store.put(late)
+    app.rt.driving.spawn("VIN-LATE", "report_point")
+    app.rt.store.put(CarReport(vin="VIN-LATE", verdict=Verdict.PASS))
+    await app.yard.tick()
+    assert car(app, "VIN-LATE").yard_slot is None and app.yard.waiting_for_slot()[0].vin == "VIN-LATE"
+    assert app.yard.ship("T-07")                      # the truck takes its cars and frees their slots
+    await app.yard.tick()
+    assert car(app, "VIN-LATE").yard_slot in slots and not app.yard.waiting_for_slot()

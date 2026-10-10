@@ -52,7 +52,7 @@ def visual_variant(call: LLMCall) -> dict:
 
 
 def track_step(call: LLMCall) -> dict:
-    truth = call.media[0].truth or {}
+    truth = call.media[-1].truth or {}            # the frame under test comes after any reference
     step = truth.get("step")
     dead = STEP_LAMPS.get(step, set()) & set(truth.get("dead_lamps", []))
     if dead:

@@ -167,7 +167,13 @@ simulation cannot yet show what the design describes. The target is the design's
   (target 0); flow 7 failures per 100 runs, time to first failure. It runs mostly on saved images
   and the offline runner, so it needs little CARLA time.
   *Started:* `python -m marshal_ai.eval` covers flows 2, 3 and 4 on dataset v1 (7 cases from
-  the 2026-10-09 runs); flows 1, 5 and 7 KPIs and a larger dataset still to come.
+  the 2026-10-09 runs); v2-v5 add damage, reports, generation and search.
+  *Operational KPIs done:* `python -m marshal_ai.shift` runs a 40-car shift on the simulated plant
+  and reports flows 1, 2, 3, 4 and 5 against each car's real faults. 10 shifts: no faulty car
+  ships with a perfect gate; with Gemini's measured damage recall 16 of 68 damaged cars ship while
+  "shipped with an open finding" reads 0. It found and fixed two bugs: cars that found the yard
+  full were never shipped, and the simulated plant missed every dead lamp after the first car.
+  *Still to come:* a larger image dataset (needs CARLA frames from Qais's cars and faults).
 
 ---
 
