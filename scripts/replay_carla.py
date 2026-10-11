@@ -208,11 +208,40 @@ def purge_dressing(world) -> int:
     The recording holds the dressing, and the replayer re-creates it. Left in place, the live copy
     stood under the replayed one, and the replayer did not remove everything it had made: after two
     filmings 155 dressing actors had built up, some drifted onto the yard slots.
+
+    The plant world's factory halls (static meshes) are left: the replayer cannot place them (see
+    drop_stranded_meshes), so the ones place_halls put in the live world are the ones filmed.
     """
-    tagged = [a for a in world.get_actors() if a.attributes.get("role_name") == DRESSING_ROLE]
+    tagged = [a for a in world.get_actors()
+              if a.attributes.get("role_name") == DRESSING_ROLE and a.type_id != "static.prop.mesh"]
     for a in tagged:
         a.destroy()
     return len(tagged)
+
+
+def drop_stranded_meshes(world) -> int:
+    """The replayer spawns each actor 1 km above the origin and then moves it into place, and a static
+    mesh (a plant-world factory hall) cannot be moved: left there, it blocks every later spawn, the
+    filmed cars included. dress_plant.py spawns the halls last, so after the first tick they are the
+    only thing created; remove them before any car is."""
+    stranded = [a for a in world.get_actors().filter("static.prop.mesh") if a.get_location().z > 500.0]
+    for a in stranded:
+        a.destroy()
+    return len(stranded)
+
+
+def place_halls(world) -> int:
+    """The halls, in the live world, where dress_plant.py put them for the run: the replay's own copies
+    are stranded, and loading the plant world for the replay rebuilt it empty. Once per world: the
+    second pass finds them still there (purge_dressing leaves them)."""
+    # on the ground: the stranded copies just destroyed are still listed until the next tick
+    if any(a.get_location().z < 500.0 for a in world.get_actors().filter("static.prop.mesh")):
+        return 0
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import dress_plant
+    d = dress_plant.Dresser(world)
+    dress_plant.plant_halls(d, world.get_map(), dress_plant.road_lengths())
+    return len(d.spawned)
 
 
 def start_replay(client, world, path: str, args) -> None:
@@ -220,6 +249,9 @@ def start_replay(client, world, path: str, args) -> None:
     purge_dressing(world)
     world.tick()
     client.replay_file(path, args.start, args.duration, 0, False)
+    world.tick()
+    if drop_stranded_meshes(world):
+        place_halls(world)
     # Spawning a sensor while the replayer is still creating the recorded actors can segfault the
     # server, so let it settle first. Both passes do the same, so their ticks line up.
     for _ in range(SETTLE_TICKS):

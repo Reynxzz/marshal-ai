@@ -311,7 +311,6 @@ def dress_world(world: carla.World, m: carla.Map) -> Dresser:
     for s in range(40, 96, 5):
         put("static.prop.trafficcone01", 1, -4, float(s), right=-0.8, up=0.05)
     detail_world(d, m, put, lengths)
-    buildings_world(d, m, lengths)
     # the rework bays: workshop clutter on the walkway beside each
     for s in (8.0, 18.0, 28.0, 38.0, 50.0):
         put("static.prop.barrel", 3, -4, s - 2.5, right=0.4)
@@ -319,6 +318,7 @@ def dress_world(world: carla.World, m: carla.Map) -> Dresser:
         put("static.prop.box02", 3, -4, s + 2.0, right=0.5)
         put("static.prop.ironplank", 3, -5, s + 0.3)
         put("static.prop.warningconstruction", 3, -5, s + 3.5, yaw_add=180.0)
+    buildings_world(d, m, lengths)                    # last: see buildings_world
     return d
 
 
@@ -390,22 +390,33 @@ HALL_SITES = [(1, 32.0, 2), (1, 90.0, 3), (3, 30.0, 1), (5, 30.0, 3), (5, 88.0, 
 def buildings_world(d: "Dresser", m: carla.Map, lengths: dict) -> None:
     """Factory halls beyond the perimeter fence, on the 40 m of paving there (lane -7), along every
     straight and across every bend, so the loop runs between buildings like a plant's internal road
-    rather than across an open lot; and trucks in front of the corner halls, as at loading docks."""
+    rather than across an open lot; and trucks in front of the corner halls, as at loading docks.
+
+    The halls are spawned after everything else. CARLA's replayer spawns each recorded actor 1 km
+    above the origin and then moves it into place; a static mesh cannot be moved, so a replayed hall
+    stays up there and every actor spawned after it collides and is not created, the filmed car
+    included. Spawned last, the halls block nothing in the dressing, and replay_carla.py removes the
+    stranded copies before the cars appear and places the halls again itself."""
+    for road in (2, 4, 6, 8):
+        for ahead in (-9.0, 9.0):
+            loc, yaw = at(m, road, -7, lengths[road] / 2, right=-12.0, ahead=ahead, up=0.3)
+            if loc is not None:
+                d.put("vehicle.carlamotors.european_hgv", loc, yaw)
+    plant_halls(d, m, lengths)
+
+
+def plant_halls(d: "Dresser", m: carla.Map, lengths: dict) -> None:
+    """The halls alone: replay_carla.py places them itself, as the replayer cannot."""
     for road, s, hall in HALL_SITES:
         loc, yaw = at(m, road, -7, s, up=0.2)
         if loc is not None:
             turn, pivot = HALLS[hall]
             d.put_mesh(FACTORY.format(hall), loc, yaw + turn, pivot)
-    for road in (2, 4, 6, 8):
-        # the corners: the slimmest hall across each bend, set back, trucks parked in front of it
+    for road in (2, 4, 6, 8):                          # the corners: the slimmest hall, set back
         loc, yaw = at(m, road, -7, lengths[road] / 2, right=6.0, up=0.2)
         if loc is not None:
             turn, pivot = HALLS[1]
             d.put_mesh(FACTORY.format(1), loc, yaw + turn, pivot)
-        for ahead in (-9.0, 9.0):
-            loc, yaw = at(m, road, -7, lengths[road] / 2, right=-12.0, ahead=ahead, up=0.3)
-            if loc is not None:
-                d.put("vehicle.carlamotors.european_hgv", loc, yaw)
 
 
 def check_world(m: carla.Map, actors) -> list[str]:
