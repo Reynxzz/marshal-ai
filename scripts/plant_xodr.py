@@ -62,7 +62,12 @@ POINTS = {
     "finishing_corner.p1": (4, -2, ARC * 0.15), "finishing_corner.p2": (4, -2, ARC * 0.5),
     "finishing_corner.p3": (4, -2, ARC * 0.85), "finishing": (5, -2, 30.0),
     "yard.entry": (7, -2, 2.0),
-    **{f"yard.Y{i}": (7, -3, 6.0 + 6.0 * (i - 1)) for i in range(1, 9)},
+    # A car pulls into its slot from a run-up 12 m before it (driving/carla_backend.py
+    # PULL_OVER_RUN_M). The first slot starts 14 m into the straight, so every run-up is straight:
+    # from slots at 6 m the run-up began in the bend, the car parked across the lane, and the cars
+    # after it stopped against it at the yard entry. 5.5 m apart for 4.9 m cars, the last clear
+    # of the loading bay at 56 m.
+    **{f"yard.Y{i}": (7, -3, 14.0 + 5.5 * (i - 1)) for i in range(1, 9)},
     "loading_bay": (7, -2, 56.0),
 }
 

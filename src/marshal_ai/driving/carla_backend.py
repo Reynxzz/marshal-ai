@@ -200,6 +200,7 @@ CREEP_MAX_S = 30.0                 # give up creeping after this long, rather th
 # and BehaviorAgent only routes on driving lanes. So the car is routed to the lane this far before
 # the spot, then steers onto it. 12 m is enough to move one lane over at walking pace.
 PULL_OVER_RUN_M = 12.0
+PULL_OVER_AIM_M = 4.0              # steer for this far beyond the spot, along it, to arrive straight
 
 # Every sensor Marshal spawns carries this role_name, so leftovers can be found and cleared. Runs used
 # to leave cameras alive in the world - 28 built up in one session, each rendering every frame on the
@@ -618,7 +619,14 @@ class CarlaDrivingSystem:
             v.actor.apply_control(carla.VehicleControl(throttle=0.0, brake=1.0))
             return False
         heading = math.atan2(forward.y, forward.x)
-        bearing = math.atan2(dy, dx)
+        aim_x, aim_y = dx, dy
+        if pulling_over:
+            # Steer for a point beyond the spot, along it, as a driver lines up with a bay. Steered
+            # at the spot itself the car arrived still angled across it (24 degrees in a yard slot)
+            # with its tail in the lane beside, where the next car to pass stopped against it.
+            spot = self.transform(point).get_forward_vector()
+            aim_x, aim_y = dx + spot.x * PULL_OVER_AIM_M, dy + spot.y * PULL_OVER_AIM_M
+        bearing = math.atan2(aim_y, aim_x)
         error = (bearing - heading + math.pi) % (2 * math.pi) - math.pi
         velocity = v.actor.get_velocity()
         speed = math.hypot(velocity.x, velocity.y)
