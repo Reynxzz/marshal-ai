@@ -671,6 +671,12 @@ class CarlaDrivingSystem:
                 continue
             if not actor.type_id.startswith(("vehicle.", "walker.", "static.prop")):
                 continue
+            # A car parked in a slot or bay is beside the lane, not in it. Measured along the car's
+            # heading, a car in a bend points across the slots: at the plant world's yard entry the
+            # third car of a run took the second, parked in Y2, for a vehicle in its lane, asked for
+            # help, and held its brake with every car behind it waiting.
+            if actor.type_id.startswith("vehicle.") and not self._in_a_driving_lane(actor):
+                continue
             offset = actor.get_location() - origin
             ahead = offset.x * forward.x + offset.y * forward.y
             if ahead <= 0:                      # behind the car
@@ -696,21 +702,21 @@ class CarlaDrivingSystem:
         if detect is None:
             return
 
-        maps: list = []                  # fetched once, on first use: get_map() is slow
-
-        def in_a_driving_lane(vehicle) -> bool:
-            if not maps:
-                maps.append(self.world.get_map())
-            wp = maps[0].get_waypoint(vehicle.get_location(), project_to_road=False,
-                                      lane_type=carla.LaneType.Any)
-            return wp is not None and wp.lane_type == carla.LaneType.Driving
-
         def detect_traffic(vehicle_list=None, *args, **kwargs):
             if vehicle_list is not None:
-                vehicle_list = [veh for veh in vehicle_list if in_a_driving_lane(veh)]
+                vehicle_list = [veh for veh in vehicle_list if self._in_a_driving_lane(veh)]
             return detect(vehicle_list, *args, **kwargs)
 
         agent._vehicle_obstacle_detected = detect_traffic
+
+    def _in_a_driving_lane(self, actor) -> bool:
+        """Whether an actor stands on a driving lane, by its own position (not the nearest lane)."""
+        world_map = getattr(self, "_driving_map", None)
+        if world_map is None:                 # fetched once: get_map() is slow
+            world_map = self._driving_map = self.world.get_map()
+        wp = world_map.get_waypoint(actor.get_location(), project_to_road=False,
+                                    lane_type=carla.LaneType.Any)
+        return wp is not None and wp.lane_type == carla.LaneType.Driving
 
     def _is_plant_car(self, actor) -> bool:
         """Whether an actor is one of the plant's cars that is itself on its way somewhere.
