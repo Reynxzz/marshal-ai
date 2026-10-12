@@ -86,7 +86,8 @@ class Labeller:
             self.big = ImageFont.load_default(size=max(18, height // 22))
             self.small = ImageFont.load_default(size=max(14, height // 36))
 
-    def draw(self, raw: bytes, title: str, place: str | None, vin: str | None) -> bytes:
+    def draw(self, raw: bytes, title: str, place: str | None, vin: str | None,
+             feed: list[dict] | None = None) -> bytes:
         if not self.ok:
             return raw
         img = Image.frombuffer("RGBA", (self.w, self.h), raw, "raw", "BGRA", 0, 1).copy()
@@ -110,5 +111,45 @@ class Labeller:
             if sub:
                 d.text((pad * 2 + 4, top + pad + self.big.size + pad // 2), sub, font=self.small,
                        fill=(210, 215, 220, 255))
+        if feed:
+            self.draw_feed(d, feed, pad)
         out = Image.alpha_composite(img, layer)
         return out.tobytes("raw", "BGRA")
+
+    def wrap(self, d, text: str, width: float) -> list[str]:
+        lines, line = [], ""
+        for word in text.split():
+            trial = f"{line} {word}".strip()
+            if line and d.textlength(trial, font=self.small) > width:
+                lines.append(line)
+                line = word
+            else:
+                line = trial
+        return lines + ([line] if line else [])
+
+    def draw_feed(self, d, feed: list[dict], pad: int) -> None:
+        """Top right: the latest decisions, newest last - who made each, and what it was."""
+        width = self.w * 0.40
+        left = self.w - pad - width
+        blocks = []
+        for n in feed:
+            tag, colour = WHO.get(n["who"], WHO["rules"])
+            blocks.append((tag, colour, self.wrap(d, n["text"], width - 2 * pad - 8), n.get("age", 0.0)))
+        line_h = self.small.size + pad // 3
+        height = sum(pad + line_h * (1 + len(b[2])) for b in blocks) + pad
+        d.rectangle([left, pad, self.w - pad, pad + height], fill=(12, 16, 20, 185))
+        y = pad * 2
+        for tag, colour, lines, age in blocks:
+            fade = 255 if age < 1.0 else 200
+            d.rectangle([left + pad, y, left + pad + 5, y + line_h * (1 + len(lines)) - pad // 3],
+                        fill=colour + (255,))
+            d.text((left + pad + 14, y), tag, font=self.small, fill=colour + (fade,))
+            for i, line in enumerate(lines):
+                d.text((left + pad + 14, y + line_h * (i + 1)), line, font=self.small,
+                       fill=(255, 255, 255, fade))
+            y += line_h * (1 + len(lines)) + pad
+
+
+# who made a decision, as the film's feed names it
+WHO = {"gemini": ("GEMINI", (110, 170, 255)), "rules": ("YARD RULES", (200, 200, 205)),
+       "supervisor": ("SUPERVISOR", (120, 210, 140)), "plant": ("PLANT", (240, 170, 60))}

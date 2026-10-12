@@ -18,8 +18,12 @@ start_recording() {
   dress_plant
   [[ "${MARSHAL_RECORD:-1}" != 0 ]] || return 0
   sudo install -d -o carla -g carla -m 755 /var/lib/carla/recordings
-  if python3 scripts/carla_recorder.py start --name "$1-$(date +%Y%m%d-%H%M%S)"; then
+  local name
+  name="$1-$(date +%Y%m%d-%H%M%S)"
+  if python3 scripts/carla_recorder.py start --name "$name"; then
     recording=true
+    # the demos note their decisions under this name, for the film (scripts/film_notes.py)
+    export MARSHAL_RECORDING="$name"
   fi
 }
 

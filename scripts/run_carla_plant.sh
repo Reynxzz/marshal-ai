@@ -4,6 +4,8 @@
 #
 #   bash scripts/run_carla_plant.sh
 #   MARSHAL_PLANT_CARS=4 MARSHAL_PLANT_STEPS=1,3 bash scripts/run_carla_plant.sh
+#   MARSHAL_PLANT_CARS=6 MARSHAL_PLANT_TRUCKS=T-1:20,T-2:45 MARSHAL_PLANT_LATE_TRUCK=T-1:40 \
+#     bash scripts/run_carla_plant.sh                   # flow 1 in full, with the late truck
 set -Eeuo pipefail
 
 readonly APP_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -57,4 +59,9 @@ fi
 python3 scripts/ensure_carla_map.py --map "${MARSHAL_CARLA_MAP:-Town05}" --wait-seconds 600
 start_recording plant
 
-python3 scripts/demo_carla_plant.py --cars "$CARS" --steps "$STEPS" --wrong-colour "$WRONG"
+# Flow 1 in full: MARSHAL_PLANT_LATE_TRUCK=T-1:40 delays that truck once every car is parked, and
+# Gemini re-plans the slots (the cars drive to them once a supervisor approves)
+extra=()
+[[ -n "${MARSHAL_PLANT_TRUCKS:-}" ]] && extra+=(--trucks "$MARSHAL_PLANT_TRUCKS")
+[[ -n "${MARSHAL_PLANT_LATE_TRUCK:-}" ]] && extra+=(--late-truck "$MARSHAL_PLANT_LATE_TRUCK")
+python3 scripts/demo_carla_plant.py --cars "$CARS" --steps "$STEPS" --wrong-colour "$WRONG" "${extra[@]}"

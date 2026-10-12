@@ -29,11 +29,14 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from carla_recorder import DEFAULT_DIR, duration_s, recording_path  # noqa: E402
 from film_labels import Labeller, plant_points, run_title, zone_for  # noqa: E402
+import film_notes  # noqa: E402
 
 SETTLE_TICKS = 10
 MOVING_M_PER_TICK = 0.01  # 0.2 m/s at 0.05 s ticks; a parked car jitters far less
 TELEPORT_M_PER_TICK = 1.0  # 72 km/h; more is the replayer spawning or removing a car, not driving
 OPENING_AFTER_TICKS = 4  # let freshly replayed cars drop onto the road first
+NOTE_SHOW_S = 30.0  # recording seconds a decision stays in the film's feed (7.5 s of film at 4x)
+NOTE_LINES = 3  # decisions shown at once, newest last
 SHOT_MAX_M = 22.0  # a longer drive is split, so the car stays big and the road around it small
 SHOT_MIN_TICKS = 20  # 1 s; shorter is a car settling as the replayer spawns it, not a drive, and
                      # moving the camera about while cars are spawned is what crashes the server
@@ -344,6 +347,8 @@ def main(argv: list[str] | None = None) -> int:
                     help="daylight for the replay; the recording does not restore the weather")
     ap.add_argument("--title", default=None, help="label for the film (default: from the recording name)")
     ap.add_argument("--no-labels", action="store_true", help="do not burn in the run and zone labels")
+    ap.add_argument("--no-notes", action="store_true",
+                    help="leave out the feed of the run's decisions (scripts/film_notes.py)")
     ap.add_argument("--host", default="localhost")
     ap.add_argument("--port", type=int, default=2000)
     args = ap.parse_args(argv)
@@ -407,6 +412,15 @@ def main(argv: list[str] | None = None) -> int:
         elif not labeller.ok:
             emit({"type": "replay.no_labels", "why": "Pillow is not installed"})
         named, title = plant_points(), args.title or run_title(args.name)
+        notes = film_notes.load(args.name) if not args.no_notes else []
+        if notes:
+            emit({"type": "replay.notes", "count": len(notes)})
+
+        def feed_at(tick: int) -> list[dict]:
+            """The last few decisions made by this point of the recording, each shown for a while."""
+            now = args.start + (tick + SETTLE_TICKS) * args.delta
+            recent = [n for n in notes if now - NOTE_SHOW_S <= n["t"] <= now]
+            return [{**n, "age": now - n["t"]} for n in recent[-NOTE_LINES:]]
 
         def caption(s: Shot) -> tuple[str | None, str | None]:
             if s.still:
@@ -443,13 +457,14 @@ def main(argv: list[str] | None = None) -> int:
             if camera is not None:
                 image = next_image(images, frame)  # always drained, or frames pile up in memory
                 if filming and shot.still:
-                    still = labeller.draw(bytes(image.raw_data), title, *caption(shot))
+                    still = labeller.draw(bytes(image.raw_data), title, *caption(shot), feed_at(tick))
                     held = round(args.opening_s / args.delta)
                     for _ in range(held):
                         writer.stdin.write(still)
                     written += held
                 elif filming and (tick - shot.start) % args.speed == 0:
-                    writer.stdin.write(labeller.draw(bytes(image.raw_data), title, *caption(shot)))
+                    writer.stdin.write(labeller.draw(bytes(image.raw_data), title, *caption(shot),
+                                                     feed_at(tick)))
                     written += 1
             if shot is not None and tick >= shot.end:
                 shot_index += 1

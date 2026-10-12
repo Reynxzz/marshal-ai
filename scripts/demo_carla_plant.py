@@ -33,6 +33,7 @@ import math
 import time
 from datetime import datetime, timedelta, timezone
 
+from film_notes import note
 from marshal_ai.app import MarshalApp
 from marshal_ai.config import Settings
 from marshal_ai.plant.state import Truck
@@ -81,6 +82,10 @@ def parser() -> argparse.ArgumentParser:
     ap.add_argument("--timeout", type=float, default=1200.0, help="wall-clock seconds")
     ap.add_argument("--wrong-colour", type=int, default=0, metavar="N",
                     help="paint car N (1-based) red while its build sheet says blue - demo scene 2")
+    ap.add_argument("--late-truck", default=None, metavar="TRUCK:MIN",
+                    help="once every car is parked, delay this truck by MIN minutes: the yard rules "
+                         "do not cover it, so Gemini re-plans the slots, a supervisor approves, and "
+                         "the cars drive to their new slots (flow 1's exception)")
     ap.add_argument("--no-supervisor", action="store_true",
                     help="leave reviews and rework proposals pending; cars wait where they are")
     return ap
@@ -145,8 +150,9 @@ class Watch:
         for car in cars:
             if car is None:
                 continue
-            now = (car.state, car.location)
+            now = (car.state, car.location, car.yard_slot)
             if self.last.get(car.vin) != now:
+                self.narrate(car, self.last.get(car.vin))
                 if car.state is CarState.INSPECTION_GATE and car.vin not in self.released_at:
                     self.released_at[car.vin] = self.sim_s()
                     self.release_gaps.append(self.gap_to_released(car.vin))
@@ -162,6 +168,41 @@ class Watch:
         self.max_in_plant = max(self.max_in_plant, in_plant)
         self.max_moving = max(self.max_moving, moving)
         return [c for c in cars if c is not None]
+
+    def narrate(self, car: Car, before: tuple | None) -> None:
+        """Say what was just decided about this car, for the film (scripts/film_notes.py)."""
+        world, vin = self.rt.driving.world, car.vin
+        state, slot = car.state, car.yard_slot
+        was_state = before[0] if before else None
+        was_slot = before[2] if before else None
+        if state is CarState.INSPECTION_GATE and was_state is CarState.LINE_END:
+            note(world, f"{vin} released to the inspection gate: fewer than 2 cars queued there, "
+                        "and the line end is clear 25 m ahead", "rules")
+        elif state is CarState.TEST_TRACK and was_state is CarState.INSPECTION_GATE:
+            r = self.rt.store.get(InspectionResult, f"{vin}:visual")
+            if r is not None:
+                found = (f"{len(r.findings)} finding(s)" if r.findings else "no damage") + \
+                    (", colour matches the build sheet" if not r.build_sheet_mismatches
+                     else f", {'; '.join(r.build_sheet_mismatches)}")
+                note(world, f"Gate photos of {vin}: {r.verdict.value}, {found}", "gemini")
+        elif state is CarState.REPORT and was_state is CarState.TEST_TRACK:
+            r = self.rt.store.get(InspectionResult, f"{vin}:functional")
+            if r is not None:
+                checks = ", ".join(f"{c.name} {'PASS' if c.passed else 'FAIL'}" for c in r.checklist)
+                note(world, f"Test track, {vin}: {checks or r.verdict.value}", "gemini")
+        if slot and slot != was_slot:
+            truck = car.build_sheet.truck_id
+            nxt = self.rt.plant.next_truck()
+            if was_slot:
+                note(world, f"{vin} moves {was_slot} to {slot}: truck {truck} now loads "
+                            f"{'first' if nxt and nxt.truck_id == truck else 'later'}", "plant")
+            else:
+                first = nxt is not None and nxt.truck_id == truck
+                note(world, f"{vin} passed; slot {slot}. Its truck {truck} loads "
+                            f"{'next, so a slot nearest the loading bay' if first else 'later, so a slot farther from the bay'}",
+                     "rules")
+        if state is CarState.REWORK and was_state is not CarState.REWORK:
+            note(world, f"{vin} booked into rework", "gemini")
 
     def gap_to_released(self, vin: str) -> float | None:
         """Metres to the nearest car already released, at the moment this one is released."""
@@ -201,6 +242,7 @@ async def supervise(app, rt) -> None:
         alarms += [{"vin": vin, "mismatch": m} for m in result.build_sheet_mismatches]
         FALSE_ALARMS.extend(alarms)
         await app.visual.decide_review(proposal.proposal_id, confirm_defect=False, by=SUPERVISOR)
+        note(rt.driving.world, f"{SUPERVISOR} cleared {vin}'s gate review", "supervisor")
         emit({"type": "plant.supervisor", "decision": "review cleared", "vin": vin,
               "why": "the simulated car has no body damage; findings recorded as false alarms"
                      if alarms else "no finding; an all-clear view scored under 0.9",
@@ -213,6 +255,8 @@ async def supervise(app, rt) -> None:
               "summary": report.summary if report else None, "result": decision})
     for proposal in rt.pending("replan"):
         decision = await app.yard.decide(proposal.proposal_id, approve=True, by=SUPERVISOR)
+        note(rt.driving.world, f"{SUPERVISOR} approved Gemini's re-plan; "
+                               f"{len(decision.get('moved', []))} car(s) move", "supervisor")
         emit({"type": "plant.supervisor", "decision": "re-plan approved",
               "summary": proposal.summary, "result": decision})
 
@@ -260,7 +304,15 @@ async def run(args) -> dict:
           "cameras": len(rt.driving._cameras) + 3 * len(vins)})
 
     watch = Watch(rt, vins)
+    late = None
+    if args.late_truck:
+        truck_id, minutes = args.late_truck.split(":")
+        late = (truck_id, float(minutes))
+    replanned = False
+    said = 0                                 # yard decisions already noted for the film
     await rt.driving.start()
+    note(rt.driving.world, f"{len(vins)} finished cars at the line end, for trucks "
+                           f"{', '.join(trucks)}; {rt.plant.next_truck().truck_id} loads first", "plant")
     deadline = time.monotonic() + args.timeout
     next_beat = time.monotonic() + 30
     try:
@@ -274,10 +326,28 @@ async def run(args) -> dict:
                                     for p in rt.proposals.values()]})
                 next_beat = time.monotonic() + 30
             await app.tick()                    # release rules and yard exceptions
+            for d in app.yard.decisions[said:]:
+                if d.get("summary"):
+                    note(rt.driving.world, f"{d['summary']} {d.get('reasoning', '')}".strip(), "gemini")
+                said += 1
             if not args.no_supervisor:
                 await supervise(app, rt)
             cars = watch.poll()
             if cars and all(finished(c) for c in cars):
+                if late and not replanned:
+                    # Flow 1's exception: the next truck is late. The rules have no answer for
+                    # it; Gemini re-plans the slots on the next tick, the supervisor approves.
+                    truck = rt.plant.trucks[late[0]]
+                    truck.eta = truck.eta + timedelta(minutes=late[1])
+                    replanned = True
+                    note(rt.driving.world, f"Truck {late[0]} is {late[1]:.0f} min late; "
+                                           f"{rt.plant.next_truck().truck_id} now loads first. "
+                                           "No rule covers this: it goes to Gemini", "plant")
+                    emit({"type": "plant.late_truck", "truck": late[0], "minutes": late[1],
+                          "next": rt.plant.next_truck().truck_id})
+                    continue
+                if any(c.mission_id for c in cars) or any(app.yard.deferred.values()):
+                    continue                    # re-slotted cars still driving
                 break
             await asyncio.sleep(1.0)
         else:
@@ -286,8 +356,10 @@ async def run(args) -> dict:
         await rt.driving.stop()
 
     shipped = {}
-    for truck_id in trucks:
-        shipped[truck_id] = app.yard.ship(truck_id)
+    for truck in rt.plant.trucks_by_eta():
+        shipped[truck.truck_id] = app.yard.ship(truck.truck_id)
+        note(rt.driving.world, f"Truck {truck.truck_id} loaded: {', '.join(shipped[truck.truck_id]) or 'nothing'}",
+             "plant")
     cars = watch.poll()
     for vin in vins:
         rt.driving.despawn(vin)
