@@ -64,4 +64,5 @@ start_recording plant
 extra=()
 [[ -n "${MARSHAL_PLANT_TRUCKS:-}" ]] && extra+=(--trucks "$MARSHAL_PLANT_TRUCKS")
 [[ -n "${MARSHAL_PLANT_LATE_TRUCK:-}" ]] && extra+=(--late-truck "$MARSHAL_PLANT_LATE_TRUCK")
+[[ -n "${MARSHAL_PLANT_TIMEOUT:-}" ]] && extra+=(--timeout "$MARSHAL_PLANT_TIMEOUT")
 python3 scripts/demo_carla_plant.py --cars "$CARS" --steps "$STEPS" --wrong-colour "$WRONG" "${extra[@]}"
