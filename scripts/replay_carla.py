@@ -208,8 +208,9 @@ LOOKS = {
     "plain": {"film": {"speed": 4, "delta": 0.05, "width": 1280, "height": 720}, "weather": {}},
     # Late-afternoon sun for long shadows; wet concrete with puddles, which reflects the halls and the
     # cars and breaks up the plain ground; light haze, which gives depth and softens the edge of the
-    # world beyond the halls. Twice the frame rate at the same 4x speed, so motion is smooth.
-    "cinematic": {"film": {"speed": 8, "delta": 0.025, "width": 1920, "height": 1080},
+    # world beyond the halls. Half the step and twice the frame rate (40 fps), so motion is smooth;
+    # the same every-4th-frame keeps it at 4x.
+    "cinematic": {"film": {"speed": 4, "delta": 0.025, "width": 1920, "height": 1080},
                   "weather": {"sun_altitude_angle": 18.0, "sun_azimuth_angle": 235.0, "cloudiness": 25.0,
                               "wetness": 70.0, "precipitation_deposits": 45.0, "fog_density": 8.0,
                               "fog_distance": 40.0, "fog_falloff": 1.0, "scattering_intensity": 1.0,
@@ -318,7 +319,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--start", type=float, default=0.0, help="seconds into the recording")
     ap.add_argument("--duration", type=float, default=0.0, help="seconds to film (0 = to the end)")
     ap.add_argument("--speed", type=int, default=None,
-                    help="playback speed-up, by keeping every Nth frame (default 4; 8 with --look cinematic)")
+                    help="playback speed-up, by keeping every Nth frame (the film runs at 1/delta fps)")
     ap.add_argument("--side", choices=("right", "left"), default="right",
                     help="which side of the road, seen in the direction of travel, to film from; "
                          "in Town05 a camera left of the yard lane, looking west, segfaults the "
@@ -328,7 +329,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--width", type=int, default=None, help="default 1280; 1920 with --look cinematic")
     ap.add_argument("--height", type=int, default=None, help="default 720; 1080 with --look cinematic")
     ap.add_argument("--look", choices=sorted(LOOKS), default="plain",
-                    help="cinematic: low sun, wet ground, light haze, 1080p, twice the frame rate. Only "
+                    help="cinematic: low sun, wet ground, light haze, 1080p, 40 fps. Only "
                          "the film changes: the recording, and what Gemini saw in the run, do not")
     ap.add_argument("--sun-altitude", type=float, default=45.0,
                     help="daylight for the replay; the recording does not restore the weather")
