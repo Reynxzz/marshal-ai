@@ -136,7 +136,7 @@ def look_at(camera: Point, target: Point) -> tuple[float, float]:
             math.degrees(math.atan2(dy, dx)))
 
 
-def side_pose(points: list[Point], fov_deg: float = 90.0, side: str = "right"
+def side_pose(points: list[Point], fov_deg: float = 90.0, side: str = "right", low: bool = False
               ) -> tuple[Point, float, float]:
     """A still camera beside a stretch of road, a little ahead, far enough back to fit it all.
 
@@ -154,6 +154,11 @@ def side_pose(points: list[Point], fov_deg: float = 90.0, side: str = "right"
     back = span / 2 / math.tan(math.radians(fov_deg) / 2) + 6.0
     ahead = span * 0.25
     up = 8.0 + 0.3 * back  # over the medians' fences, and the horizon (the city) low in the frame
+    if low:
+        # as a person filming from beside the road would: closer, at a few metres, the buildings
+        # behind the car in frame and less of the empty ground in front of it
+        back = span / 2 / math.tan(math.radians(fov_deg) / 2) + 2.0
+        up = 2.2 + 0.12 * back
     sign = 1.0 if side == "right" else -1.0
     # right of travel is (uy, -ux) in CARLA's left-handed x/y
     location = (cx + sign * uy * back + ux * ahead, cy - sign * ux * back + uy * ahead, cz + up)
@@ -205,7 +210,8 @@ DRESSING_ROLE = "marshal-dressing"  # scripts/dress_plant.py tags the plant's sc
 # How the film looks. The replay's own weather and camera only: the recording is not changed, so a
 # film can be made again in either look.
 LOOKS = {
-    "plain": {"film": {"speed": 4, "delta": 0.05, "width": 1280, "height": 720}, "weather": {}},
+    "plain": {"film": {"speed": 4, "delta": 0.05, "width": 1280, "height": 720}, "weather": {},
+              "camera": {"fov": 90, "low": False}},
     # Late-afternoon sun for long shadows; wet concrete with puddles, which reflects the halls and the
     # cars and breaks up the plain ground; light haze, which gives depth and softens the edge of the
     # world beyond the halls. Half the step and twice the frame rate (40 fps), so motion is smooth;
@@ -214,7 +220,10 @@ LOOKS = {
                   "weather": {"sun_altitude_angle": 18.0, "sun_azimuth_angle": 235.0, "cloudiness": 25.0,
                               "wetness": 70.0, "precipitation_deposits": 45.0, "fog_density": 8.0,
                               "fog_distance": 40.0, "fog_falloff": 1.0, "scattering_intensity": 1.0,
-                              "mie_scattering_scale": 0.03}},
+                              "mie_scattering_scale": 0.03},
+                  # a longer lens, lower and closer (side_pose low); motion blur off, as the step is
+                  # short enough for smooth motion and blur smears the labelled zones
+                  "camera": {"fov": 62, "low": True, "attributes": {"motion_blur_intensity": 0.0}}},
 }
 
 
@@ -226,7 +235,7 @@ def purge_dressing(world) -> int:
     filmings 155 dressing actors had built up, some drifted onto the yard slots.
 
     The plant world's factory halls (static meshes) are left: the replayer cannot place them (see
-    drop_stranded_meshes), so the ones place_halls put in the live world are the ones filmed.
+    drop_stranded_meshes), so the ones place_meshes puts in the live world are the ones filmed.
     """
     tagged = [a for a in world.get_actors()
               if a.attributes.get("role_name") == DRESSING_ROLE and a.type_id != "static.prop.mesh"]
@@ -246,8 +255,8 @@ def drop_stranded_meshes(world) -> int:
     return len(stranded)
 
 
-def place_halls(world) -> int:
-    """The halls, in the live world, where dress_plant.py put them for the run: the replay's own copies
+def place_meshes(world) -> int:
+    """The halls and ground slabs, in the live world, where dress_plant.py put them for the run: the replay's own copies
     are stranded, and loading the plant world for the replay rebuilt it empty. Once per world: the
     second pass finds them still there (purge_dressing leaves them)."""
     # on the ground: the stranded copies just destroyed are still listed until the next tick
@@ -256,7 +265,7 @@ def place_halls(world) -> int:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     import dress_plant
     d = dress_plant.Dresser(world)
-    dress_plant.plant_halls(d, world.get_map(), dress_plant.road_lengths())
+    dress_plant.plant_meshes(d, world.get_map(), dress_plant.road_lengths())
     return len(d.spawned)
 
 
@@ -267,7 +276,7 @@ def start_replay(client, world, path: str, args) -> None:
     client.replay_file(path, args.start, args.duration, 0, False)
     world.tick()
     if drop_stranded_meshes(world):
-        place_halls(world)
+        place_meshes(world)
     # Spawning a sensor while the replayer is still creating the recorded actors can segfault the
     # server, so let it settle first. Both passes do the same, so their ticks line up.
     for _ in range(SETTLE_TICKS):
@@ -385,7 +394,11 @@ def main(argv: list[str] | None = None) -> int:
         bp = world.get_blueprint_library().find("sensor.camera.rgb")
         bp.set_attribute("image_size_x", str(args.width))
         bp.set_attribute("image_size_y", str(args.height))
-        bp.set_attribute("fov", "90")
+        cam = LOOKS[args.look]["camera"]
+        bp.set_attribute("fov", str(cam["fov"]))
+        for name, value in cam.get("attributes", {}).items():
+            if bp.has_attribute(name):
+                bp.set_attribute(name, str(value))
         images: queue.Queue = queue.Queue()
         writer = ffmpeg_writer(out, args.width, args.height, 1.0 / args.delta)
         labeller = Labeller(args.width, args.height)
@@ -413,7 +426,8 @@ def main(argv: list[str] | None = None) -> int:
                     yaw = shot.yaw
                     (x, y, z), pitch = overview_pose(shot.points, yaw)
                 else:
-                    (x, y, z), pitch, yaw = side_pose(shot.points, side=args.side)
+                    (x, y, z), pitch, yaw = side_pose(shot.points, fov_deg=cam["fov"], side=args.side,
+                                                      low=cam["low"])
                 pose = carla.Transform(carla.Location(x=x, y=y, z=z),
                                        carla.Rotation(pitch=pitch, yaw=yaw))
                 # A fresh camera per shot: teleporting one a few tens of metres with set_transform

@@ -292,9 +292,10 @@ def dress_world(world: carla.World, m: carla.Map) -> Dresser:
         put("vehicle.lincoln.mkz_2020", 7, -5, float(s), PLANT_COLOURS[k % 5], up=0.3)
         for row, right in enumerate((-4.0, 4.0)):             # two rows across the 20 m inner apron
             put("vehicle.lincoln.mkz_2020", 7, 1, float(s), PLANT_COLOURS[(k + row + 1) % 5], up=0.3, right=right)
-    # the loading area: trucks along the north straight's inner apron
+    # the loading area: trucks along the north straight's inner apron, at its far edge, so the replay's
+    # low camera (which stands on this apron, up to 15 m from the road) is in front of them
     for s in range(8, int(lengths[5]) - 6, 13):
-        put("vehicle.carlamotors.european_hgv", 5, 1, float(s), up=0.3, right=4.0)
+        put("vehicle.carlamotors.european_hgv", 5, 1, float(s), up=0.3, right=8.0)
     # the middle: the storage compound, rows of finished cars
     for k, s in enumerate(range(10, int(lengths[9]) - 6, 9)):
         for row, (lane, right) in enumerate(((1, -5.0), (1, 5.0), (-1, -5.0), (-1, 5.0))):   # two rows a side
@@ -396,17 +397,63 @@ def buildings_world(d: "Dresser", m: carla.Map, lengths: dict) -> None:
     above the origin and then moves it into place; a static mesh cannot be moved, so a replayed hall
     stays up there and every actor spawned after it collides and is not created, the filmed car
     included. Spawned last, the halls block nothing in the dressing, and replay_carla.py removes the
-    stranded copies before the cars appear and places the halls again itself."""
+    stranded copies before the cars appear and places them again itself. The ground slabs and
+    bollards are static meshes too and come with them (plant_meshes)."""
     for road in (2, 4, 6, 8):
         for ahead in (-9.0, 9.0):
             loc, yaw = at(m, road, -7, lengths[road] / 2, right=-12.0, ahead=ahead, up=0.3)
             if loc is not None:
                 d.put("vehicle.carlamotors.european_hgv", loc, yaw)
+    plant_meshes(d, m, lengths)
+
+
+# A 48 x 20 m concrete floor slab from CARLA's construction site, 0.4 m thick, its pivot at its middle:
+# stained, patched, jointed concrete where the generated world has one plain colour. Laid along the
+# aprons, the paving beyond the fence and the inner apron, never on a lane a car drives or parks on.
+SLAB = "/Game/Carla/Static/Building/ConstructionSite/SM_concreteFloorT5_02"
+SLAB_LEN = 48.0
+# (lane, right of that lane's middle): the outer apron, shifted out so its inner edge stops at the lot
+# row (lane -5) and clear of the walkway; beyond the fence; the inner apron
+SLAB_ROWS = [(-6, 1.0), (-7, -10.0), (-7, 10.0), (1, 1.0)]   # lane 1 faces back: right is away from the road
+BOLLARD = "/Game/Carla/Static/Pole/SM_Lights/SM_Bollard01"
+
+
+def plant_meshes(d: "Dresser", m: carla.Map, lengths: dict) -> None:
+    """Every static mesh of the dressing: replay_carla.py places them itself, as the replayer cannot."""
     plant_halls(d, m, lengths)
+    plant_ground(d, m, lengths)
+
+
+def plant_ground(d: "Dresser", m: carla.Map, lengths: dict) -> None:
+    """Concrete slabs over the open ground, and bollards along the walkway at the gate and the bays.
+    The slab's top sits 0.2 m above the lane it is laid on, level with the raised walkways."""
+    for road in (1, 3, 5, 7):
+        n = max(1, round(lengths[road] / SLAB_LEN))
+        for i in range(n):
+            s = lengths[road] * (i + 0.5) / n
+            for lane, right in SLAB_ROWS:
+                loc, yaw = at(m, road, lane, s, right=right, up=0.0)
+                if loc is not None:
+                    d.put_mesh(SLAB, loc, yaw, (0.0, 0.0))
+    for road in (2, 4, 6, 8):                         # the bends: one slab on the tangent, outer apron
+        loc, yaw = at(m, road, -6, lengths[road] / 2, right=1.0, up=0.0)
+        if loc is not None:
+            d.put_mesh(SLAB, loc, yaw, (0.0, 0.0))
+    for s in (SLAB_LEN / 2, lengths[9] / 2, lengths[9] - SLAB_LEN / 2):   # the compound
+        for lane in (1, -1):
+            for right in (-8.0, 8.0):
+                loc, yaw = at(m, 9, lane, s, right=right, up=0.0)
+                if loc is not None:
+                    d.put_mesh(SLAB, loc, yaw, (0.0, 0.0))
+    for road, s0, s1 in ((1, 22.0, 42.0), (3, 2.0, 56.0)):   # the gate, the bays: outer edge of the walkway
+        for s in range(int(s0), int(s1), 3):
+            loc, yaw = at(m, road, -4, float(s), right=1.3, up=0.2)
+            if loc is not None:
+                d.put_mesh(BOLLARD, loc, yaw, (0.0, 0.0))
 
 
 def plant_halls(d: "Dresser", m: carla.Map, lengths: dict) -> None:
-    """The halls alone: replay_carla.py places them itself, as the replayer cannot."""
+    """The halls alone."""
     for road, s, hall in HALL_SITES:
         loc, yaw = at(m, road, -7, s, up=0.2)
         if loc is not None:
