@@ -113,8 +113,15 @@ def set_sun(rt, altitude: float, attempts: int = 10) -> float:
     raise RuntimeError(f"sun altitude did not apply: asked {altitude}, server reports {applied}")
 
 
-def clear_records(rt, vins: list[str]) -> None:
-    """Remove this run's VINs from the store, so no wait is ended by a previous run's record."""
+def clear_records(rt, vins: list[str], prefix: str | None = None) -> None:
+    """Remove this run's VINs from the store, so no wait is ended by a previous run's record.
+
+    And every other car with the run's prefix: the store is shared, and a VIN-P6 left by an earlier
+    six-car run was in the yard state Gemini was shown, so its re-plan for the late truck moved a
+    car that did not exist here and the plan check rejected the whole plan.
+    """
+    if prefix:
+        vins = sorted(set(vins) | {c.vin for c in rt.store.list(Car) if c.vin.startswith(prefix)})
     for vin in vins:
         for model, key in ((Car, vin), (CarReport, vin), (InspectionResult, f"{vin}:visual"),
                            (InspectionResult, f"{vin}:functional")):
@@ -268,7 +275,7 @@ async def run(args) -> dict:
         raise RuntimeError(f"expected GeminiLLM, got {type(rt.llm).__name__}")
 
     vins = [f"{args.prefix}{i + 1}" for i in range(args.cars)]
-    clear_records(rt, vins)
+    clear_records(rt, vins, args.prefix)
 
     now = datetime.now(timezone.utc)
     trucks = []
@@ -327,7 +334,10 @@ async def run(args) -> dict:
                 next_beat = time.monotonic() + 30
             await app.tick()                    # release rules and yard exceptions
             for d in app.yard.decisions[said:]:
-                if d.get("summary"):
+                if d.get("status") == "rejected_plan":
+                    note(rt.driving.world, "Gemini's plan rejected by the plan check: "
+                                           + "; ".join(d.get("errors", [])), "rules")
+                elif d.get("summary"):
                     note(rt.driving.world, f"{d['summary']} {d.get('reasoning', '')}".strip(), "gemini")
                 said += 1
             if not args.no_supervisor:
