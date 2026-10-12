@@ -202,6 +202,21 @@ def next_image(images: queue.Queue, frame: int):
 DRESSING_ROLE = "marshal-dressing"  # scripts/dress_plant.py tags the plant's scenery with it
 
 
+# How the film looks. The replay's own weather and camera only: the recording is not changed, so a
+# film can be made again in either look.
+LOOKS = {
+    "plain": {"film": {"speed": 4, "delta": 0.05, "width": 1280, "height": 720}, "weather": {}},
+    # Late-afternoon sun for long shadows; wet concrete with puddles, which reflects the halls and the
+    # cars and breaks up the plain ground; light haze, which gives depth and softens the edge of the
+    # world beyond the halls. Twice the frame rate at the same 4x speed, so motion is smooth.
+    "cinematic": {"film": {"speed": 8, "delta": 0.025, "width": 1920, "height": 1080},
+                  "weather": {"sun_altitude_angle": 18.0, "sun_azimuth_angle": 235.0, "cloudiness": 25.0,
+                              "wetness": 70.0, "precipitation_deposits": 45.0, "fog_density": 8.0,
+                              "fog_distance": 40.0, "fog_falloff": 1.0, "scattering_intensity": 1.0,
+                              "mie_scattering_scale": 0.03}},
+}
+
+
 def purge_dressing(world) -> int:
     """Remove the plant dressing from the live world.
 
@@ -302,14 +317,19 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--out", default=None, help="MP4 path (default /tmp/marshal-replays/NAME.mp4)")
     ap.add_argument("--start", type=float, default=0.0, help="seconds into the recording")
     ap.add_argument("--duration", type=float, default=0.0, help="seconds to film (0 = to the end)")
-    ap.add_argument("--speed", type=int, default=4, help="playback speed-up, by keeping every Nth frame")
+    ap.add_argument("--speed", type=int, default=None,
+                    help="playback speed-up, by keeping every Nth frame (default 4; 8 with --look cinematic)")
     ap.add_argument("--side", choices=("right", "left"), default="right",
                     help="which side of the road, seen in the direction of travel, to film from; "
                          "in Town05 a camera left of the yard lane, looking west, segfaults the "
                          "server, so keep the default there")
-    ap.add_argument("--delta", type=float, default=0.05, help="replay step, seconds")
-    ap.add_argument("--width", type=int, default=1280)
-    ap.add_argument("--height", type=int, default=720)
+    ap.add_argument("--delta", type=float, default=None,
+                    help="replay step, seconds (default 0.05; 0.025 with --look cinematic)")
+    ap.add_argument("--width", type=int, default=None, help="default 1280; 1920 with --look cinematic")
+    ap.add_argument("--height", type=int, default=None, help="default 720; 1080 with --look cinematic")
+    ap.add_argument("--look", choices=sorted(LOOKS), default="plain",
+                    help="cinematic: low sun, wet ground, light haze, 1080p, twice the frame rate. Only "
+                         "the film changes: the recording, and what Gemini saw in the run, do not")
     ap.add_argument("--sun-altitude", type=float, default=45.0,
                     help="daylight for the replay; the recording does not restore the weather")
     ap.add_argument("--title", default=None, help="label for the film (default: from the recording name)")
@@ -317,6 +337,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--host", default="localhost")
     ap.add_argument("--port", type=int, default=2000)
     args = ap.parse_args(argv)
+    for name, value in LOOKS[args.look]["film"].items():
+        if getattr(args, name) is None:
+            setattr(args, name, value)
     if args.speed < 1 or args.delta <= 0:
         raise SystemExit("speed must be >= 1 and delta > 0")
 
@@ -346,6 +369,8 @@ def main(argv: list[str] | None = None) -> int:
         world.apply_settings(settings)
         weather = world.get_weather()
         weather.sun_altitude_angle = args.sun_altitude
+        for name, value in LOOKS[args.look]["weather"].items():
+            setattr(weather, name, value)
         world.set_weather(weather)
 
         shots = scout(client, world, path, ticks, args)
