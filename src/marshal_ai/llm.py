@@ -66,6 +66,10 @@ GATE_THINKING = 512
 # a person was in view, no high-risk option - and the desk's rules are enforced in code whatever the
 # model says. Capped at 512 it took 7.0 s. Without thinking it first wrote a thinner situation line
 # that left the people out (2 of 16), so the field now asks for them (16 of 16, against 12 before).
+# Tasks whose single image needs fine detail: the track's stacked lamp crops (flows/functional.py
+# pair_image), where a lit strip and a dark lens are a few pixels apart at the default resolution.
+TASK_SINGLE_IMAGE_RESOLUTION = {"track.step": "high"}
+
 TASK_THINKING_BUDGET = {"assist.locate": 0, "assist.assess": 0, "visual.defects": GATE_THINKING,
                         "visual.variant": GATE_THINKING, "visual.verify": GATE_THINKING}
 
@@ -129,6 +133,10 @@ class GeminiLLM:
                 raise LLMError(f"{task}: media {m.label!r} has no data or uri")
         parts.append(types.Part.from_text(text=prompt))
         budget = TASK_THINKING_BUDGET.get(task, self.thinking_budget)
+        resolution = self.media_resolution if media else None
+        if resolution is None and media and len(media) == 1:
+            # Vertex allows HIGH for a single image only (400 INVALID_ARGUMENT otherwise)
+            resolution = TASK_SINGLE_IMAGE_RESOLUTION.get(task)
         config = types.GenerateContentConfig(
             temperature=self.temperature,
             seed=self.seed,
@@ -136,8 +144,8 @@ class GeminiLLM:
             response_json_schema=schema.model_json_schema() if schema is not None else None,
             system_instruction=system or None,
             thinking_config=None if budget is None else types.ThinkingConfig(thinking_budget=budget),
-            media_resolution=(getattr(types.MediaResolution, f"MEDIA_RESOLUTION_{self.media_resolution.upper()}")
-                              if self.media_resolution and media else None),
+            media_resolution=(getattr(types.MediaResolution, f"MEDIA_RESOLUTION_{resolution.upper()}")
+                              if resolution else None),
         )
         response = self.client.models.generate_content(
             model=self.model,

@@ -54,4 +54,5 @@ python3 scripts/ensure_carla_map.py --map "${MARSHAL_CARLA_MAP:-Town05}" --wait-
 start_recording day4
 
 # MARSHAL_DAY4_REWORK=1 goes on through flow 5: repair, re-inspection, report PASS
-python3 scripts/demo_carla_day4.py --steps "$STEPS" ${MARSHAL_DAY4_REWORK:+--rework}
+python3 scripts/demo_carla_day4.py --steps "$STEPS" ${MARSHAL_DAY4_REWORK:+--rework} \
+  ${MARSHAL_DAY4_SUN:+--sun-altitude "$MARSHAL_DAY4_SUN"}
