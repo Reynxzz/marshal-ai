@@ -462,6 +462,7 @@ class CarlaDrivingSystem:
             else:
                 self.world.wait_for_tick(seconds=10.0)
             agent = BehaviorAgent(actor, behavior=self.behavior)
+            self._ignore_parked(agent)
         except Exception:
             actor.destroy()
             raise
@@ -681,6 +682,35 @@ class CarlaDrivingSystem:
             if distance < best_d:
                 best, best_d = actor, distance
         return best, best_d
+
+    def _ignore_parked(self, agent) -> None:
+        """Let the agent drive past cars parked off the driving lanes.
+
+        BehaviorAgent decides whether a vehicle is in its way by the driving-lane waypoint nearest
+        to it, so a car pulled over into a yard slot reads as a car standing in the lane beside the
+        slot. On the plant world the third car of a run stopped at the yard entrance behind the
+        second, parked in Y2, and every car after it queued there until the run timed out. A vehicle
+        whose own position is on no driving lane (a slot, a bay, the lot rows) is not traffic.
+        """
+        detect = getattr(agent, "_vehicle_obstacle_detected", None)
+        if detect is None:
+            return
+
+        maps: list = []                  # fetched once, on first use: get_map() is slow
+
+        def in_a_driving_lane(vehicle) -> bool:
+            if not maps:
+                maps.append(self.world.get_map())
+            wp = maps[0].get_waypoint(vehicle.get_location(), project_to_road=False,
+                                      lane_type=carla.LaneType.Any)
+            return wp is not None and wp.lane_type == carla.LaneType.Driving
+
+        def detect_traffic(vehicle_list=None, *args, **kwargs):
+            if vehicle_list is not None:
+                vehicle_list = [veh for veh in vehicle_list if in_a_driving_lane(veh)]
+            return detect(vehicle_list, *args, **kwargs)
+
+        agent._vehicle_obstacle_detected = detect_traffic
 
     def _is_plant_car(self, actor) -> bool:
         """Whether an actor is one of the plant's cars that is itself on its way somewhere.
