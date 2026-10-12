@@ -201,6 +201,7 @@ CREEP_MAX_S = 30.0                 # give up creeping after this long, rather th
 # the spot, then steers onto it. 12 m is enough to move one lane over at walking pace.
 PULL_OVER_RUN_M = 12.0
 PULL_OVER_AIM_M = 4.0              # steer for this far beyond the spot, along it, to arrive straight
+SETTLE_MAX_M = 3.0                 # a car this close to its slot or bay is squared up on it (_square_up)
 
 # Every sensor Marshal spawns carries this role_name, so leftovers can be found and cleared. Runs used
 # to leave cameras alive in the world - 28 built up in one session, each rendering every frame on the
@@ -613,6 +614,8 @@ class CarlaDrivingSystem:
             v.actor.apply_control(carla.VehicleControl(throttle=0.0, brake=1.0))
             if v.creep_s > CREEP_MAX_S:
                 log.warning("%s stopped %.1f m short of %s", v.vin, along, v.remaining[0])
+            elif pulling_over:
+                self._square_up(v, point)
             return True
         obstacle, distance = self._obstacle_ahead(v)
         if obstacle is not None and distance < along + 3.0:
@@ -638,6 +641,22 @@ class CarlaDrivingSystem:
             steer=max(-limit, min(limit, 1.5 * error)),
             brake=0.0))
         return False
+
+    def _square_up(self, v: _Vehicle, point: str) -> None:
+        """Square a car up in its slot or bay once it has crept onto it.
+
+        A real plant driving system parks precisely; this stand-in steers BehaviorAgent's car off
+        the lane by hand and arrives a little angled. Even at 17 degrees a car in yard slot Y2 kept
+        its tail in the lane beside, and the next car creeping to Y4 stopped against it, 15 m short.
+        So the last metre or two is set, not driven: the car is placed on the spot, straight.
+        """
+        spot = self.transform(point)
+        here = v.actor.get_transform()
+        if here.location.distance(spot.location) > SETTLE_MAX_M:
+            return
+        v.actor.set_transform(carla.Transform(
+            carla.Location(spot.location.x, spot.location.y, here.location.z), spot.rotation))
+        v.actor.set_target_velocity(carla.Vector3D(0.0, 0.0, 0.0))
 
     def position_xy(self, vin: str) -> tuple[float, float] | None:
         """Where a car is right now, in the same frame as reference_xy."""

@@ -69,11 +69,12 @@ Report what you actually see. Do not assume the car behaved correctly."""
 
 PAIR_SYSTEM = """You compare two crops of the same test-track step, one above the other in a single
 image. The TOP crop, labelled REFERENCE, is from a car that passed this step: the expected result is
-present in it. The BOTTOM crop, labelled UNDER TEST, is the car being checked. Look at the lamps the
-step names in both, side by side. If they show the same light as in the reference - the same glowing
-strips or bulbs, about as bright - the result is present. If a lamp named glows in the reference but
-is dark, grey or clearly dimmer under test, it is not. Report what you see in each crop. Do not assume
-the car behaved correctly."""
+present in it. The BOTTOM crop, labelled UNDER TEST, is the car being checked. Look only at the lamps
+the step names, in both, side by side; other lights (fog, bumper or grille lights) and differences in
+framing, distance or angle do not count. If the lamps named show the same light as in the reference -
+the same glowing strips or bulbs, about as bright - the result is present. If a lamp named glows in the
+reference but is dark, grey or clearly dimmer under test, it is not. Report what you see in each crop.
+Do not assume the car behaved correctly."""
 
 
 # The front of the car in a track camera frame, as fractions of its width and height: the camera

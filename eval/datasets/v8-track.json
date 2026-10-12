@@ -101,6 +101,17 @@
    "expect_seen": false,
    "note": "v1's dusk case (Town05).",
    "reference": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v1/track/VIN-OK/step1_headlights.jpg"
+  },
+  {
+   "id": "healthy-p3-vs-p1-closer",
+   "step": 1,
+   "frame": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v8-track/run3/VIN-P3.jpg",
+   "telemetry": {
+    "headlights": "ON"
+   },
+   "reference": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v8-track/run3/VIN-P1.jpg",
+   "expect_seen": true,
+   "note": "Five-car run: P3 stopped closer to the camera, so its crop is framed differently; headlights lit, failed for the lower bumper lights."
   }
  ],
  "assist": []
