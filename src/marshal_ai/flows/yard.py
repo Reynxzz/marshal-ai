@@ -54,6 +54,11 @@ Cars for the next truck belong in slots nearest the loading bay. A do_not_ship c
 loading bay. Explain the trade-off briefly. Plan the fewest moves that solve the exception."""
 
 
+def target_slot(a: YardAction) -> str | None:
+    """The yard slot a go action ends in, if it ends in one."""
+    return next((w for w in reversed(a.waypoints) if w.startswith("yard.Y")), None)
+
+
 class YardTraffic:
     def __init__(self, app: "MarshalApp"):
         self.app = app
@@ -62,6 +67,8 @@ class YardTraffic:
         self.handled: set[str] = set()
         self.decisions: list[dict] = []           # every exception decision, with its reason
         self.slot_missions: dict[str, str] = {}   # mission id -> slot
+        # moves waiting for a slot's current car to drive off it: occupant vin -> actions
+        self.deferred: dict[str, list[YardAction]] = {}
 
     # ---------- routine rules (no model call) ----------
 
@@ -190,6 +197,8 @@ class YardTraffic:
         if event.location.startswith("yard.Y"):
             update_car(self.rt, event.vin, state=CarState.YARD, location=event.location,
                        mission_id=None, yard_at=car.yard_at or self.rt.clock())
+            for action in self.deferred.pop(event.vin, []):
+                await self.go(action)
         elif event.location == "buffer_zone_b":
             update_car(self.rt, event.vin, location=event.location, mission_id=None)
         elif event.location == "inspection_gate":
@@ -275,6 +284,15 @@ class YardTraffic:
                         errors.append(f"{a.vin}: unknown map point {wp}")
                 if (car.do_not_ship or a.do_not_ship) and "loading_bay" in a.waypoints:
                     errors.append(f"{a.vin}: do-not-ship car cannot go to loading_bay")
+                # The rule send_to_slot keeps, kept for plans too: a shipping slot needs a PASS report.
+                # Asked about a backlog at the line end, Gemini planned "move all 6 cars from the line
+                # end to available yard slots" - past the gate and the track - and a supervisor
+                # approving in a hurry would have shipped six uninspected cars.
+                report = self.rt.store.get(CarReport, a.vin)
+                passed = report is not None and report.verdict == Verdict.PASS
+                if target_slot(a) and not passed and not (car.do_not_ship or a.do_not_ship):
+                    errors.append(f"{a.vin}: has no PASS report, so it cannot go to a shipping slot "
+                                  f"({target_slot(a)}); hold it, or flag it do_not_ship")
         return errors
 
     async def handle_exception(self, kind: str, details: dict, key: str | None = None) -> dict:
@@ -308,21 +326,50 @@ class YardTraffic:
         self.decisions.append(decision)
         return decision
 
+    async def go(self, a: YardAction) -> None:
+        mission = MissionGo(mission_id=self.rt.next_id("M", 4), vin=a.vin,
+                            waypoints=a.waypoints, max_speed_kmh=YARD_SPEED_KMH)
+        await self.rt.missions.send(mission)
+        changes = {"mission_id": mission.mission_id}
+        slot = target_slot(a)
+        if slot:
+            changes["yard_slot"] = slot
+        update_car(self.rt, a.vin, **changes)
+
+    def blocked_by(self, plan: YardPlan) -> dict[str, str]:
+        """Moves into a slot whose car this same plan moves out: mover vin -> that car's vin.
+
+        A re-slot is often a swap - the next truck's cars into the slots nearest the bay, the late
+        truck's cars out of them. Sent at once, a car drives to a slot that is still taken and stops
+        short of it, in the yard lane, while the car it is waiting for has to get past. So it waits
+        for that car to arrive at its own new slot first. Every move in a cycle (A to B's slot, B to
+        A's) is blocked; the first one goes anyway, to break it.
+        """
+        moving = {a.vin for a in plan.actions if a.action == "go"}
+        held_by = {c.yard_slot: c.vin for c in self.rt.store.list(Car)
+                   if c.yard_slot and c.state == CarState.YARD}
+        blocked = {}
+        for a in plan.actions:
+            slot = target_slot(a) if a.action == "go" else None
+            occupant = held_by.get(slot)
+            if occupant and occupant != a.vin and occupant in moving:
+                blocked[a.vin] = occupant
+        if blocked and len(blocked) == len(moving):
+            blocked.pop(next(a.vin for a in plan.actions if a.vin in blocked))
+        return blocked
+
     async def execute(self, plan: YardPlan) -> list[str]:
         done = []
         if plan.release_interval_s:
             self.release_interval_s = plan.release_interval_s
+        blocked = self.blocked_by(plan)
         for a in plan.actions:
             try:
-                if a.action == "go":
-                    mission = MissionGo(mission_id=self.rt.next_id("M", 4), vin=a.vin,
-                                        waypoints=a.waypoints, max_speed_kmh=YARD_SPEED_KMH)
-                    await self.rt.missions.send(mission)
-                    changes = {"mission_id": mission.mission_id}
-                    slot = next((w for w in reversed(a.waypoints) if w.startswith("yard.Y")), None)
-                    if slot:
-                        changes["yard_slot"] = slot
-                    update_car(self.rt, a.vin, **changes)
+                if a.action == "go" and a.vin in blocked:
+                    self.deferred.setdefault(blocked[a.vin], []).append(a)
+                    log.info("yard: %s waits for %s to leave %s", a.vin, blocked[a.vin], target_slot(a))
+                elif a.action == "go":
+                    await self.go(a)
                 elif a.action == "hold":
                     await self.rt.missions.send(MissionHold(vin=a.vin, duration_s=a.duration_s,
                                                             reason=a.reason))

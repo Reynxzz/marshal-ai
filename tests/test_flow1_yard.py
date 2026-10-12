@@ -159,3 +159,31 @@ async def test_a_backlog_for_slots_is_raised_once_as_the_line_outpacing_the_yard
     for _ in range(3):
         await app.yard.tick()
     assert not app.yard.waiting_for_slot() and "line_outpacing_yard" not in app.yard.handled
+
+
+async def test_a_re_slot_into_a_taken_slot_waits_for_that_car_to_move_out(plant):
+    from marshal_ai.flows.yard import YardAction, YardPlan
+    app = plant(["VIN-214", "VIN-231"])
+    near = app.yard.slots_by_distance()
+    await park(app, "VIN-214", near[0])
+    await park(app, "VIN-231", near[-1])
+    plan = YardPlan(summary="swap", reasoning="next truck first", actions=[
+        YardAction(vin="VIN-231", action="go", waypoints=[near[0]], reason="next truck"),
+        YardAction(vin="VIN-214", action="go", waypoints=[near[2]], reason="late truck")])
+    await app.yard.execute(plan)
+    # VIN-214 leaves first; VIN-231 is held until near[0] is free
+    assert car(app, "VIN-214").mission_id is not None
+    assert car(app, "VIN-231").mission_id is None and car(app, "VIN-231").yard_slot == near[-1]
+    await app.run_for(120)
+    assert car(app, "VIN-214").location == near[2]
+    assert car(app, "VIN-231").location == near[0]
+
+
+async def test_a_plan_sending_uninspected_cars_to_shipping_slots_is_rejected(plant):
+    from marshal_ai.flows.yard import YardAction, YardPlan
+    app = plant(["VIN-214"])
+    slot = app.yard.slots_by_distance()[0]
+    plan = YardPlan(summary="clear the line", reasoning="backlog", actions=[
+        YardAction(vin="VIN-214", action="go", waypoints=[slot], reason="make room")])
+    errors = app.yard.check_plan(plan)
+    assert errors and "PASS report" in errors[0]
