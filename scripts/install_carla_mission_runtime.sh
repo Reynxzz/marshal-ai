@@ -25,7 +25,13 @@ sudo python3 -m pip install \
   'typing-inspection==0.4.4' \
   'typing-extensions==4.16.0' \
   'PyYAML==6.0.2' \
-  'pillow==10.4.0'                                # labels in the filmed replays (scripts/film_labels.py)
+  'pillow==10.4.0' \
+  'python-dotenv' \
+  'imageio-ffmpeg' \
+  google-genai google-cloud-firestore google-cloud-storage google-cloud-bigquery google-cloud-pubsub
+# pillow: labels in the filmed replays (scripts/film_labels.py). python-dotenv: marshal_ai.config,
+# which scripts/check_carla.py imports, so without it every run takes CARLA for dead and restarts it.
+# imageio-ffmpeg: the replay films. The Google SDKs: Gemini and the shared store; the AMI has none.
 sudo chown -R root:root "$INSTALL_DIR"
 
 PYTHONPATH="$INSTALL_DIR/vendor:/opt/carla/PythonAPI/carla" python3 - <<'PY'
