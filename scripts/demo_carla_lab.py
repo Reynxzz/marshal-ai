@@ -57,6 +57,9 @@ def parser() -> argparse.ArgumentParser:
                          "server: every compiled run puts the world in synchronous "
                          "mode and ticks it, so concurrent runs corrupt each other. "
                          "The design's 8-way parallelism needs one server per slot.")
+    ap.add_argument("--release", default=None,
+                    help="then run the whole library against this driving system release "
+                         "(demo scene 5); it is blocked if any test fails")
     ap.add_argument("--engineer", default="eng-demo")
     return ap
 
@@ -73,7 +76,7 @@ def run(args: argparse.Namespace) -> dict:
     # compiled scenario subprocess, so the driving system stays out of the way.
     settings = Settings(driving="fake")
     rt = build_runtime(settings)
-    if not rt.map.carla_map or not rt.map.carla_map.endswith("Town05"):
+    if not rt.map.carla_map or not rt.map.carla_map.endswith(("Town05", "Town05_Opt", "OpenDriveMap")):
         raise RuntimeError(f"lab needs a Town05 plant map, got {rt.map.carla_map!r}")
 
     runner = CarlaRunner(rt.map, host=args.host, port=args.port, timeout_s=args.run_timeout)
@@ -167,6 +170,18 @@ def run(args: argparse.Namespace) -> dict:
         manifest["adversarial"] = summary
         manifest["artifacts"] = sorted(p.name for p in out.iterdir())
 
+    # ---- scene 5: the release gate over the whole library -------------------
+    if args.release:
+        gate = app.release_gate
+        emit({"type": "lab.release.start", "release": args.release,
+              "suite": [s.id for s in gate.suite()], "history": getattr(rt.history, "name", "none")})
+        report = gate.evaluate(args.release, runner, parallel=args.batch)
+        emit({"type": "lab.release.done", "summary": report.summary(), "blocked": report.blocked,
+              "failed": report.failed, "previous_release": report.previous_release,
+              "newly_failing": report.newly_failing, "newly_passing": report.newly_passing})
+        manifest["release"] = {**report.model_dump(mode="json"), "summary": report.summary(),
+                               "blocked": report.blocked}
+
     library = [s.id for s in rt.store.list(Scenario)]
     manifest["library"] = library
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True, default=str))
@@ -187,4 +202,8 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    # Skips interpreter shutdown, where the CARLA client intermittently aborts; see
+    # exit_without_teardown.
+    from marshal_ai.carla_connection import exit_without_teardown
+
+    exit_without_teardown(main())

@@ -203,6 +203,8 @@ def main():
                 agent.set_destination(transform(targets[0]).location)
             ego.apply_control(agent.run_step())
 
+        if contact:      # what was touched: a failed no_contact is unreadable without it
+            events.append("contact with " + ", ".join(sorted(set(contact))))
         metrics = {
             "no_contact": 0.0 if contact else 1.0,
             "reached_goal": 1.0 if reached else 0.0,

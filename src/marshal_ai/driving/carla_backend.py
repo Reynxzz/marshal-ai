@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import queue
 import threading
 from collections import deque
@@ -168,6 +169,7 @@ class _Vehicle:
     routine_done: bool = False
     step_left_s: float = 0.0
     stalled_s: float = 0.0                 # how long the agent has been stopped mid-mission
+    creep_s: float = 0.0                   # time spent creeping onto a precise stop; see _creep
     assists_raised: int = 0
     onboard: object | None = None          # forward camera on the car; see assist_clip()
     onboard_frames: object | None = None   # _FrameBuffer of its frames
@@ -178,6 +180,34 @@ class _Vehicle:
 # The options the driving system offers when it stops. The desk may only choose among these;
 # it never invents a path. "wait" first so a rule-bound desk always has a safe choice.
 ASSIST_OPTIONS = ["wait_for_removal", "pass_left_3kmh", "reroute_lane_c"]
+
+# Simulated seconds between frames for every Marshal camera (CARLA's sensor_tick). Measured on the
+# T4 with three cameras per car: at the default of rendering every tick, simulated time ran at 1.26x
+# real time with one car, 0.47x with three and 0.28x with five; at 0.2 s, 1.54x with three and 0.98x
+# with five, with no crash either way. Nothing needs more: a clip samples every 0.5 s, the indicator
+# changes side every 1.2 s, and a still is the newest frame.
+CAMERA_TICK_S = 0.2
+
+# Points where a car has to stop on the mark, because cameras are aimed at it. BehaviorAgent counts
+# itself as arrived once within about 3-4 m of a destination, which is fine for a yard slot and wrong
+# for the gate: the car stopped short, the rear camera ended up over its roof, the side camera caught
+# only its front half, and Gemini reported a "panel gap" at 0.9 on a car it could barely see. Scene 1
+# never showed it because it spawns the car on the mark.
+PRECISE_STOPS = {"inspection_gate"}
+STOP_TOLERANCE_M = 0.4
+CREEP_MAX_S = 30.0                 # give up creeping after this long, rather than wait forever
+# A pull_over point (plant_map.yaml) is off the driving lanes - a bay or yard slot on the shoulder -
+# and BehaviorAgent only routes on driving lanes. So the car is routed to the lane this far before
+# the spot, then steers onto it. 12 m is enough to move one lane over at walking pace.
+PULL_OVER_RUN_M = 12.0
+PULL_OVER_AIM_M = 4.0              # steer for this far beyond the spot, along it, to arrive straight
+SETTLE_MAX_M = 3.0                 # a car this close to its slot or bay is squared up on it (_square_up)
+
+# Every sensor Marshal spawns carries this role_name, so leftovers can be found and cleared. Runs used
+# to leave cameras alive in the world - 28 built up in one session, each rendering every frame on the
+# GPU - and nothing could tell Marshal's apart from the viewer's or a replay's. The lab already tags
+# its actors the same way ("marshal-lab").
+SENSOR_ROLE = "marshal-sensor"
 
 STEP_LIGHTS = {
     "headlights": "LowBeam", "indicators": "LeftBlinker", "brake_lights": "Brake", "reverse": "Reverse",
@@ -193,6 +223,21 @@ STEP_LIGHTS = {
 INDICATOR_SIDES = ("LeftBlinker", "RightBlinker")
 
 
+def _destroy_quietly(actor) -> None:
+    """Destroy an actor that may already be gone, and that this process may not have created.
+
+    No stop() first: these are found in the world, not held, and stopping a sensor this process
+    never subscribed to only logs "attempting to unsubscribe from stream but sensor wasn't
+    listening" - thirteen of them at the start of a run. Sensors this process does hold are stopped
+    by release_car_sensors and close_cameras before they come here.
+    """
+    try:
+        actor.destroy()
+    except Exception as exc:
+        log.warning("could not destroy %s %s: %s", getattr(actor, "type_id", "actor"),
+                    getattr(actor, "id", "?"), exc)
+
+
 class CarlaDrivingSystem:
     def __init__(self, plant_map: PlantMap, host: str = "localhost", port: int = 2000,
                  fixed_delta_s: float = 0.05, behavior: str = "cautious",
@@ -200,7 +245,8 @@ class CarlaDrivingSystem:
                  timeout_s: float = 20.0, expected_version: str = "0.9.16",
                  auto_assist: bool = True, blocked_after_s: float = 5.0,
                  blocked_speed_kmh: float = 0.6, obstacle_range_m: float = 14.0,
-                 assist_options: list[str] | None = None):
+                 assist_options: list[str] | None = None, sweep_stale_sensors: bool = True,
+                 camera_tick_s: float | None = CAMERA_TICK_S):
         if carla is None:
             raise RuntimeError(
                 "CARLA client not available. Install the 0.9.16 wheel bundled with the server "
@@ -238,11 +284,16 @@ class CarlaDrivingSystem:
         # pose key -> (camera, frame queue, callback); see capture()/close_cameras()
         self._cameras: dict[tuple, tuple] = {}
         self.frame_timeout_s = 1.0            # how long to wait for one camera frame
+        # Simulated seconds between frames for every Marshal camera; None renders on every tick.
+        # See _camera_blueprint.
+        self.camera_tick_s = camera_tick_s
         self._simulated_s = 0.0               # see realtime_ratio()
         self._sim_started_at: float | None = None
         # Replaced by the runtime when MARSHAL_ARTIFACTS=gcs, so the gs:// URI a record
         # carries points at the actual photo behind the verdict.
         self.artifacts: Artifacts = NoArtifacts()
+        if sweep_stale_sensors:
+            self.sweep_sensors()
 
     def transform(self, point: str):
         spec = self.map.points[point].carla
@@ -281,11 +332,7 @@ class CarlaDrivingSystem:
                        window_s: float, frames: int, fov: float | None = None):
         """One camera bolted to the car, subscribed for the life of the car."""
         try:
-            bp = self.world.get_blueprint_library().find("sensor.camera.rgb")
-            bp.set_attribute("image_size_x", str(EVIDENCE_WIDTH))
-            bp.set_attribute("image_size_y", str(EVIDENCE_HEIGHT))
-            if fov is not None and bp.has_attribute("fov"):
-                bp.set_attribute("fov", str(fov))
+            bp = self._camera_blueprint(EVIDENCE_WIDTH, EVIDENCE_HEIGHT, fov)
             buffer = _FrameBuffer(window_s=window_s, max_frames=frames, encode=self._encode)
 
             def receive(image, into=buffer) -> None:
@@ -301,6 +348,99 @@ class CarlaDrivingSystem:
             log.warning("no camera at x=%s yaw=%s for %s: %s: %s",
                         x, yaw, v.vin, type(exc).__name__, exc)
             return None, None
+
+    def _camera_blueprint(self, width: int, height: int, fov: float | None = None):
+        """An RGB camera blueprint, tagged so Marshal can find its own sensors later."""
+        bp = self.world.get_blueprint_library().find("sensor.camera.rgb")
+        bp.set_attribute("image_size_x", str(width))
+        bp.set_attribute("image_size_y", str(height))
+        if fov is not None and bp.has_attribute("fov"):
+            bp.set_attribute("fov", str(fov))
+        if bp.has_attribute("role_name"):
+            bp.set_attribute("role_name", SENSOR_ROLE)
+        # Every car carries three 1280x720 cameras, and by default each renders on every tick - 20
+        # times a simulated second - though nothing reads them that often: a clip keeps a sample
+        # every half second and a still takes the newest frame. sensor_tick is how often CARLA
+        # renders the camera, so with several cars this is the difference between 3N full-rate
+        # streams and 3N slow ones.
+        tick = getattr(self, "camera_tick_s", None)
+        if tick and bp.has_attribute("sensor_tick"):
+            bp.set_attribute("sensor_tick", str(tick))
+        return bp
+
+    def release_car_sensors(self, v: "_Vehicle") -> None:
+        """Stop and destroy the cameras attached to one car.
+
+        CARLA does not destroy a sensor when the car it is attached to is destroyed: the sensor stays
+        in the world, still rendering. Each car carries three, so every car a run removed without this
+        left three cameras behind.
+        """
+        cams = [v.onboard] + [cam for cam, _buffer in v.evidence.values()]
+        for cam in cams:
+            if cam is None:
+                continue
+            try:
+                cam.stop()
+                cam.destroy()
+            except Exception as exc:              # already gone with the world
+                log.warning("could not release a camera on %s: %s", v.vin, exc)
+        v.onboard, v.onboard_frames = None, None
+        v.evidence.clear()
+
+    def despawn(self, vin: str) -> None:
+        """Remove a car and everything attached to it, whether or not this process spawned it.
+
+        A car left by an earlier process is found by its role_name (the VIN), and its sensors by
+        being attached to it, so a new phase can clear the previous phase's car completely.
+        """
+        v = self.vehicles.pop(vin, None)
+        if v is not None:
+            self.release_car_sensors(v)
+        actors = self.world.get_actors()
+        removed = False
+        for car in actors.filter("vehicle.*"):
+            if car.attributes.get("role_name") != vin:
+                continue
+            for sensor in actors.filter("sensor.*"):
+                if sensor.parent is not None and sensor.parent.id == car.id:
+                    _destroy_quietly(sensor)
+            _destroy_quietly(car)
+            removed = True
+        if removed:
+            # A destroyed actor leaves the world on the server's next frame, not when destroy()
+            # returns. Respawning the car at the same pose straight away failed with "Spawn failed
+            # because of collision at spawn position": it collided with itself.
+            self._settle()
+
+    def _settle(self) -> None:
+        """Let the server apply what was just changed, by letting one frame pass."""
+        try:
+            if self.world.get_settings().synchronous_mode:
+                if self._owns_ticks():
+                    self._tick_world()
+            else:
+                self.world.wait_for_tick(seconds=10.0)
+        except Exception as exc:                  # a settle that fails must not hide the cause
+            log.warning("could not wait for the server to apply a change: %s", exc)
+
+    def sweep_sensors(self) -> int:
+        """Destroy Marshal sensors left in the world by earlier processes. Returns how many.
+
+        Called when a backend connects, so each run starts from a world with none of Marshal's
+        cameras in it, however the previous run ended - including a phase that deliberately skipped
+        teardown, or a process that was killed. Only sensors tagged SENSOR_ROLE are touched: the
+        viewer's camera and a replay's are left alone.
+
+        Run one Marshal process against a server at a time. A second process connecting would clear
+        the first one's cameras.
+        """
+        stale = [a for a in self.world.get_actors().filter("sensor.*")
+                 if a.attributes.get("role_name") == SENSOR_ROLE]
+        for sensor in stale:
+            _destroy_quietly(sensor)
+        if stale:
+            log.info("cleared %d Marshal sensor(s) left by an earlier run", len(stale))
+        return len(stale)
 
     def spawn(self, vin: str, at: str = "line_end", colour: str | None = None,
               behind_m: float = 0.0) -> None:
@@ -324,6 +464,7 @@ class CarlaDrivingSystem:
             else:
                 self.world.wait_for_tick(seconds=10.0)
             agent = BehaviorAgent(actor, behavior=self.behavior)
+            self._ignore_parked(agent)
         except Exception:
             actor.destroy()
             raise
@@ -354,8 +495,20 @@ class CarlaDrivingSystem:
                 v.assist_case = None
                 # day 3: translate the chosen option (wait / pass left / reroute) here
 
+    def _precise(self, point: str) -> bool:
+        spec = self.map.points[point].carla or {}
+        return point in PRECISE_STOPS or bool(spec.get("pull_over"))
+
     def _next_destination(self, v: _Vehicle) -> None:
-        v.agent.set_destination(self.transform(v.remaining[0]).location)
+        point = v.remaining[0]
+        target = self.transform(point).location
+        if (self.map.points[point].carla or {}).get("pull_over"):
+            # Off the driving lanes: route to the lane beside the spot, a run-up before it.
+            wp = self.world.get_map().get_waypoint(target, project_to_road=True,
+                                                   lane_type=carla.LaneType.Driving)
+            back = wp.previous(PULL_OVER_RUN_M) if wp is not None else []
+            target = (back[0] if back else wp).transform.location if wp is not None else target
+        v.agent.set_destination(target)
 
     async def start(self) -> None:
         settings = self.world.get_settings()
@@ -418,6 +571,9 @@ class CarlaDrivingSystem:
             await self._routine_step(v)
             return
         if v.agent.done():
+            if self._precise(v.remaining[0]) and not self._creep(v):
+                return                          # still edging onto the mark
+            v.creep_s = 0.0
             v.location = v.remaining.pop(0)
             if v.location == "test_track" and v.mission.routine and not v.routine_done:
                 v.routine_done = True
@@ -438,6 +594,70 @@ class CarlaDrivingSystem:
             return
         v.actor.apply_control(v.agent.run_step())
 
+    def _creep(self, v: _Vehicle) -> bool:
+        """Edge the car onto its stop mark at walking pace. True once it is there.
+
+        Measured along the car's heading, so a car that has rolled past the mark counts as there.
+        It brakes for anything in front, and gives up after CREEP_MAX_S rather than hold up the
+        plant if something it cannot see is in the way.
+        """
+        point = v.remaining[0]
+        target = self.transform(point).location
+        here = v.actor.get_transform()
+        forward = here.get_forward_vector()
+        dx, dy = target.x - here.location.x, target.y - here.location.y
+        along = dx * forward.x + dy * forward.y
+        pulling_over = bool((self.map.points[point].carla or {}).get("pull_over"))
+        v.creep_s += self.fixed_delta_s
+        close = math.hypot(dx, dy) <= 1.0
+        if along <= STOP_TOLERANCE_M or close or v.creep_s > CREEP_MAX_S:
+            v.actor.apply_control(carla.VehicleControl(throttle=0.0, brake=1.0))
+            if v.creep_s > CREEP_MAX_S:
+                log.warning("%s stopped %.1f m short of %s", v.vin, along, v.remaining[0])
+            elif pulling_over:
+                self._square_up(v, point)
+            return True
+        obstacle, distance = self._obstacle_ahead(v)
+        if obstacle is not None and distance < along + 3.0:
+            v.actor.apply_control(carla.VehicleControl(throttle=0.0, brake=1.0))
+            return False
+        heading = math.atan2(forward.y, forward.x)
+        aim_x, aim_y = dx, dy
+        if pulling_over:
+            # Steer for a point beyond the spot, along it, as a driver lines up with a bay. Steered
+            # at the spot itself the car arrived still angled across it (24 degrees in a yard slot)
+            # with its tail in the lane beside, where the next car to pass stopped against it.
+            spot = self.transform(point).get_forward_vector()
+            aim_x, aim_y = dx + spot.x * PULL_OVER_AIM_M, dy + spot.y * PULL_OVER_AIM_M
+        bearing = math.atan2(aim_y, aim_x)
+        error = (bearing - heading + math.pi) % (2 * math.pi) - math.pi
+        velocity = v.actor.get_velocity()
+        speed = math.hypot(velocity.x, velocity.y)
+        # Pulling over is a lane's width sideways in a short run, so it may steer harder than the
+        # straight creep onto the gate mark, which only corrects a little.
+        limit = 0.6 if pulling_over else 0.3
+        v.actor.apply_control(carla.VehicleControl(
+            throttle=0.3 if speed < 1.0 else 0.0,          # about 3.6 km/h
+            steer=max(-limit, min(limit, 1.5 * error)),
+            brake=0.0))
+        return False
+
+    def _square_up(self, v: _Vehicle, point: str) -> None:
+        """Square a car up in its slot or bay once it has crept onto it.
+
+        A real plant driving system parks precisely; this stand-in steers BehaviorAgent's car off
+        the lane by hand and arrives a little angled. Even at 17 degrees a car in yard slot Y2 kept
+        its tail in the lane beside, and the next car creeping to Y4 stopped against it, 15 m short.
+        So the last metre or two is set, not driven: the car is placed on the spot, straight.
+        """
+        spot = self.transform(point)
+        here = v.actor.get_transform()
+        if here.location.distance(spot.location) > SETTLE_MAX_M:
+            return
+        v.actor.set_transform(carla.Transform(
+            carla.Location(spot.location.x, spot.location.y, here.location.z), spot.rotation))
+        v.actor.set_target_velocity(carla.Vector3D(0.0, 0.0, 0.0))
+
     def position_xy(self, vin: str) -> tuple[float, float] | None:
         """Where a car is right now, in the same frame as reference_xy."""
         v = self.vehicles.get(vin)
@@ -455,6 +675,16 @@ class CarlaDrivingSystem:
         """Upload evidence and return the URI to record. Never raises."""
         return self.artifacts.put(uri, data, "image/jpeg")
 
+    def repair(self, vin: str, defect_types: list[str]) -> None:
+        """Rework fixed the car: the electrical bay replaces a dead lamp, so it lights again.
+
+        The only fault this backend can put on a car is a dark lamp (`faults`), so that is the only
+        repair it has to model; the fake world's `repair` is the same rule. Without it a repaired
+        car kept its dead bulb and re-inspection could never pass.
+        """
+        if any(t in defect_types for t in ("brake_light", "lamp", "indicator", "headlight", "electrical")):
+            self.faults.pop(vin, None)
+
     # ---------- flow 2: the driving system asks for help ----------
 
     def _obstacle_ahead(self, v: _Vehicle):
@@ -468,6 +698,12 @@ class CarlaDrivingSystem:
                 continue
             if not actor.type_id.startswith(("vehicle.", "walker.", "static.prop")):
                 continue
+            # A car parked in a slot or bay is beside the lane, not in it. Measured along the car's
+            # heading, a car in a bend points across the slots: at the plant world's yard entry the
+            # third car of a run took the second, parked in Y2, for a vehicle in its lane, asked for
+            # help, and held its brake with every car behind it waiting.
+            if actor.type_id.startswith("vehicle.") and not self._in_a_driving_lane(actor):
+                continue
             offset = actor.get_location() - origin
             ahead = offset.x * forward.x + offset.y * forward.y
             if ahead <= 0:                      # behind the car
@@ -479,6 +715,48 @@ class CarlaDrivingSystem:
             if distance < best_d:
                 best, best_d = actor, distance
         return best, best_d
+
+    def _ignore_parked(self, agent) -> None:
+        """Let the agent drive past cars parked off the driving lanes.
+
+        BehaviorAgent decides whether a vehicle is in its way by the driving-lane waypoint nearest
+        to it, so a car pulled over into a yard slot reads as a car standing in the lane beside the
+        slot. On the plant world the third car of a run stopped at the yard entrance behind the
+        second, parked in Y2, and every car after it queued there until the run timed out. A vehicle
+        whose own position is on no driving lane (a slot, a bay, the lot rows) is not traffic.
+        """
+        detect = getattr(agent, "_vehicle_obstacle_detected", None)
+        if detect is None:
+            return
+
+        def detect_traffic(vehicle_list=None, *args, **kwargs):
+            if vehicle_list is not None:
+                vehicle_list = [veh for veh in vehicle_list if self._in_a_driving_lane(veh)]
+            return detect(vehicle_list, *args, **kwargs)
+
+        agent._vehicle_obstacle_detected = detect_traffic
+
+    def _in_a_driving_lane(self, actor) -> bool:
+        """Whether an actor stands on a driving lane, by its own position (not the nearest lane)."""
+        world_map = getattr(self, "_driving_map", None)
+        if world_map is None:                 # fetched once: get_map() is slow
+            world_map = self._driving_map = self.world.get_map()
+        wp = world_map.get_waypoint(actor.get_location(), project_to_road=False,
+                                    lane_type=carla.LaneType.Any)
+        return wp is not None and wp.lane_type == carla.LaneType.Driving
+
+    def _is_plant_car(self, actor) -> bool:
+        """Whether an actor is one of the plant's cars that is itself on its way somewhere.
+
+        Only a car with a mission is traffic to wait behind. A plant car with none is parked, and if
+        it is in the lane it is an obstruction like any other: waiting behind it is waiting for
+        ever, which is exactly what happened when a car stood in production control on the next
+        car's route to the yard. That has to come back as a request for help, not silence.
+        """
+        if not actor.type_id.startswith("vehicle."):
+            return False
+        other = self.vehicles.get(actor.attributes.get("role_name"))
+        return other is not None and other.mission is not None
 
     def assist_clip(self, v: _Vehicle) -> list[bytes]:
         """The seconds before the stop, from the camera on the car, oldest frame first."""
@@ -538,6 +816,13 @@ class CarlaDrivingSystem:
         obstacle, distance = self._obstacle_ahead(v)
         if obstacle is None:
             v.stalled_s = 0.0                   # stopped for its own reasons, not an obstacle
+            return False
+        if self._is_plant_car(obstacle):
+            # Waiting behind another of the plant's own cars is queuing, not being stuck: with
+            # several cars, the next one stops behind the car at the gate or on the track until it
+            # moves on. Asking for help there would put a "vehicle in lane" card in front of a
+            # supervisor every time two cars were released in a row.
+            v.stalled_s = 0.0
             return False
         kind = obstacle.type_id.split(".")[0]
         what = {"walker": "a person", "vehicle": "a vehicle", "static": "an object"}.get(
@@ -618,7 +903,13 @@ class CarlaDrivingSystem:
         # Ticking a few times first matters: frames already in flight show the previous world
         # state, which once made a dark lamp look lit because the frame was of the previous,
         # healthy car. Each tick delivers a frame, so after a few the newest held is current.
-        for _ in range(4):
+        # A camera rendering every camera_tick_s needs that many ticks plus two for a frame that
+        # postdates the call; four was enough only while every camera rendered on every tick.
+        ticks = 4
+        tick_s = getattr(self, "camera_tick_s", None)
+        if tick_s:
+            ticks = max(ticks, math.ceil(tick_s / self.fixed_delta_s) * 2 + 2)
+        for _ in range(ticks):
             self._tick_world()
         return self._latest_frame(frames)
         with tempfile.TemporaryDirectory() as tmp:
@@ -727,9 +1018,7 @@ class CarlaDrivingSystem:
         "camera produced no frame after bounded warm-up". One creation path, so the two cannot
         drift apart again.
         """
-        bp = self.world.get_blueprint_library().find("sensor.camera.rgb")
-        bp.set_attribute("image_size_x", str(width))
-        bp.set_attribute("image_size_y", str(height))
+        bp = self._camera_blueprint(width, height)
         frames = _FrameBuffer(window_s=CLIP_WINDOW_S, max_frames=CLIP_FRAMES,
                               encode=self._encode)
         def receive(image, buffer=frames) -> None:
@@ -742,9 +1031,7 @@ class CarlaDrivingSystem:
 
     def _make_movable(self, key, transform, width: int, height: int):
         """Create the movable camera and subscribe it once, for the life of the run."""
-        bp = self.world.get_blueprint_library().find("sensor.camera.rgb")
-        bp.set_attribute("image_size_x", str(width))
-        bp.set_attribute("image_size_y", str(height))
+        bp = self._camera_blueprint(width, height)
         frames = _FrameBuffer(window_s=1.0, max_frames=4)   # the gate judges single frames only
         def receive(image, buffer=frames) -> None:
             buffer.append(image)
@@ -796,17 +1083,10 @@ class CarlaDrivingSystem:
             except Exception:                     # already gone with the world
                 pass
         self._cameras.clear()
-        # The cars' own cameras too. They are attached, so the server drops them with the car,
-        # but releasing them here keeps "sensor object went out of the scope but the sensor is
-        # still alive" out of the logs and makes cleanup one thing rather than two.
+        # The cars' own cameras too: all three on each car. Only the forward one used to be released
+        # here, so the front and rear evidence cameras outlived every run.
         for v in self.vehicles.values():
-            if v.onboard is not None:
-                try:
-                    v.onboard.stop()
-                    v.onboard.destroy()
-                except Exception as exc:
-                    log.warning("could not release the onboard camera for %s: %s", v.vin, exc)
-                v.onboard, v.onboard_frames = None, None
+            self.release_car_sensors(v)
 
     def _status(self, v: _Vehicle) -> Status:
         loc = v.actor.get_location()
@@ -872,19 +1152,46 @@ class CarlaGateCamera:
     def __init__(self, ds: CarlaDrivingSystem, point: str = "inspection_gate"):
         self.ds, self.point = ds, point
 
-    def prewarm(self, views: list[str] | None = None) -> None:
-        """Create the single movable gate sensor before the driving loop starts."""
-        first = next(iter(GATE_VIEWS if views is None else views))
-        self.ds.prewarm_camera(_offset(self.ds, self.point, *GATE_CAMERAS[first]),
-                               EVIDENCE_WIDTH, EVIDENCE_HEIGHT, movable=True)
+    def _pose(self, view: str):
+        return _offset(self.ds, self.point, *GATE_CAMERAS[view])
+
+    def prewarm(self, views: list[str] | None = None, fixed: bool = False) -> None:
+        """Create the gate sensors before the driving loop starts.
+
+        A camera created mid-tick segfaults the server, so this runs before start(). Without
+        `fixed`, one movable sensor is made, for a process that photographs a parked car with no
+        loop running (scene 1's gate phase, day 2). With `fixed`, one sensor per view is made and
+        left streaming, so a car can be photographed while the loop runs and other cars keep
+        driving - see capture().
+        """
+        wanted = list(GATE_VIEWS if views is None else views)
+        if fixed:
+            for view in wanted:
+                self.ds.prewarm_camera(self._pose(view), EVIDENCE_WIDTH, EVIDENCE_HEIGHT)
+            return
+        self.ds.prewarm_camera(self._pose(wanted[0]), EVIDENCE_WIDTH, EVIDENCE_HEIGHT,
+                               movable=True)
 
     def capture(self, vin: str, views: list[str] | None = None) -> list[Media]:
         out = []
+        running = getattr(self.ds, "_task", None) is not None
         for view in GATE_VIEWS:
             if views is not None and view not in views:
                 continue
-            data = self.ds.capture_moving(_offset(self.ds, self.point, *GATE_CAMERAS[view]),
-                                          EVIDENCE_WIDTH, EVIDENCE_HEIGHT)
+            if running:
+                # Inside the driving loop. A movable camera cannot be used here: moving it and
+                # waiting for a frame from the new pose deadlocks, because the loop that would
+                # produce that frame is blocked in this call. The fixed cameras have been
+                # streaming all along, so the newest frame each one already delivered is the car
+                # at the gate now. They must have been prewarmed: creating one here is the
+                # mid-tick spawn that segfaults the server.
+                key = self.ds._camera_key(self._pose(view), EVIDENCE_WIDTH, EVIDENCE_HEIGHT)
+                if key not in self.ds._cameras:
+                    raise RuntimeError("gate cameras were not prewarmed before the driving loop "
+                                       "started; call gate_camera.prewarm(fixed=True) first")
+                data = self.ds.capture(self._pose(view), EVIDENCE_WIDTH, EVIDENCE_HEIGHT)
+            else:
+                data = self.ds.capture_moving(self._pose(view), EVIDENCE_WIDTH, EVIDENCE_HEIGHT)
             uri = self.ds.store_artifact(f"gs://marshal/gate/{vin}/{view}.jpg", data)
             out.append(Media(mime="image/jpeg", data=data, label=f"{view} camera", uri=uri))
         return out

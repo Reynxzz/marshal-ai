@@ -1,0 +1,271 @@
+{
+  "name": "v3-report",
+  "description": "Flow 5: gate and track results for six failing cars, and the rework the design's bay table gives them, safety first. No media: the report is written from the records.",
+  "report": [
+    {
+      "id": "brake-light-and-scratch",
+      "build_sheet": {
+        "model": "sedan",
+        "colour": "black"
+      },
+      "visual": {
+        "verdict": "FAIL",
+        "findings": [
+          {
+            "zone": "rear_left_door",
+            "type": "scratch",
+            "confidence": 0.95,
+            "size_cm": 6,
+            "observation": "a 6 cm scratch across the door"
+          }
+        ]
+      },
+      "functional": {
+        "verdict": "FAIL",
+        "checklist": [
+          {
+            "step": 1,
+            "name": "headlights",
+            "telemetry_ok": true,
+            "camera_ok": true,
+            "camera_confidence": 0.93,
+            "observation": null
+          },
+          {
+            "step": 3,
+            "name": "brake_lights",
+            "telemetry_ok": true,
+            "camera_ok": false,
+            "camera_confidence": 0.93,
+            "observation": "left brake lamp stays dark while the right one lights"
+          }
+        ]
+      },
+      "expect_bays": [
+        "electrical",
+        "paint"
+      ],
+      "note": "Design flow 5's own example: a paint scratch and a failed brake light, electrical first."
+    },
+    {
+      "id": "dent-only",
+      "build_sheet": {
+        "model": "sedan",
+        "colour": "black"
+      },
+      "visual": {
+        "verdict": "FAIL",
+        "findings": [
+          {
+            "zone": "bonnet",
+            "type": "dent",
+            "confidence": 0.93,
+            "size_cm": 4,
+            "observation": "a small dent near the bonnet's leading edge"
+          }
+        ]
+      },
+      "functional": {
+        "verdict": "PASS",
+        "checklist": [
+          {
+            "step": 1,
+            "name": "headlights",
+            "telemetry_ok": true,
+            "camera_ok": true,
+            "camera_confidence": 0.93,
+            "observation": "both headlights lit"
+          },
+          {
+            "step": 3,
+            "name": "brake_lights",
+            "telemetry_ok": true,
+            "camera_ok": true,
+            "camera_confidence": 0.93,
+            "observation": "brake lamps lit"
+          }
+        ]
+      },
+      "expect_bays": [
+        "paint"
+      ]
+    },
+    {
+      "id": "wrong-colour",
+      "build_sheet": {
+        "model": "sedan",
+        "colour": "red"
+      },
+      "visual": {
+        "verdict": "FAIL",
+        "build_sheet_mismatches": [
+          "colour: build sheet says red, car shows blue (0.96)"
+        ]
+      },
+      "functional": {
+        "verdict": "PASS",
+        "checklist": [
+          {
+            "step": 1,
+            "name": "headlights",
+            "telemetry_ok": true,
+            "camera_ok": true,
+            "camera_confidence": 0.93,
+            "observation": "both headlights lit"
+          },
+          {
+            "step": 3,
+            "name": "brake_lights",
+            "telemetry_ok": true,
+            "camera_ok": true,
+            "camera_confidence": 0.93,
+            "observation": "brake lamps lit"
+          }
+        ]
+      },
+      "expect_bays": [
+        "production_control"
+      ],
+      "note": "Demo scene 2's wrong colour: a person decides, at production control."
+    },
+    {
+      "id": "brakes-headlight-gap",
+      "build_sheet": {
+        "model": "suv",
+        "colour": "white"
+      },
+      "visual": {
+        "verdict": "FAIL",
+        "findings": [
+          {
+            "zone": "front_left_door",
+            "type": "panel_gap",
+            "confidence": 0.92,
+            "size_cm": null,
+            "observation": "front door sits 4 mm proud of the wing"
+          }
+        ]
+      },
+      "functional": {
+        "verdict": "FAIL",
+        "checklist": [
+          {
+            "step": 1,
+            "name": "headlights",
+            "telemetry_ok": true,
+            "camera_ok": false,
+            "camera_confidence": 0.93,
+            "observation": "the left headlight is dark"
+          },
+          {
+            "step": 5,
+            "name": "brake_test",
+            "telemetry_ok": false,
+            "camera_ok": null,
+            "camera_confidence": 0.93,
+            "observation": "stopping distance 9.8 m from 20 km/h, limit 7 m"
+          }
+        ]
+      },
+      "expect_bays": [
+        "mechanical",
+        "electrical",
+        "body"
+      ]
+    },
+    {
+      "id": "scuff-and-missing-badge",
+      "build_sheet": {
+        "model": "sedan",
+        "colour": "grey",
+        "options": [
+          "rear_badge"
+        ]
+      },
+      "visual": {
+        "verdict": "FAIL",
+        "findings": [
+          {
+            "zone": "rear",
+            "type": "scuff",
+            "confidence": 0.91,
+            "size_cm": 8,
+            "observation": "scuffing on the rear bumper corner"
+          }
+        ],
+        "build_sheet_mismatches": [
+          "rear_badge: build sheet says fitted, car shows none (0.94)"
+        ]
+      },
+      "functional": {
+        "verdict": "PASS",
+        "checklist": [
+          {
+            "step": 1,
+            "name": "headlights",
+            "telemetry_ok": true,
+            "camera_ok": true,
+            "camera_confidence": 0.93,
+            "observation": "both headlights lit"
+          },
+          {
+            "step": 3,
+            "name": "brake_lights",
+            "telemetry_ok": true,
+            "camera_ok": true,
+            "camera_confidence": 0.93,
+            "observation": "brake lamps lit"
+          }
+        ]
+      },
+      "expect_bays": [
+        "body",
+        "paint"
+      ]
+    },
+    {
+      "id": "indicator-and-paint-chip",
+      "build_sheet": {
+        "model": "hatchback",
+        "colour": "blue"
+      },
+      "visual": {
+        "verdict": "FAIL",
+        "findings": [
+          {
+            "zone": "bonnet",
+            "type": "paint_chip",
+            "confidence": 0.91,
+            "size_cm": 1,
+            "observation": "a stone chip in the paint"
+          }
+        ]
+      },
+      "functional": {
+        "verdict": "FAIL",
+        "checklist": [
+          {
+            "step": 1,
+            "name": "headlights",
+            "telemetry_ok": true,
+            "camera_ok": true,
+            "camera_confidence": 0.93,
+            "observation": null
+          },
+          {
+            "step": 2,
+            "name": "indicators",
+            "telemetry_ok": true,
+            "camera_ok": false,
+            "camera_confidence": 0.93,
+            "observation": "the right indicator does not blink"
+          }
+        ]
+      },
+      "expect_bays": [
+        "electrical",
+        "paint"
+      ]
+    }
+  ]
+}

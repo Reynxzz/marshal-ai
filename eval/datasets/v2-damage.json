@@ -1,0 +1,576 @@
+{
+  "name": "v2-damage",
+  "description": "Flow 3 on real photos of damaged cars: Humans in the Loop, 'Car parts and car damages' (CC0 1.0), the 441 photos labelled with both parts and damage. Damaged cases balanced across kinds, half from the smallest damage; clean cases are crops of undamaged parts. Built by scripts/build_damage_dataset.py, seed 7.",
+  "damage": [
+    {
+      "id": "car-damages-269",
+      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/car-damages-269.jpg",
+      "expect_damaged": true,
+      "expect_kinds": [
+        "broken_part",
+        "missing_part",
+        "scratch"
+      ],
+      "expect_zones": [
+        "front"
+      ],
+      "note": "scratch; damage covers 2.3% of the photo; Broken part on Front-bumper, Missing part on Front-bumper, Scratch on Front-bumper"
+    },
+    {
+      "id": "car-damages-1342",
+      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/car-damages-1342.jpg",
+      "expect_damaged": true,
+      "expect_kinds": [
+        "dent",
+        "missing_part",
+        "paint",
+        "scratch"
+      ],
+      "expect_zones": [
+        "boot",
+        "rear"
+      ],
+      "note": "scratch; damage covers 1.3% of the photo; Corrosion on Back-wheel, Dent on Quarter-panel, Flaking on Trunk, Missing part on Trunk, Scratch on Back-bumper"
+    },
+    {
+      "id": "car-damages-1078",
+      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/car-damages-1078.jpg",
+      "expect_damaged": true,
+      "expect_kinds": [
+        "broken_part",
+        "dent",
+        "scratch"
+      ],
+      "expect_zones": [
+        "rear"
+      ],
+      "note": "scratch; damage covers 2.4% of the photo; Broken part on Back-bumper, Dent on Back-bumper, Scratch on Back-bumper"
+    },
+    {
+      "id": "car-damages-246",
+      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/car-damages-246.jpg",
+      "expect_damaged": true,
+      "expect_kinds": [
+        "broken_part",
+        "dent",
+        "paint",
+        "scratch"
+      ],
+      "expect_zones": [
+        "bonnet",
+        "front",
+        "front_left_door",
+        "front_right_door"
+      ],
+      "note": "scratch; damage covers 4.5% of the photo; Broken part on Rocker-panel, Corrosion on Front-wheel, Dent on Fender, Paint chip on Fender, Scratch on Fender, Scratch on Front-bumper, Scratch on Front-door, Scratch on Hood"
+    },
+    {
+      "id": "car-damages-245",
+      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/car-damages-245.jpg",
+      "expect_damaged": true,
+      "expect_kinds": [
+        "dent",
+        "missing_part",
+        "scratch"
+      ],
+      "expect_zones": [
+        "bonnet",
+        "front_left_door",
+        "front_right_door"
+      ],
+      "note": "scratch; damage covers 6.0% of the photo; Dent on Fender, Dent on Front-door, Dent on Hood, Missing part on Front-door, Scratch on Front-door"
+    },
+    {
+      "id": "car-damages-325",
+      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/car-damages-325.jpg",
+      "expect_damaged": true,
+      "expect_kinds": [
+        "dent",
+        "scratch"
+      ],
+      "expect_zones": [
+        "front_left_door",
+        "front_right_door",
+        "rear_left_door",
+        "rear_right_door"
+      ],
+      "note": "scratch; damage covers 6.2% of the photo; Dent on Back-door, Scratch on Back-door, Scratch on Front-door"
+    },
+    {
+      "id": "car-damages-322",
+      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/car-damages-322.jpg",
+      "expect_damaged": true,
+      "expect_kinds": [
+        "broken_part",
+        "dent",
+        "missing_part",
+        "paint",
+        "scratch"
+      ],
+      "expect_zones": [
+        "rear",
+        "rear_left_door",
+        "rear_right_door"
+      ],
+      "note": "scratch; damage covers 24.1% of the photo; Broken part on Back-bumper, Broken part on Back-door, Corrosion on Quarter-panel, Dent on Back-door, Dent on Quarter-panel, Flaking on Back-door, Missing part on Back-door, Scratch on Back-bumper, Scratch on Back-door, Scratch on Quarter-panel"
+    },
+    {
+      "id": "car-damages-291",
+      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/car-damages-291.jpg",
+      "expect_damaged": true,
+      "expect_kinds": [
+        "broken_part",
+        "dent",
+        "missing_part",
+        "paint",
+        "scratch"
+      ],
+      "expect_zones": [
+        "bonnet",
+        "front_left_door",
+        "front_right_door"
+      ],
+      "note": "scratch; damage covers 11.8% of the photo; Broken part on Fender, Broken part on Front-door, Dent on Fender, Dent on Hood, Missing part on Front-door, Paint chip on Fender, Scratch on Fender, Scratch on Front-door"
+    },
+    {
+      "id": "car-damages-652",
+      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/car-damages-652.jpg",
+      "expect_damaged": true,
+      "expect_kinds": [
+        "broken_part",
+        "dent"
+      ],
+      "expect_zones": [
+        "front_left_door",
+        "front_right_door"
+      ],
+      "note": "dent; damage covers 1.5% of the photo; Broken part on Front-door, Dent on Front-door"
+    },
+    {
+      "id": "car-damages-648",
+      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/car-damages-648.jpg",
+      "expect_damaged": true,
+      "expect_kinds": [
+        "broken_part",
+        "dent",
+        "paint"
+      ],
+      "expect_zones": [
+        "front"
+      ],
+      "note": "dent; damage covers 3.3% of the photo; Broken part on Front-bumper, Dent on Fender, Paint chip on Fender"
+    },
+    {
+      "id": "car-damages-1273",
+      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/car-damages-1273.jpg",
+      "expect_damaged": true,
+      "expect_kinds": [
+        "broken_part",
+        "dent",
+        "paint",
+        "scratch"
+      ],
+      "expect_zones": [
+        "rear"
+      ],
+      "note": "dent; damage covers 4.6% of the photo; Broken part on Back-bumper, Dent on Back-bumper, Dent on Quarter-panel, Flaking on Back-bumper, Paint chip on Back-bumper, Paint chip on Quarter-panel, Scratch on Back-bumper"
+    },
+    {
+      "id": "car-damages-1074",
+      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/car-damages-1074.jpg",
+      "expect_damaged": true,
+      "expect_kinds": [
+        "dent"
+      ],
+      "expect_zones": [],
+      "note": "dent; damage covers 0.7% of the photo; Dent on Fender"
+    },
+    {
+      "id": "car-damages-783",
+      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/car-damages-783.jpg",
+      "expect_damaged": true,
+      "expect_kinds": [
+        "broken_part",
+        "dent",
+        "missing_part",
+        "paint",
+        "scratch"
+      ],
+      "expect_zones": [
+        "boot",
+        "rear"
+      ],
+      "note": "dent; damage covers 12.2% of the photo; Broken part on Back-bumper, Broken part on Tail-light, Dent on Back-bumper, Dent on Quarter-panel, Flaking on Back-bumper, Missing part on Fender, Missing part on Trunk, Scratch on Back-bumper, Scratch on Quarter-panel"
+    },
+    {
+      "id": "car-damages-646",
+      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/car-damages-646.jpg",
+      "expect_damaged": true,
+      "expect_kinds": [
+        "broken_part",
+        "dent",
+        "missing_part",
+        "scratch"
+      ],
+      "expect_zones": [
+        "boot",
+        "front_left_door",
+        "front_right_door",
+        "rear_left_door",
+        "rear_right_door"
+      ],
+      "note": "dent; damage covers 7.5% of the photo; Broken part on Front-door, Dent on Back-door, Dent on Front-door, Missing part on Trunk, Scratch on Front-door, Scratch on Rocker-panel"
+    },
+    {
+      "id": "car-damages-1283",
+      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/car-damages-1283.jpg",
+      "expect_damaged": true,
+      "expect_kinds": [
+        "broken_part",
+        "dent",
+        "paint",
+        "scratch"
+      ],
+      "expect_zones": [
+        "rear",
+        "rear_left_door",
+        "rear_right_door"
+      ],
+      "note": "dent; damage covers 6.7% of the photo; Broken part on Back-bumper, Broken part on Tail-light, Dent on Back-door, Dent on Quarter-panel, Paint chip on Back-door, Scratch on Tail-light"
+    },
+    {
+      "id": "car-damages-644",
+      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/car-damages-644.jpg",
+      "expect_damaged": true,
+      "expect_kinds": [
+        "missing_part",
+        "paint"
+      ],
+      "expect_zones": [
+        "bonnet",
+        "rear"
+      ],
+      "note": "paint; damage covers 1.3% of the photo; Missing part on Back-bumper, Paint chip on Fender, Paint chip on Hood"
+    },
+    {
+      "id": "car-damages-212",
+      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/car-damages-212.jpg",
+      "expect_damaged": true,
+      "expect_kinds": [
+        "broken_part",
+        "dent",
+        "paint"
+      ],
+      "expect_zones": [
+        "bonnet",
+        "front"
+      ],
+      "note": "paint; damage covers 3.2% of the photo; Broken part on Fender, Broken part on Hood, Dent on Front-bumper, Dent on Hood, Flaking on Front-bumper, Flaking on Hood"
+    },
+    {
+      "id": "car-damages-256",
+      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/car-damages-256.jpg",
+      "expect_damaged": true,
+      "expect_kinds": [
+        "dent",
+        "paint",
+        "scratch"
+      ],
+      "expect_zones": [
+        "front_left_door",
+        "front_right_door",
+        "rear"
+      ],
+      "note": "paint; damage covers 3.2% of the photo; Dent on Quarter-panel, Paint chip on Quarter-panel, Scratch on Back-bumper, Scratch on Front-door, Scratch on Quarter-panel"
+    },
+    {
+      "id": "car-damages-905",
+      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/car-damages-905.jpg",
+      "expect_damaged": true,
+      "expect_kinds": [
+        "broken_part",
+        "dent",
+        "missing_part",
+        "paint"
+      ],
+      "expect_zones": [
+        "boot",
+        "front_left_door",
+        "front_right_door",
+        "rear"
+      ],
+      "note": "paint; damage covers 5.1% of the photo; Broken part on Back-bumper, Broken part on Front-door, Broken part on Quarter-panel, Corrosion on Quarter-panel, Dent on Quarter-panel, Missing part on Trunk"
+    },
+    {
+      "id": "car-damages-247",
+      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/car-damages-247.jpg",
+      "expect_damaged": true,
+      "expect_kinds": [
+        "broken_part",
+        "dent",
+        "paint"
+      ],
+      "expect_zones": [
+        "bonnet",
+        "front"
+      ],
+      "note": "paint; damage covers 9.4% of the photo; Broken part on Front-bumper, Broken part on Hood, Dent on Front-bumper, Dent on Hood, Paint chip on Hood"
+    },
+    {
+      "id": "car-damages-310",
+      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/car-damages-310.jpg",
+      "expect_damaged": true,
+      "expect_kinds": [
+        "broken_part",
+        "missing_part",
+        "scratch"
+      ],
+      "expect_zones": [
+        "front_left_door",
+        "front_right_door",
+        "rear"
+      ],
+      "note": "missing_part; damage covers 1.7% of the photo; Broken part on Fender, Missing part on Back-bumper, Missing part on Front-door, Scratch on Back-bumper, Scratch on Quarter-panel"
+    },
+    {
+      "id": "car-damages-892",
+      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/car-damages-892.jpg",
+      "expect_damaged": true,
+      "expect_kinds": [
+        "broken_part",
+        "dent",
+        "missing_part",
+        "paint",
+        "scratch"
+      ],
+      "expect_zones": [
+        "bonnet",
+        "front",
+        "front_left_door",
+        "front_right_door"
+      ],
+      "note": "missing_part; damage covers 7.9% of the photo; Broken part on Front-bumper, Broken part on Headlight, Corrosion on Front-bumper, Corrosion on Front-wheel, Dent on Fender, Dent on Front-door, Flaking on Hood, Missing part on Front-bumper, Scratch on Fender"
+    },
+    {
+      "id": "car-damages-885",
+      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/car-damages-885.jpg",
+      "expect_damaged": true,
+      "expect_kinds": [
+        "broken_part",
+        "dent",
+        "missing_part"
+      ],
+      "expect_zones": [
+        "boot",
+        "front_left_door",
+        "front_right_door",
+        "rear_left_door",
+        "rear_right_door"
+      ],
+      "note": "missing_part; damage covers 4.7% of the photo; Broken part on Back-door, Broken part on Front-door, Dent on Back-door, Missing part on Trunk"
+    },
+    {
+      "id": "car-damages-880",
+      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/car-damages-880.jpg",
+      "expect_damaged": true,
+      "expect_kinds": [
+        "broken_part",
+        "missing_part",
+        "scratch"
+      ],
+      "expect_zones": [
+        "boot",
+        "rear",
+        "rear_left_door",
+        "rear_right_door"
+      ],
+      "note": "missing_part; damage covers 10.5% of the photo; Broken part on Back-door, Broken part on Quarter-panel, Broken part on Trunk, Missing part on Back-door, Scratch on Back-bumper"
+    },
+    {
+      "id": "car-damages-141",
+      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/car-damages-141.jpg",
+      "expect_damaged": true,
+      "expect_kinds": [
+        "broken_part",
+        "dent",
+        "missing_part",
+        "scratch"
+      ],
+      "expect_zones": [
+        "bonnet",
+        "front"
+      ],
+      "note": "missing_part; damage covers 22.6% of the photo; Broken part on Fender, Broken part on Front-bumper, Dent on Fender, Dent on Hood, Missing part on Front-bumper, Scratch on Front-bumper"
+    },
+    {
+      "id": "car-damages-1082",
+      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/car-damages-1082.jpg",
+      "expect_damaged": true,
+      "expect_kinds": [
+        "broken_part",
+        "dent",
+        "missing_part"
+      ],
+      "expect_zones": [
+        "front"
+      ],
+      "note": "broken_part; damage covers 2.0% of the photo; Broken part on Front-bumper, Broken part on Grille, Broken part on Quarter-panel, Dent on Quarter-panel, Missing part on License-plate"
+    },
+    {
+      "id": "car-damages-113",
+      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/car-damages-113.jpg",
+      "expect_damaged": true,
+      "expect_kinds": [
+        "broken_part",
+        "dent",
+        "scratch"
+      ],
+      "expect_zones": [
+        "front"
+      ],
+      "note": "broken_part; damage covers 3.2% of the photo; Broken part on Grille, Dent on Front-bumper, Scratch on Grille"
+    },
+    {
+      "id": "car-damages-1290",
+      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/car-damages-1290.jpg",
+      "expect_damaged": true,
+      "expect_kinds": [
+        "broken_part",
+        "missing_part",
+        "paint"
+      ],
+      "expect_zones": [
+        "bonnet",
+        "front"
+      ],
+      "note": "broken_part; damage covers 8.3% of the photo; Broken part on Front-bumper, Broken part on Grille, Broken part on Hood, Flaking on Hood, Missing part on Front-bumper, Paint chip on Hood"
+    },
+    {
+      "id": "car-damages-643",
+      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/car-damages-643.jpg",
+      "expect_damaged": true,
+      "expect_kinds": [
+        "broken_part",
+        "dent",
+        "scratch"
+      ],
+      "expect_zones": [
+        "bonnet",
+        "front"
+      ],
+      "note": "broken_part; damage covers 20.1% of the photo; Broken part on Front-bumper, Broken part on Hood, Dent on Front-bumper, Scratch on Front-bumper"
+    },
+    {
+      "id": "car-damages-868",
+      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/car-damages-868.jpg",
+      "expect_damaged": true,
+      "expect_kinds": [
+        "broken_part",
+        "dent",
+        "paint",
+        "scratch"
+      ],
+      "expect_zones": [
+        "bonnet",
+        "front"
+      ],
+      "note": "broken_part; damage covers 18.8% of the photo; Broken part on Front-bumper, Broken part on Grille, Broken part on Headlight, Broken part on Hood, Corrosion on Fender, Corrosion on Hood, Dent on Hood, Paint chip on Hood, Scratch on Hood"
+    },
+    {
+      "id": "clean-front-bumper-car-damages-710",
+      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/clean-front-bumper-car-damages-710.jpg",
+      "expect_damaged": false,
+      "note": "Front-bumper with no labelled damage, cropped from Car damages 710.jpg"
+    },
+    {
+      "id": "clean-trunk-car-damages-180",
+      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/clean-trunk-car-damages-180.jpg",
+      "expect_damaged": false,
+      "note": "Trunk with no labelled damage, cropped from Car damages 180.png"
+    },
+    {
+      "id": "clean-trunk-car-damages-1289",
+      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/clean-trunk-car-damages-1289.jpg",
+      "expect_damaged": false,
+      "note": "Trunk with no labelled damage, cropped from Car damages 1289.png"
+    },
+    {
+      "id": "clean-back-bumper-car-damages-652",
+      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/clean-back-bumper-car-damages-652.jpg",
+      "expect_damaged": false,
+      "note": "Back-bumper with no labelled damage, cropped from Car damages 652.png"
+    },
+    {
+      "id": "clean-back-bumper-car-damages-1158",
+      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/clean-back-bumper-car-damages-1158.jpg",
+      "expect_damaged": false,
+      "note": "Back-bumper with no labelled damage, cropped from Car damages 1158.png"
+    },
+    {
+      "id": "clean-back-bumper-car-damages-782",
+      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/clean-back-bumper-car-damages-782.jpg",
+      "expect_damaged": false,
+      "note": "Back-bumper with no labelled damage, cropped from Car damages 782.png"
+    },
+    {
+      "id": "clean-front-bumper-car-damages-102",
+      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/clean-front-bumper-car-damages-102.jpg",
+      "expect_damaged": false,
+      "note": "Front-bumper with no labelled damage, cropped from Car damages 102.jpg"
+    },
+    {
+      "id": "clean-front-bumper-car-damages-232",
+      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/clean-front-bumper-car-damages-232.jpg",
+      "expect_damaged": false,
+      "note": "Front-bumper with no labelled damage, cropped from Car damages 232.png"
+    },
+    {
+      "id": "clean-hood-car-damages-225",
+      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/clean-hood-car-damages-225.jpg",
+      "expect_damaged": false,
+      "note": "Hood with no labelled damage, cropped from Car damages 225.png"
+    },
+    {
+      "id": "clean-back-bumper-car-damages-303",
+      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/clean-back-bumper-car-damages-303.jpg",
+      "expect_damaged": false,
+      "note": "Back-bumper with no labelled damage, cropped from Car damages 303.png"
+    },
+    {
+      "id": "clean-front-bumper-car-damages-1074",
+      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/clean-front-bumper-car-damages-1074.jpg",
+      "expect_damaged": false,
+      "note": "Front-bumper with no labelled damage, cropped from Car damages 1074.png"
+    },
+    {
+      "id": "clean-hood-car-damages-252",
+      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/clean-hood-car-damages-252.jpg",
+      "expect_damaged": false,
+      "note": "Hood with no labelled damage, cropped from Car damages 252.png"
+    },
+    {
+      "id": "clean-hood-car-damages-266",
+      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/clean-hood-car-damages-266.jpg",
+      "expect_damaged": false,
+      "note": "Hood with no labelled damage, cropped from Car damages 266.png"
+    },
+    {
+      "id": "clean-front-door-car-damages-1087",
+      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/clean-front-door-car-damages-1087.jpg",
+      "expect_damaged": false,
+      "note": "Front-door with no labelled damage, cropped from Car damages 1087.png"
+    },
+    {
+      "id": "clean-back-bumper-car-damages-1148",
+      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/clean-back-bumper-car-damages-1148.jpg",
+      "expect_damaged": false,
+      "note": "Back-bumper with no labelled damage, cropped from Car damages 1148.png"
+    },
+    {
+      "id": "clean-trunk-car-damages-244",
+      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/clean-trunk-car-damages-244.jpg",
+      "expect_damaged": false,
+      "note": "Trunk with no labelled damage, cropped from Car damages 244.png"
+    }
+  ]
+}

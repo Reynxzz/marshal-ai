@@ -13,7 +13,7 @@ from marshal_ai.lab.sim import simulate
 from marshal_ai.lab.spec import ScenarioSpec
 from marshal_ai.llm import FakeLLM
 from marshal_ai.plant import load_plant_map
-from marshal_ai.records import Scenario, ScenarioStatus
+from marshal_ai.records import ReleaseReport, Scenario, ScenarioStatus
 
 DOC_REQUEST = ("A worker steps out from behind a parked forklift at dusk while a car turns "
                "into the finishing lane.")
@@ -113,6 +113,13 @@ def test_search_finds_shrinks_explains_and_adds_a_regression_test(library):
     assert result.explanation and result.explanation.suggested_fix
     reg = app.rt.store.get(Scenario, result.regression_id)
     assert reg.status == ScenarioStatus.IN_LIBRARY and "regression" in reg.tags
+    # every run says why it was tried: the base case, the model's reasoning, or a shrinking step
+    reasons = [r.run.reason for r in result.runs]
+    assert reasons[0] == "the passing case the search starts from"
+    assert reasons[1] == result.reasoning[0]
+    assert all(r for r in reasons)
+    shrinks = [r for r in reasons if r.startswith("shrinking")]
+    assert len(shrinks) == (len(result.failure.changes) if len(result.failure.changes) > 1 else 0)
 
 
 def test_search_keeps_going_when_the_model_is_unavailable(library):
@@ -133,5 +140,65 @@ def test_release_gate_blocks_until_the_fix_ships(library):
         gate.approve(old, "eng-kim")
     new = gate.evaluate("behavior-agent-1.1", SimRunner(app.rt.map, RELEASES["behavior-agent-1.1"]))
     assert not new.blocked, new.failed
-    assert new.newly_passing == sorted(old.failed)
+    assert new.previous_release == "behavior-agent-1.0" and new.newly_passing == sorted(old.failed)
     assert gate.approve(new, "eng-kim").approved_by == "eng-kim"
+    assert gate.report("behavior-agent-1.1").approved_by == "eng-kim"     # the approval is stored
+
+
+class _History:
+    """BigQuery history holding one release report that an earlier process wrote."""
+
+    def __init__(self, row):
+        self.row, self.asked = row, []
+
+    def append(self, kind, key, payload):
+        return True
+
+    def latest(self, kind, exclude_key=None):
+        self.asked.append((kind, exclude_key))
+        return self.row if self.row["release"] != exclude_key else None
+
+
+def test_release_gate_compares_with_the_release_history_holds(library):
+    """A fresh process has no reports in its store; what changed is read from history."""
+    app, sid = library
+    app.adversarial.search(sid)
+    earlier = ReleaseReport(release="behavior-agent-0.9", total=1, passed=[sid])
+    app.rt.history = _History(earlier.model_dump(mode="json"))
+    report = app.release_gate.evaluate("behavior-agent-1.0",
+                                       SimRunner(app.rt.map, RELEASES["behavior-agent-1.0"]))
+    assert app.rt.history.asked == [("ReleaseReport", "behavior-agent-1.0")]
+    assert report.previous_release == "behavior-agent-0.9"
+    assert report.newly_failing == sorted(report.failed) and report.blocked
+    assert "Newly failing since behavior-agent-0.9" in report.summary()
+
+
+def test_the_failure_report_states_the_facts_and_tries_the_fix(library):
+    app, sid = library
+    result = app.adversarial.search(sid)
+    report = result.failure_report
+    assert report.measured and all("limit" in m or "contact" in m for m in report.measured)
+    assert report.passes_when                    # the shrink established what makes it pass
+    assert report.fix_check.startswith("Fix tried in the simulator") and "failing case passes" in report.fix_check
+    stored = app.rt.store.get(Scenario, result.regression_id)
+    assert stored.failure_report["fix_check"] == report.fix_check and stored.notes == result.report()
+
+
+def _report_with(app, speed_fix):
+    def explain(call):
+        return {"summary": "s", "likely_cause": "c", "suggested_fix": "f", "speed_fix": speed_fix}
+    app.rt.llm.on("adversarial.report", explain)
+
+
+def test_a_fix_that_does_not_work_is_reported_as_such(library):
+    app, sid = library
+    _report_with(app, {"zone": "test_track", "time_of_day": ["night"], "max_speed_kmh": 4.0})  # wrong zone
+    report = app.adversarial.search(sid).failure_report
+    assert "still fails" in report.fix_check
+
+
+def test_a_fix_in_a_zone_the_plant_lacks_is_not_tried(library):
+    app, sid = library
+    _report_with(app, {"zone": "paint_shop", "time_of_day": ["night"], "max_speed_kmh": 4.0})
+    report = app.adversarial.search(sid).failure_report
+    assert report.speed_fix is None and report.fix_check is None and report.suggested_fix == "f"

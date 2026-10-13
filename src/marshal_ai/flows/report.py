@@ -37,8 +37,25 @@ STEP_DEFECT = {
     "brake_lights": ("brake_light", "electrical"), "reverse": ("reverse_light", "electrical"),
     "brake_test": ("brakes", "mechanical"), "full_lock": ("steering", "mechanical"),
 }
-DEFECT_BAY = {"scratch": "paint", "dent": "paint", "paint_run": "paint",
-              "panel_gap": "body", "trim": "body", "missing_part": "body", "missing_badge": "body"}
+# The design's bay table, by the words a defect is described with. Checked in this order, so a
+# light wins over a word it shares with paint ("headlight_haze"). It used to be an exact lookup on
+# the finding's type, but Gemini writes free text: in the evaluation answers 13% of findings
+# ("scratches", "scuff", "paint_damage", "chip", "corrosion", "headlight_haze") missed the table
+# and fell to the body bay.
+BAY_WORDS: list[tuple[str, tuple[str, ...]]] = [
+    ("electrical", ("light", "lamp", "indicator", "blinker", "electric", "wiring")),
+    ("mechanical", ("brake", "steering")),
+    ("paint", ("scratch", "scuff", "scrape", "abrasion", "dent", "ding", "paint", "chip", "flak",
+               "peel", "corros", "rust", "clear coat", "clearcoat")),
+]
+
+
+def bay_for(defect_type: str) -> BayKey:
+    """The rework bay for a defect, from the design's table; panel gaps, trim, missing or broken
+    parts and anything else unrecognised go to the body bay, where a person looks at it."""
+    text = defect_type.lower().replace("_", " ")
+    return next((bay for bay, words in BAY_WORDS if any(w in text for w in words)), "body")
+
 BADGE_ITEMS = {"rear_badge", "front_badge", "badge"}
 
 
@@ -63,7 +80,7 @@ def required_steps(visual: InspectionResult | None, functional: InspectionResult
     steps: list[ReworkStepDraft] = []
     if visual and visual.verdict != Verdict.PASS:
         for f in visual.findings:
-            steps.append(ReworkStepDraft(bay=DEFECT_BAY.get(f.type, "body"), defect_type=f.type,
+            steps.append(ReworkStepDraft(bay=bay_for(f.type), defect_type=f.type,
                                          reason=f"{f.type} on {f.zone}"))
         for m in visual.build_sheet_mismatches:
             item = m.split(":", 1)[0].strip()
@@ -197,10 +214,7 @@ class ReportRouter:
     # ---------- supervisor decision and rework ----------
 
     async def decide(self, proposal_id: str, confirm: bool, by: str) -> dict:
-        p = self.rt.proposals[proposal_id]
-        if p.kind != "rework" or p.status != "pending":
-            raise ValueError(f"{proposal_id} is not a pending rework proposal")
-        p.status, p.decided_by = ("approved" if confirm else "rejected"), by
+        p = self.rt.decide(proposal_id, "rework", confirm, by, what="rework proposal")
         vin = p.payload["vin"]
         report = self.rt.store.get(CarReport, vin)
         if not confirm:                 # supervisor clears the findings
@@ -260,15 +274,18 @@ class ReportRouter:
         plan = self.plans[vin]
         ticket = plan.tickets[plan.next_index]
         ticket.done_at = self.rt.clock()
+        types = [t.strip() for t in ticket.defect_type.split(",")]
+        repaired = types + (["electrical"] if "electrical" in ticket.bay else [])
         if self.rt.world is not None:          # simulation: the repair changes the car
-            types = [t.strip() for t in ticket.defect_type.split(",")]
-            self.rt.world.repair(vin, types + (["electrical"] if "electrical" in ticket.bay else []))
+            self.rt.world.repair(vin, repaired)
             if {"missing_badge", "wrong_variant"} & set(types):
                 sheet = self.rt.store.get(Car, vin).build_sheet
                 truth = self.rt.world.cars[vin]
                 truth.fitted = list(sheet.options)
                 if "wrong_variant" in types:   # production control brings the car to spec
                     truth.colour, truth.model, truth.trim = sheet.colour, sheet.model, sheet.trim
+        elif hasattr(self.rt.driving, "repair"):  # CARLA: the bay fixes the car on the simulator
+            self.rt.driving.repair(vin, repaired)
         self.rt.plant.release(vin)
         plan.next_index += 1
         report = self.rt.store.get(CarReport, vin)

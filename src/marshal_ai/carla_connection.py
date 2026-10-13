@@ -86,3 +86,26 @@ def connect_carla(
         raise CarlaConnectionError(
             f"Could not query CARLA at {host}:{port} within {timeout_s:g}s: {exc}"
         ) from exc
+
+
+def exit_without_teardown(code: int) -> None:
+    """End a CARLA client process without running interpreter shutdown, and keep the exit code.
+
+    The CARLA 0.9.16 client can abort while Python tears itself down - ``terminate called without an
+    active exception``, then SIGABRT, exit 134 - after the script has finished and stored its
+    result. It is the C++ client's background threads being torn down in the wrong order, and it
+    is intermittent: a day 4 run reported success and then exited 134, failing a pass of
+    run_carla_all.sh, and the next two day 4 runs exited cleanly. Scene 1 worked around it by
+    reading a phase's log for "done" despite the abort.
+
+    Skipping shutdown removes the window in which it happens. That is safe here only because
+    nothing in these processes relies on it: the bus awaits each publish, BigQuery inserts and
+    Cloud Storage uploads are synchronous, and there are no atexit hooks. Output is flushed first,
+    since os._exit does not.
+    """
+    import os
+    import sys
+
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(code)

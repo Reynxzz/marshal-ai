@@ -46,10 +46,11 @@ if ! timeout 30 python3 scripts/check_carla.py >/dev/null 2>&1; then
   echo "CARLA not answering; restarting the service..." >&2
   sudo systemctl restart carla
 fi
-python3 scripts/ensure_carla_map.py --map Town05 --wait-seconds 600
+python3 scripts/ensure_carla_map.py --map "${MARSHAL_CARLA_MAP:-Town05}" --wait-seconds 600
 start_recording scene1
 
 before=$(systemctl show carla -p NRestarts --value 2>/dev/null || echo 0)
+shipped=false
 for phase in release gate track report ship; do
   echo "=== phase: $phase ==="
   # Each phase is a fresh process on purpose; do not merge these into one.
@@ -66,9 +67,23 @@ for phase in release gate track report ship; do
       exit 1
     fi
   fi
+  if [[ "$phase" == ship ]] && grep '"type": "scene1.phase.done"' "$phase_log" | grep -q '"state": "shipped"'; then
+    shipped=true
+  fi
   rm -f "$phase_log"
 done
 after=$(systemctl show carla -p NRestarts --value 2>/dev/null || echo 0)
 
 echo "=== scene 1 complete ==="
 echo "CARLA restarts during the run: $((after - before))"
+
+# Every phase finishing is not the same as the scene being shown. The scene is a car going from the
+# line to a truck, and it only reaches the truck with a PASS report: a gate REVIEW stops it in the
+# yard with every phase "done". Exit 2 for that, as the other demos do for "not demonstrated", so
+# run_carla_all.sh does not count a car that never shipped as a pass.
+if "$shipped"; then
+  echo "result: success (the car shipped)"
+  exit 0
+fi
+echo "result: not demonstrated (every phase ran, but the car did not ship; see the report verdict)" >&2
+exit 2

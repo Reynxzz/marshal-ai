@@ -1,0 +1,127 @@
+{
+  "name": "v4-scenario",
+  "description": "Flow 6: requests, mostly assistance cases as the desk writes them, and what a test faithful to each must contain. Run on the quick simulator; no media. Each case runs twice: with retrieval from the library (lab/library.py) and with the fixed examples (the design example, plus the incident one for a desk case).",
+  "scenario": [
+    {
+      "id": "scene3-box-and-worker",
+      "source": "assistance case AC-VIN-STUCK-1",
+      "request": "An object (box) is 2.3m ahead in the lane, with a person walking behind it. The driving system stopped and offered ['wait_for_removal', 'pass_left_3kmh', 'reroute_lane_c']; supervisor-ana chose wait_for_removal. Location: test_track.",
+      "expect_zone": "test_track",
+      "expect_actors": [
+        "box",
+        "worker"
+      ],
+      "expect_at": {
+        "box": "test_track",
+        "worker": "test_track"
+      },
+      "expect_metrics": [
+        "no_contact",
+        "min_gap_to_person_m"
+      ],
+      "note": "Demo scene 3's own case, as the assistance desk wrote it on 2026-10-09."
+    },
+    {
+      "id": "box-no-people",
+      "source": "assistance case AC-VIN-210-1",
+      "request": "A cardboard box lies in the lane, car VIN-210 stopped 3 m before it; nobody nearby. The driving system stopped and offered ['wait_for_removal', 'pass_left_3kmh', 'reroute_lane_c']; supervisor-ana chose pass_left_3kmh. Location: report_point.",
+      "expect_zone": "test_track",
+      "expect_actors": [
+        "box"
+      ],
+      "expect_at": {
+        "box": "report_point"
+      },
+      "expect_metrics": [
+        "no_contact"
+      ]
+    },
+    {
+      "id": "forklift-at-corner",
+      "source": "assistance case AC-VIN-305-1",
+      "request": "A forklift is crossing the lane at the finishing corner in front of the car, its driver reversing. The driving system stopped and offered ['wait_for_removal', 'reroute_lane_c']; supervisor-ana chose wait_for_removal. Location: finishing_corner.p2.",
+      "expect_zone": "finishing_corner",
+      "expect_actors": [
+        "forklift"
+      ],
+      "expect_metrics": [
+        "no_contact"
+      ]
+    },
+    {
+      "id": "design-sc0142",
+      "source": "supervisor request",
+      "request": "A worker steps out from behind a parked forklift at dusk while a car turns into the finishing lane.",
+      "expect_zone": "finishing_corner",
+      "expect_actors": [
+        "forklift",
+        "worker"
+      ],
+      "expect_metrics": [
+        "no_contact",
+        "min_gap_to_person_m"
+      ],
+      "expect_time_of_day": "dusk",
+      "note": "The design's flow 6 example."
+    },
+    {
+      "id": "car-braking-fog",
+      "source": "supervisor request",
+      "request": "During the test track run in fog, the vehicle in front of the car stops hard.",
+      "expect_zone": "test_track",
+      "expect_actors": [
+        "car"
+      ],
+      "expect_metrics": [
+        "no_contact",
+        "min_gap_to_vehicle_m"
+      ],
+      "note": "Not like the design example: a second car, vehicle gap."
+    },
+    {
+      "id": "worker-crossing-evening",
+      "source": "supervisor request",
+      "request": "A pedestrian walks across the test track in the evening.",
+      "expect_zone": "test_track",
+      "expect_actors": [
+        "worker"
+      ],
+      "expect_metrics": [
+        "no_contact",
+        "min_gap_to_person_m"
+      ],
+      "expect_time_of_day": "dusk",
+      "note": "A crossing person with nothing hiding them."
+    },
+    {
+      "id": "forklift-crossing-night",
+      "source": "supervisor request",
+      "request": "At night a forklift drives across the finishing corner as the car comes round it.",
+      "expect_zone": "finishing_corner",
+      "expect_actors": [
+        "forklift"
+      ],
+      "expect_metrics": [
+        "no_contact"
+      ],
+      "expect_time_of_day": "night",
+      "note": "A moving forklift, not a parked one."
+    },
+    {
+      "id": "pallet-worker-night",
+      "source": "supervisor request",
+      "request": "A worker comes out from behind a pallet stack at the finishing corner at night.",
+      "expect_zone": "finishing_corner",
+      "expect_actors": [
+        "pallet_stack",
+        "worker"
+      ],
+      "expect_metrics": [
+        "no_contact",
+        "min_gap_to_person_m"
+      ],
+      "expect_time_of_day": "night",
+      "note": "The design example's form with a different occluder and light."
+    }
+  ]
+}

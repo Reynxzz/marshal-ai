@@ -29,7 +29,7 @@ def parser() -> argparse.ArgumentParser:
 
 async def run(args: argparse.Namespace) -> dict:
     plant_map = load_plant_map()
-    if not plant_map.carla_map or not plant_map.carla_map.endswith("Town05"):
+    if not plant_map.carla_map or not plant_map.carla_map.endswith(("Town05", "Town05_Opt", "OpenDriveMap")):
         raise RuntimeError(f"demo requires Town05, plant map declares {plant_map.carla_map!r}")
     missing = [name for name in ["line_end", *ROUTE] if not plant_map.points[name].carla]
     if missing:
@@ -43,7 +43,7 @@ async def run(args: argparse.Namespace) -> dict:
         expected_version="0.9.16",
     )
     current_map = driving.world.get_map().name
-    if not current_map.endswith("Town05"):
+    if not current_map.endswith(("Town05", "Town05_Opt", "OpenDriveMap")):
         raise RuntimeError(f"server must be on Town05, currently {current_map}")
 
     for actor in driving.world.get_actors().filter("vehicle.*"):

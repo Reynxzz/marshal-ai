@@ -1,0 +1,118 @@
+{
+ "name": "v8-track",
+ "description": "Headlight step judged against a reference frame, on the plant world: healthy cars against healthy cars (where a reference that was not stated as passing failed two of three), and dark lamps against healthy ones at sun 15, 45 and dusk. Frames frozen under eval/v8-track/ in the artifacts bucket, labels checked by eye.",
+ "gate": [],
+ "track": [
+  {
+   "id": "healthy-p2-vs-p1-sun15",
+   "step": 1,
+   "frame": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v8-track/sun15/VIN-P2.jpg",
+   "telemetry": {
+    "headlights": "ON"
+   },
+   "expect_seen": true,
+   "note": "Plant world, three healthy cars in one run, sun 15: the frames the comparison failed in that run.",
+   "reference": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v8-track/sun15/VIN-P1.jpg"
+  },
+  {
+   "id": "healthy-p3-vs-p1-sun15",
+   "step": 1,
+   "frame": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v8-track/sun15/VIN-P3.jpg",
+   "telemetry": {
+    "headlights": "ON"
+   },
+   "expect_seen": true,
+   "note": "As above.",
+   "reference": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v8-track/sun15/VIN-P1.jpg"
+  },
+  {
+   "id": "healthy-p1-vs-p2-sun15",
+   "step": 1,
+   "frame": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v8-track/sun15/VIN-P1.jpg",
+   "telemetry": {
+    "headlights": "ON"
+   },
+   "expect_seen": true,
+   "note": "As above, the other way round.",
+   "reference": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v8-track/sun15/VIN-P2.jpg"
+  },
+  {
+   "id": "healthy-ok-vs-p1-sun15",
+   "step": 1,
+   "frame": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v8-track/sun15/VIN-OK.jpg",
+   "telemetry": {
+    "headlights": "ON"
+   },
+   "expect_seen": true,
+   "note": "Day 4's healthy car against a healthy car from another run, both sun 15.",
+   "reference": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v8-track/sun15/VIN-P1.jpg"
+  },
+  {
+   "id": "healthy-ok-vs-ok-sun45",
+   "step": 1,
+   "frame": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v8-track/sun45/VIN-OK.jpg",
+   "telemetry": {
+    "headlights": "ON"
+   },
+   "expect_seen": true,
+   "note": "Healthy at sun 45 against healthy at sun 15: different light, same lamps.",
+   "reference": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v8-track/sun15/VIN-OK.jpg"
+  },
+  {
+   "id": "dark-vs-ok-sun15",
+   "step": 1,
+   "frame": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v8-track/sun15/VIN-DARK.jpg",
+   "telemetry": {
+    "headlights": "ON"
+   },
+   "expect_seen": false,
+   "note": "Day 4 at sun 15: the L-shaped running light is dark, telemetry says ON.",
+   "reference": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v8-track/sun15/VIN-OK.jpg"
+  },
+  {
+   "id": "dark-vs-p1-sun15",
+   "step": 1,
+   "frame": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v8-track/sun15/VIN-DARK.jpg",
+   "telemetry": {
+    "headlights": "ON"
+   },
+   "expect_seen": false,
+   "note": "The same dark car against another healthy car.",
+   "reference": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v8-track/sun15/VIN-P1.jpg"
+  },
+  {
+   "id": "dark-vs-ok-sun45",
+   "step": 1,
+   "frame": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v8-track/sun45/VIN-DARK.jpg",
+   "telemetry": {
+    "headlights": "ON"
+   },
+   "expect_seen": false,
+   "note": "Day 4 at sun 45: the lamp strip is plainly dark next to the lit one. Missed in the run.",
+   "reference": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v8-track/sun45/VIN-OK.jpg"
+  },
+  {
+   "id": "dark-vs-ok-dusk",
+   "step": 1,
+   "frame": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v1/track/VIN-DARK/step1_headlights.jpg",
+   "telemetry": {
+    "headlights": "ON"
+   },
+   "expect_seen": false,
+   "note": "v1's dusk case (Town05).",
+   "reference": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v1/track/VIN-OK/step1_headlights.jpg"
+  },
+  {
+   "id": "healthy-p3-vs-p1-closer",
+   "step": 1,
+   "frame": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v8-track/run3/VIN-P3.jpg",
+   "telemetry": {
+    "headlights": "ON"
+   },
+   "reference": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v8-track/run3/VIN-P1.jpg",
+   "expect_seen": true,
+   "note": "Five-car run: P3 stopped closer to the camera, so its crop is framed differently; headlights lit, failed for the lower bumper lights."
+  }
+ ],
+ "assist": []
+}

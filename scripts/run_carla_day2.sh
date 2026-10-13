@@ -34,7 +34,7 @@ carla_healthy() {
 }
 
 wait_and_load_map() {
-  python3 scripts/ensure_carla_map.py --map Town05 --wait-seconds 600
+  python3 scripts/ensure_carla_map.py --map "${MARSHAL_CARLA_MAP:-Town05}" --wait-seconds 600
 }
 
 recover_if_needed() {

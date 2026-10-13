@@ -138,6 +138,56 @@ The replay emits one status per simulated second, advances progress at each name
 `mission.done` at `yard.Y1`, restores asynchronous world mode, and removes its vehicle. The browser
 viewer is fixed over the start lane, so the vehicle is visible as it departs.
 
+## Dressing Town05 as a plant (`scripts/dress_plant.py`)
+
+Town05 is a city map, so every run now dresses the plant road before it starts recording
+(`carla_recording.sh` calls it; `MARSHAL_DRESS=0` skips it). Everything is placed from the map's own
+lanes, measured along road 34 at run time, and none of it on a lane the plant's cars use:
+
+- across the median, on the carriageway the plant does not use: a row of semi-trailer trucks along
+  the straight, which also hides the houses, and a lot of finished cars in the plant's colours at
+  the curve
+- beside every rework bay, on the sidewalk: barrels, boxes, an iron plank and a work sign
+- at the line end, stacked boxes and barrels; at the gate, two calibration boards and a warning board
+- cones along the outer edge of the shoulder at the gate and the test track, where no car parks
+
+About 90 actors, vehicles with physics off: along the straight the far carriageway is packed with
+finished cars and trucks behind its fence, so it reads as a vehicle compound and the plant's lanes
+are the only open road. The script then checks that nothing stands on a driving lane
+or shoulder of the plant's carriageway (the shoulder before the first bay excepted) and removes it
+all and exits 1 if anything does; it also removes the previous run's dressing first. CARLA's own
+props set the limits: its "container" is a 1.9 m bin, not a shipping container, and there are no
+factory buildings, so the trucks and the car lot carry the look. A fence along the sidewalk was
+tried and dropped (the road's stone railing hides it).
+
+What still says "highway" is the map itself: the wide marked road, the speed sign, the tall lamps,
+the houses and the skyline. Town05_Opt has the same roads with its scenery in layers, so
+`MARSHAL_CARLA_MAP=Town05_Opt` loads it (every run script passes it to `ensure_carla_map.py`) and
+`dress_plant.py` then unloads the buildings, street lights, parked cars, props and decals
+(`MARSHAL_PLANT_UNLOAD` to change the list), leaving roads, ground and trees. **Tried on the
+server on 2026-10-10 and not usable:** unloading Buildings removes the houses and StreetLights the
+tall lamps (Props, Decals and ParkedVehicles leave the speed sign and the stone railing), but CARLA
+0.9.16 at Epic crashed three times (signal 11) within a minute of layers being unloaded on
+Town05_Opt - after the photos, while idle, and while the dressing was spawned - even with only
+Buildings and StreetLights unloaded. The default stays Town05; the switch is kept for a later
+CARLA version. Films are shot closer (a shot covers at most 22 m of drive, was
+30), so the car is big and the road around it small. Demo scene 1 ran dressed end to end: gate
+PASS with no finding, report PASS, shipped.
+
+Two faults found on the way. An early version walked the plant lane until it came within 4 m of the
+loading bay, missed it by a lane and dressed half of Town05; the walk now stops at the loading bay
+or as soon as the lane moves away from it. And replays left copies of the dressing behind: the
+recording holds it and the replayer re-creates it, and after two filmings 155 dressing actors had
+built up, some on the yard slots. The filmer now removes the live dressing before each replay pass
+and any left after it.
+
+The films are labelled (`scripts/film_labels.py`): the run at the top ("Demo scene 1 · One car, line
+to yard") and, in a lower third, where the car is and which car - the bay or slot it stops at, or
+else the plant zone it drives through, from the nearest named plant point. Driving past the bays is
+not labelled as being in one. Cameras sit 2 m higher, keeping the horizon, and the city, low in the
+frame. The labels need Pillow (`install_carla_mission_runtime.sh` installs it; until then
+`MARSHAL_EXTRA_PYTHONPATH` can point at a folder that has it); without it the film is unlabelled.
+
 ## Recording and replaying a run
 
 The viewer cannot show a run: every `run_carla_*.sh` stops it for the run, and it is a fixed
@@ -160,6 +210,178 @@ stretches are cut. Options: `--follow VIN`, `--speed N` (default 4), `--keep-idl
 Two things in CARLA 0.9.16 shape this, and both segfault the server: moving a camera during a
 replay, and a camera west of the yard lane looking west. The replay therefore gives each shot its own
 camera and films from the east side by default. See [PROGRESS.md](PROGRESS.md).
+
+## Evaluating the flows
+
+`python -m marshal_ai.eval` scores Gemini's part of flows 2, 3 and 4 against known answers, many
+runs per case, through the flows' own code (fresh app, in-memory store, no CARLA). It needs only the
+Vertex AI credentials.
+
+```bash
+python -m marshal_ai.eval eval/datasets/v1.json --runs 5
+python -m marshal_ai.eval eval/datasets/v1.json --flows track --runs 10 --model gemini-2.5-pro
+```
+
+It prints the design's KPIs per flow (gate: first-pass yield, review share, false alarms,
+build-sheet mismatches caught, latency against the 5 s budget; track: dark lamps confirmed as lit,
+lit lamps rejected, unconfirmed; assistance: recommendation, people detected, high-risk
+recommendations, objects boxed and how well the boxes overlap hand-labelled ones, time to the card
+against the design's ~5 s) plus consistency across runs, and writes the full answers to `eval/results/`.
+
+A dataset is JSON (`eval/datasets/v1.json`): each case names its frames and the right answer. Frames
+point at a frozen copy in the artifacts bucket, because the run scripts overwrite evidence for the
+same VIN; freeze new evidence with `scripts/snapshot_eval_media.py v3 gate/VIN-X/ ...`.
+
+`eval/datasets/v2-damage.json` is the design's stand-in for scratches and dents: 30 photos of damaged
+cars and 16 clean panels from Humans in the Loop's "Car parts and car damages" (CC0), run through the
+gate's defect check one photo at a time (`--flows damage`). It scores damage found, the kind and the
+zone it was put in, recall per kind, and false alarms on the clean panels.
+`scripts/build_damage_dataset.py` rebuilds it from the downloaded archive: it uses the 441 photos
+labelled with both parts and damage (the archive's two folder names are swapped), places each
+damage on a part and the part in a gate zone, balances the kinds towards small damage, and crops
+undamaged parts as the clean cases. Every clean crop was checked by eye; those rejected are listed
+in the script with the reason. The set is mostly salvage-auction crash damage, far heavier than what
+a finishing line sees, so read it as an upper bound on recall.
+
+`eval/datasets/v3-report.json` scores flow 5 (`--flows report`): six failing cars as gate and track
+records, no media, each with the bays the design's table gives, safety first. It scores the plan
+that reaches the supervisor, Gemini's own plan before the router checks it (right bays, safety
+bays first), and whether the summary names the safety defect before the cosmetic one. On
+gemini-2.5-flash, 3 runs: every score 1.0, 2.8 s median.
+
+`eval/datasets/v5-search.json` asks whether Gemini's steering earns its place in flow 7
+(`--flows search`). Each case is a passing scenario; the search runs on the quick simulator against
+`behavior-agent-1.0`, once with Gemini choosing each batch from the scores so far and five times with
+no model, where the tester falls back to random variations: the same code with the steering
+removed. On gemini-2.5-flash, 4 scenarios x 3 runs, 60-run budget:
+
+| | Gemini | Random |
+| --- | --- | --- |
+| Runs to the first failure (median) | **11** | 19 |
+| Failures per 100 runs | **2.9** | 2.0 |
+| Scenarios with a failure found | 3 of 4 | 3 of 4 (one seed missed one) |
+| Proposals skipped as unfair, per search | 0.5 | 1.6 |
+
+By scenario: the design's example 3 vs 7 runs, a worker behind a parked car 16 vs 23.5, behind a
+pallet stack 11 vs 31. Neither finds a failure in scene 3's incident in 60 runs: its worker stands
+20 m beyond the box, out of reach of the parameters the search varies. Every run now keeps the reason
+it was tried (`TestRun.reason`): the batch's reasoning, e.g. "speed near the person is consistently
+at the 5 km/h limit, so the system is at its edge", or the shrinking step.
+
+**The failure report** (`Scenario.failure_report`) follows the design's flow 7 example. The facts come
+from the runs: the conditions, each measurement against its limit, and the single changes back to the
+passing case that make it pass (found while shrinking). Gemini adds the likely cause and a concrete
+fix, a speed cap for one zone and light, which is then tried in the simulator on both the failing and
+the passing case. From the eval run above:
+
+> SC-0300-v15 fails: at night, with the worker starting to move when the car is 8 m away at 1.2 m/s
+> from behind a parked car, the car driving at 8 km/h, min gap to person 1.43 m (limit >= 1.5 m); speed
+> near person 7.28 km/h (limit <= 5 km/h). It passes with the trigger distance back at 12 m or with
+> light back at noon. Likely cause: ... reduced visibility at night and the worker appearing closer ...
+> Fix tried in the simulator: with 5 km/h in test_track at night, the failing case passes and the
+> passing case still passes. Clip: gs://marshal/lab/SC-0300-v15.mp4
+
+On the 9 failures found, Gemini proposed a fix every time and every fix passed both checks
+(`fix_proposed` 1.0, `fix_works` 1.0). Its free-text suggestion stays general ("brake earlier when a
+pedestrian emerges"); the speed cap is the checkable part. On CARLA the check reads "not tried", as the
+CARLA runner cannot change the driving system's limits.
+
+**Its clean cases do not measure false alarms.** They are crops of used cars whose wear was never
+labelled: on gemini-2.5-flash the gate flagged 7 of 16, and at full size at least three findings are
+right (scratches on the blue door, scuffs on the grey bumper, a missing front number plate). Relabelling
+them after seeing the model's answers would bias the set, so the false-alarm rate needs panels known
+to be clean - new cars, such as the CARLA renders in v1, where it was 0.
+
+### The gate's false alarms on clean cars (dataset v6-gate)
+
+Qais's multi-car runs failed a clean car about one time in three, and v1 (one parked car, one light)
+could not show it. `scripts/capture_gate_set.py` photographs clean sedans in five colours on the gate
+under six suns, as the plant scene does (fixed gate cameras, loop running); with three of Qais's plant
+cars that drove onto the mark, that is v6-gate: 33 clean cases and 10 with a wrong-colour build sheet.
+
+The false findings all described the paint, not a mark: "a distinct pixelated or checkerboard pattern"
+across both left doors, "cloud-like, irregular red patterns", "rough texture along the lower edge of
+the door" - a low sun on glossy paint and the shading along the sills, reported at 0.6-0.9. Saying so
+in the defect prompt removed some and made Qais's P1 worse (it then failed 2 of 2 for "paint scraped
+off the lower door"), so it was reverted. Instead each view with a finding is checked against the
+same camera's photo of the latest car that passed (`visual.verify`): a finding stays only if it is a
+mark the passed car does not have, as flow 4 compares a lamp with a car that passed the step. The
+first car of a run has no reference, so its findings stand and go to a person; once the person clears
+it, it becomes the reference (a car a person cleared is a clean car in the current light), and a
+confirmed defect never does.
+
+gemini-2.5-flash, 2 runs per case:
+
+| | Before | With the reference check |
+| --- | --- | --- |
+| 30 clean cars: runs with a false finding | 6.7% | **0%** |
+| 30 clean cars: passed first time | 0.93 | **0.97** |
+| Qais's plant car P1 (sill shading) | flagged 1 run in 3 | passed 2 of 2 |
+| Wrong colour caught | 10/10 | 10/10 |
+| v2-damage, damaged photos caught (reference: another car's clean crop) | 93.3% | 93.3% |
+| v1 gate | all correct | all correct |
+
+The one clean case still not passing (a red car, sun 15 along the road) has its findings refuted
+but goes to review because Gemini's all-clear for that view was below 0.9; that is left as it is, a
+review rather than a pass on doubt. v2-damage-ref uses a different car as the reference, a harder
+test than the gate's same-camera photo, and real damage survived it.
+
+### A shift on the simulated plant: the operational KPIs
+
+```
+python -m marshal_ai.shift --cars 40 --seeds 10
+python -m marshal_ai.shift --cars 40 --seeds 10 --damage-recall eval/results/v2-damage-20261009-234019.json
+```
+
+The eval datasets score Gemini's judgements. The design's other KPIs (cars per hour, line-to-yard
+time, time to resolution, rework turnaround, cars shipped with an open finding) are about the
+operation, so `marshal_ai.shift` runs one: cars leave the line every 2 min, each with a fault
+drawn from a mix (dead headlight or brake lamp, wrong colour, missing badge, scratch, dent, panel
+gap) or none; 8% stop at a box on the way to the yard, half with a worker; one truck runs 40 min
+late. A simulated supervisor makes every human decision after 45 s, judging review cards by the
+car's real state; bays repair in the design's minutes; a truck loads what is ready at its ETA and
+waits up to 15 min only for passed cars on their way. Judgements come from the offline stand-ins,
+which read the ground truth, so this measures the rules and hand-offs; `--damage-recall` drops the
+gate's findings at the miss rate Gemini showed per kind on v2-damage, and the shift shows where
+those misses go. Every car is checked against its real faults when it ships.
+
+10 shifts of 40 cars (seeds 7-16):
+
+| KPI | Perfect gate | Gate missing as on v2-damage |
+| --- | --- | --- |
+| Cars with a scratch, dent or panel gap | 68 | 68 |
+| **Shipped with a real fault** | **0** | **16** |
+| Shipped with an open finding (design target 0) | 0 | 0 |
+| Gate first-pass yield / review share | 0.76 / 0.08 | 0.79 / 0.05 |
+| Telemetry-camera disagreements / cars with a dead lamp | 47 / 47 | 47 / 47 |
+| Rework rate | 0.37 | 0.33 |
+| Rework turnaround, median | 43 min | 43 min |
+| Line to yard, clean car, median | 14.7 min | 14.7 min |
+| Assistance cases / with a worker / wait recommended | 34 / 13 / 13 | 34 / 13 / 13 |
+| Time to resolution | 45 s (the supervisor's delay) | 45 s |
+| Clean cars sent to rework | 0 | 0 |
+
+What it found:
+
+- **"Shipped with an open finding" cannot see a miss.** It reads the records, and a defect the gate
+  never reported is not in them: with Gemini's measured recall (scratches 72%, dents 87%), 16 of 68
+  damaged cars shipped and the KPI still read 0. Only checking against the car shows it, which on
+  the real line means sampling shipped cars, or the design's human review for small findings.
+- **A car that found the yard full was never shipped.** `send_to_slot` raised `yard_full` and left
+  the car where its report finished; nothing tried again when a truck freed slots. The yard now
+  re-tries every tick (`YardTraffic.waiting_for_slot`, tested). It also asked Gemini for a
+  `yard_full` plan every time, about 22 calls in a 40-car shift that changed nothing; the design
+  lists no such exception. Now the car simply waits, and a backlog of 3 or more cars waiting for a
+  slot is the design's "line running faster than the yard", asked once per episode. Over the 10
+  shifts, `yard.exception` calls went from 320 to 108 with every KPI unchanged.
+- **The simulated plant was blind to lamp faults after the first car.** Once a passed car became
+  the reference frame, the frame under test was rebuilt without its simulated ground truth, and the
+  offline judge read the reference's. Every later dead lamp passed. Real CARLA runs were not
+  affected (they send image bytes); the offline demo and tests were. Fixed and tested.
+- **The 8-slot yard is the constraint.** Clean cars take 2.8 min from line to yard when a slot is
+  free and 14.7 min in a full shift. Flow 1's numbers here depend on the truck schedule assumed (a
+  truck is due 10 min after its last car), which the design does not give, so read them as how the
+  yard behaves, not as the plant's figures.
 
 ## Real Gemini via Vertex AI
 
@@ -310,6 +532,33 @@ with credentials to use the model.
 mode and ticks it, so concurrent runs corrupt each other and the first one to finish restores
 asynchronous mode under the others. The design's 8-way parallelism needs one server per slot.
 
+### Demo scenes 4 and 5 on CARLA (`scripts/run_carla_release.sh`)
+
+```
+bash scripts/run_carla_release.sh                    # MARSHAL_LAB_ADVERSARIAL=16, behavior-agent-1.0
+```
+
+One process on the host, Gemini throughout, BigQuery history on: the design's example scenario is
+generated, judged on CARLA and put in the library; the search varies it on CARLA until a variant
+fails, shrinks it and adds it to the library as a regression test with its failure report; then the
+release gate runs every library test against the driving system. Each `ReleaseReport` is stored
+(collection `releases`) and so becomes a history row; "what changed" is computed against the most
+recent other release, from the store or, when this process never saw one, from BigQuery
+(`History.latest`). Run on 2026-10-10:
+
+```
+SC-0142-v1 fails: at dusk, with the worker starting to move when the car is 9 m away at 1.3 m/s from
+behind a forklift, the car driving at 9 km/h, speed near person 9.55 km/h (limit <= 5 km/h). It
+passes with the car's speed back at 8 km/h. ... The fix was not tried: this runner cannot change the
+driving system.
+Release behavior-agent-1.0: 2 tests, 1 passed, 1 failed. 1 failing test, release blocked.
+```
+
+The search found the failure in 2 runs. A fresh process read the report back from BigQuery. It had
+no earlier release to compare with: the only release CARLA can run is 1.0 (`CarlaRunner.with_driver`
+returns the same BehaviorAgent), so "now passing since 1.0" for the fixed 1.1 is shown on the
+quick simulator (`scripts/demo.py`, tests), not on CARLA.
+
 ### Map points the lab needs
 
 Lab scenarios drive `line_end → finishing`, so the finishing branch is pinned to real Town05
@@ -429,6 +678,77 @@ with no failed checks reached the rework path and crashed on `tickets[0]`; propo
 before the router's own Gemini call had written the report; and confirming a rework after the car
 was cleaned up failed with `KeyError`, because dispatch drives the car to the bay.
 
+**The rework loop closes on CARLA** (`MARSHAL_DAY4_REWORK=1 bash scripts/run_carla_day4.sh`). After
+the car reaches `rework.electrical`, the bay reports the repair done; the CARLA backend's `repair`
+relights the lamp (the electrical bay clears the car's fault, as the fake world's repair does), the
+router sends the car back for the failed step only, and the report turns to PASS. Twice in a row:
+
+```
+VIN-DARK  headlights  telemetry_ok=true  camera_ok=false  FAIL  -> rework.electrical (confirmed, arrived)
+          repair_done -> faults_left=[] -> step 1 re-run only -> camera_ok=true -> report PASS (20 s)
+          summary (Gemini): "The car failed its functional inspection because the headlights were not
+                             operating correctly. ... Re-inspection passed."
+```
+
+The bay used to come from an exact lookup on the finding's type, but Gemini writes free text: in
+the evaluation answers 13% of findings ("scratches", "scuff", "paint_damage", "chip", "corrosion",
+"headlight_haze") missed the table and went to the body bay. `bay_for` now reads the words against
+the design's table, lights before paint.
+
+**Incident → test on CARLA** (`scripts/run_incident_to_test.sh`): the design's loop between
+operations and the test lab. Scene 3 runs, the desk's case goes to the lab, Gemini writes a spec
+from the case, and it is validated, checked fair, dry-run, run and judged on CARLA and reviewed into
+the library tagged `from-incident`. `MARSHAL_INCIDENT_CASE=/tmp/marshal-day5/case.json` reuses a case.
+
+```
+AC-VIN-STUCK-1  "A cardboard box is in the lane 2.3m ahead, with a person walking further ahead..."
+SC-0142         route inspection_gate->test_track->report_point at 8 km/h; box at test_track,
+                worker walking at report_point; no_contact, min_gap_to_person_m >= 1.5,
+                speed_near_person_kmh <= 5        generated first try, in_library
+CARLA run       FAIL no_contact: "contact with static.prop.box01"; worker kept 20 m away (twice)
+```
+
+The test fails, and that is the finding: BehaviorAgent brakes for vehicles and walkers, not props,
+so the stand-in drives into the box. Scene 3's "2.3 m ahead" is measured from the car's centre,
+about half a car length, so its stop was most likely this contact too.
+
+It took three fixes. Generation failed on all three tries at scene 3's case (4 attempts, ~2 min, then
+rejected): Gemini placed the box and worker at `test_track`, where the car spawns, and, told only
+that "no_contact is not achievable", loosened the criteria instead of moving them. The validator now
+rejects an actor at the car's start and says how to fix it; the prompt says where the car starts,
+that only a forklift, pallet stack or parked car can hide a person (first tries wrote `behind:box`
+for "a person walking behind it"), and to use only the example's fields; and a request from an
+assistance case is shown an incident example beside the supervisor one. `run_carla_lab.sh` takes
+`MARSHAL_LAB_SOURCE`, so the case id reaches the scenario. Dataset `v4-scenario` (`--flows scenario`)
+scores it on the quick simulator: 4 requests x 3 runs, a runnable test 12/12 (first try 9/12),
+faithful to the request (zone, actors, where they stand, criteria, time of day) 100%, 13 s median.
+
+**Retrieval library for generation** (`lab/library.py`), the design's ChatScene method: a new request
+is shown the two reviewed tests most like it, as request-and-spec pairs, instead of the same design
+example every time. The library is five hand-checked seeds (the design example, scene 3's box, a car
+braking ahead, a forklift crossing, a worker crossing at night in rain) plus every scenario an
+engineer puts in the library; regression variants are left out. Ranking is by shared words, weighted
+by rarity, after folding plant synonyms (pedestrian -> worker, evening -> dusk); a request from the
+assistance desk always gets an incident example. Each seed passes the generator's own validation,
+fairness and dry-run checks (`tests/test_flow6_library.py`). `generator.retrieval = False` shows the
+old fixed examples, and v4-scenario, now 8 requests, runs every case both ways. gemini-2.5-flash,
+3 runs each:
+
+| | Retrieval | Fixed examples |
+| --- | --- | --- |
+| Runnable test | 24/24 | 24/24 |
+| Right on the first try | **18/24** | 15/24 |
+| Attempts, mean | **1.33** | 1.58 |
+| Faithful to the request | 100% | 100% |
+
+The gain is small and from two requests (a forklift crossing at the corner 3/3 vs 1/3, a box with
+nobody near 1/3 vs 0/3); the run before tied at 18/24, so read it as no worse and probably better.
+Building it fixed two things that helped both: the dry run no longer asks a car behind a braking car
+to reach its goal (the car-braking request went from rejected every time to generated every time),
+and each fix attempt now sees all earlier errors, because shown only the latest, Gemini removed
+`reached_goal`, added an unmeetable speed limit, then put `reached_goal` back. Each attempt's errors
+are kept (`GenerationResult.retried_for`).
+
 **Day 5 complete on real CARLA with real Gemini** (`scripts/run_carla_day5.sh`). Demo scene 3 runs
 end to end. `carla_backend` used to note that raising `assist.request` was unwired, so flow 2 only
 ever worked against the fake plant; the CARLA backend now raises it itself when the agent stalls
@@ -522,6 +842,7 @@ real Gemini rather than assumed:
 | 3 visual | `run_carla_scene1.sh`, `run_carla_day2.sh` | `PASS` on a matching car; 4 gate views ~150 KB each |
 | 4 functional | `run_carla_day4.sh` | healthy `PASS`, dark lamp `FAIL` on the telemetry/camera disagreement → `rework.electrical` |
 | 5 report | `run_carla_scene1.sh` | `PASS` merged from both results → car parked in `yard.Y1` |
+| 5 rework | `MARSHAL_DAY4_REWORK=1 run_carla_day4.sh` | `success` — dark lamp → electrical bay → repaired → failed step only re-run → report `PASS` |
 | 6 generate | `run_carla_lab.sh` | `SC-0142` generated in 1 attempt, dry run clean, judged `passed: true`, moved to `in_library` |
 | 7 adversarial | `run_carla_lab.sh` | search shrinks the failure to one parameter (`trigger_distance_m` 9 → 7) |
 
@@ -594,10 +915,12 @@ with a worker beside the box.
 | 3 s clip per track step (flow 4) | Built, as a sampled run of frames from the camera's recent past. The steps that remain unconfirmed are limited by the asset and the simulation, not by the evidence. |
 | 10 s clip with the assistance request (flow 2) | Built: seven frames of the approach to the stop. Not an encoded video - a video file would need an encoder on the host and buys nothing for the judgement. |
 | 60 runs per scenario, 8 in parallel (flow 7) | **Serial only.** Parallel runs need one CARLA server per slot; the search works but takes the full budget serially. |
-| Release gate blocks a release on a failing test | Implemented in `lab/regression.py`; not yet exercised end to end against BigQuery-backed history. |
+| Release gate blocks a release on a failing test | Built and run on CARLA (`run_carla_release.sh`): the failure the search found joins the suite and the gate reports "1 failing test, release blocked"; reports go to BigQuery history and the previous release is read back from it. The fixed release 1.1 runs only on the quick simulator. |
 | Demo scene 2 uses a dead brake light | Built with a dead **headlight**: it is the fault the camera reads most clearly, and the disagreement is the point. |
-| Scratches and dents from a car-damage image set | Not wired in; the gate currently finds real colour and variant mismatches only. |
-| Gate decides in under 5 s (flow 3) | Its five model calls now run one at a time, so the gate takes about their sum. `google-genai` proved unsafe to drive from five threads: runs failed intermittently with pydantic rejecting a JSON schema as a model, a schema from one call being handled as another's. The phased demo can afford it because the car is stopped; overlapping them again needs an SDK that supports it. |
+| Scratches and dents from a car-damage image set | Measured, not part of a live run: dataset v2-damage (see "Evaluating the flows"). gemini-2.5-flash finds 97% of damage, in the right zone every time; subtle kinds (paint, broken, missing parts) 21-40%. |
+| Assistance card with the object boxed (flow 2) | Built. A second call, `assist.locate`, runs beside the assessment with thinking off and boxes the object and every person near it ([ymin, xmin, ymax, xmax], 0-1000, on the frame it names, which is uploaded). On the scene 3 frame the worker's box overlaps the hand-labelled one 0.78; the cardboard box's is on the box but twice its width (0.25). Asked inside the assessment, both boxes landed beside the objects (0.17). A located person counts as "people near" even if the assessment missed them. |
+| Card in about 5 s (flow 2) | **4.3 s median, 19 of 22 cards under 5 s** on dataset v7-assist (`scripts/capture_assist_set.py`: a box with workers beside, beyond, on the shoulder, two workers, none, a low sun; plus scene 3), from 13 s. The assessment no longer thinks (`assist.assess` in `TASK_THINKING_BUDGET`): same recommendations, a wait whenever a person was in view, no high-risk option. Without thinking its situation line first left the people out (2 of 16), so the field now asks for every person in view and where (16 of 16, against 12 with thinking on). |
+| Gate decides in under 5 s (flow 3) | **Median 5.3 s, 90% within 7.3 s** on v6-gate's 1280x720 frames (4.6 s on v1's smaller ones), from 12 s. The gate waits for the slowest of its five calls, and flash sometimes thought for 10-20 s on one view: its three tasks now think at most 512 tokens (`llm.GATE_THINKING`), same answers, damage found on v2-damage unchanged (scratches 80%). A gate call still out after 10 s is sent again and the first answer used, for stalls (one car took 70 s with nothing to think about). Measured and rejected: thinking off (first-pass yield 0.31), low image resolution (scratches 75% -> 60%), and re-sending at 4 s (most calls are still out at 4 s). Under 5 s for every car needs a faster model call than flash gives on these frames. |
 
 ## Demo scene 1 on real CARLA (`scripts/run_carla_scene1.sh`)
 

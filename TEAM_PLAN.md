@@ -27,7 +27,7 @@ simulation cannot yet show what the design describes. The target is the design's
 | 2 Two faults | Wrong colour flagged at the gate; dead **left brake light** (telemetry ON, camera OFF); both booked into rework | Dead **headlight** caught (`run_carla_day4.sh`); wrong colour not run on CARLA | Wrong-colour car on CARLA; a brake-lamp fault the asset can show; cars driven to rework bays and re-inspected |
 | 3 Stuck car | Box in lane, worker nearby, "wait" recommended, case sent to the lab | Works (`run_carla_day5.sh`) | The chosen option executed by the car; the case turned into a lab scenario on CARLA |
 | 4 Test lab | Plain-language request → spec → run → passes; adversarial search finds a night / pallet-stack failure, report with clip | Generation and a serial search work (`run_carla_lab.sh`) | Search over light, weather, occluder, second actor; 8 runs in parallel; failure report with its clip |
-| 5 Close | Failure joins the regression suite; release gate shows "1 failing test, release blocked" | Implemented (`lab/regression.py`), never run end to end | Release gate end to end on real runs and BigQuery history |
+| 5 Close | Failure joins the regression suite; release gate shows "1 failing test, release blocked" | Run end to end on CARLA (`run_carla_release.sh`): blocked by the search's failure, reports in BigQuery | Release gate end to end on real runs and BigQuery history |
 
 ---
 
@@ -46,19 +46,19 @@ simulation cannot yet show what the design describes. The target is the design's
 ## Qais: simulation
 
 ### M1: dependable runs
-- [ ] **Fix the camera sensor leak.** Runs leave cameras alive in the world; 28 built up in one
+- [x] **Fix the camera sensor leak.** (`qais/m1-sensor-leak`: 11 left per scene 1 run → 0) Runs leave cameras alive in the world; 28 built up in one
   session, all rendering every frame. Destroy them when each phase ends. Scene 1's gate deliberately
   skips teardown (see `capture_gate_views`), so handle that one with care.
-- [ ] **`scripts/run_carla_all.sh`**: every flow in order, CARLA health-checked and restarted between
+- [x] **`scripts/run_carla_all.sh`** (`qais`): every flow in order, CARLA health-checked and restarted between
   flows, each recording filmed at the end. One command to verify any change.
-- [ ] **Find what crashes the renderer.** A camera west of the yard lane looking west
+- [x] **Find what crashes the renderer.** (`qais`: `-quality-level=Low` itself; the server now runs at Epic) A camera west of the yard lane looking west
   (`(221, -27, 7)`, yaw 163°) segfaults the server even with no replay. Grid-probe to the asset or
   area, then try `-quality-level` (now `Low`). May also be what crashed scene 1's gate.
-- [ ] **Crash-on-exit of the CARLA client** (`terminate called without an active exception` after a
+- [x] **Crash-on-exit of the CARLA client** (`qais`: demos exit via `exit_without_teardown`) (`terminate called without an active exception` after a
   phase finished). Scene 1 tolerates it; fix the cause so other flows don't need the workaround.
 
 ### M2: the plant behaves as the design describes
-- [ ] **Several cars at once** (scene 1). Cars leave the line on the design's rules: fewer than 2 in
+- [x] **Several cars at once** (scene 1). (`qais`: `run_carla_plant.sh`, 3 cars to 2 trucks, all shipped) Cars leave the line on the design's rules: fewer than 2 in
   the gate queue, 25 m apart, slots by truck nearest the loading bay (design, flow 1).
 - [ ] **Missions that move cars.** Yard re-slotting after a late truck changes only the records
   today; the cars should drive to their new slots (design, flow 1 "Send missions").
@@ -66,7 +66,7 @@ simulation cannot yet show what the design describes. The target is the design's
   cameras (flow 3). Today the car stops, because a capture and a running driving loop in one process
   deadlock (comment in `run_carla_scene1.sh`). Find a way: a capture process separate from the
   driving process, or sensors that stream into a buffer.
-- [ ] **A wrong-colour car** at the gate (scene 2): spawn a car whose colour or model differs from its
+- [x] **A wrong-colour car** at the gate (scene 2) (`qais`: `MARSHAL_PLANT_WRONG_COLOUR=2 run_carla_plant.sh`; flagged at 1.00 in 3 of 3 runs, booked to production control): spawn a car whose colour or model differs from its
   build sheet. The variant check is the stand-in the design names for CARLA (flow 3, "What is real").
 - [ ] **A brake-lamp fault the camera can see** (scene 2 wants a dead left brake light). This asset
   draws one continuous brake bar and no left blinker (README, "Flow 4 on the whole R-12 routine").
@@ -99,32 +99,76 @@ simulation cannot yet show what the design describes. The target is the design's
 ### M2: the judgements in demo scenes 1–3
 - [ ] **Wrong colour flagged** at the gate on Qais's car, with the finding written as the design's
   structured output (zone, type, confidence, image) and the verdict from the 0.6 / 0.9 thresholds.
-- [ ] **Scratches and dents** from a public car-damage image set (the design's stated stand-in,
+- [x] **Scratches and dents** from a public car-damage image set (the design's stated stand-in,
   "What is real"): findings per zone for the eight body zones, against labelled ground truth.
-- [ ] **Gate under 5 s** (design, "A car's journey"). Its five Gemini calls run one at a time
+  *Done:* dataset v2-damage (Humans in the Loop, CC0): 30 damaged photos, 16 clean crops.
+  gemini-2.5-flash finds 97% of damage, right kind 95%, right zone 100%, 13.7 s a photo;
+  flash-lite (thinking 1024) 89%, 4.9 s. False alarms need truly clean panels (see README).
+- [x] **Gate under 5 s** (design, "A car's journey"). Its five Gemini calls run one at a time
   because `google-genai` misbehaved from five threads; retry with a current SDK or the async client.
+  *Progress:* calls run at once again (lock removed, schema sent as JSON): 33 s → 12 s on
+  gemini-2.5-flash, same answers. Then thinking capped at 512 tokens for the gate's tasks and a
+  stalled call re-sent after 10 s: v6-gate median 5.6 → 5.3 s, 90% within 7.3 s (was 8.6), same
+  answers, damage recall unchanged. *Accepted at 5.3 s median* (Rey, 2026-10-10): a single flash
+  call on 1280x720 frames takes 4-6 s, and lower resolution was faster but missed scratches.
+- [x] **No false alarms on clean cars at the gate** (found in Qais's multi-car runs, about one in
+  three). *Done:* dataset v6-gate (`scripts/capture_gate_set.py`: five colours x six suns, plus
+  Qais's plant cars). Each finding is checked against the same camera's photo of the latest car that
+  passed: false findings on clean cars 6.7% -> 0%, first-pass yield 0.93 -> 0.97, wrong colour still
+  10/10, real damage still 93% on v2-damage. The first car of a run has no reference; once a
+  supervisor clears it, it becomes one.
 - [ ] **Brake-lamp fault judged** on Qais's asset, with the 3 s clip per step, so scene 2 can use the
   design's dead left brake light.
-- [ ] **Rework loop on real runs**: the summary orders safety items first, picks the bay from the
+- [x] **Rework loop on real runs**: the summary orders safety items first, picks the bay from the
   design's table, and re-inspection after repair turns the report to PASS.
-- [ ] **Assistance card content** (design, flow 2): the one-line situation, the object located in the
+  *Done:* `MARSHAL_DAY4_REWORK=1 run_carla_day4.sh` closes the loop on CARLA (dark lamp → electrical
+  bay → repair relights it → step 1 only re-run → PASS, twice). Bays now come from the defect's
+  words (`bay_for`): 13% of real findings used to miss the table. Dataset v3-report: right bays,
+  safety first, summary leads with safety, all 1.0 on gemini-2.5-flash. For Qais: `repair()` in
+  `carla_backend.py` and the `--rework` flag in `demo_carla_day4.py` are new.
+- [x] **Assistance card content** (design, flow 2): the one-line situation, the object located in the
   clip (for the dashboard to box), ranked options with reasons, confidence, and never recommending a
   high-risk option.
-- [ ] **Persist proposals.** Supervisor proposals (e.g. the late-truck re-plan) live only in the
+  *Done:* `AssistanceCase.objects` holds each box (label, kind, frame, `image` URI, `box_2d`
+  [ymin, xmin, ymax, xmax] 0-1000, distance), from a separate `assist.locate` call; the boxed frame is
+  uploaded. Scene 3: right recommendation 5/5, worker boxed well (IoU 0.78), box loosely (0.25).
+  Card time: 13 s -> 4.3 s median (19 of 22 under 5 s) on dataset v7-assist (11 CARLA stops, 8 with
+  a person in view) with the assessment's thinking off, same answers; the situation line now names
+  every person in view (16 of 16).
+- [x] **Persist proposals.** Supervisor proposals (e.g. the late-truck re-plan) live only in the
   running app; there is no Firestore collection for them. Add one beside `COLLECTIONS` in
   `src/marshal_ai/store/__init__.py`; Faris's `/proposals` page reads it.
 
 ### M3: the test lab story
-- [ ] **Incident → test on CARLA.** Scene 3's assistance case becomes a scenario spec, validated,
+- [x] **Incident → test on CARLA.** Scene 3's assistance case becomes a scenario spec, validated,
   compiled and run; the design's ops-to-lab loop ("The loop between operations and the test lab").
-- [ ] **Search that reads results.** Gemini proposes each batch from the previous batch's scores and
+  *Done:* `scripts/run_incident_to_test.sh`. Scene 3's case → SC-0142 first try → run on CARLA →
+  in the library, tagged from-incident. It fails `no_contact`: the car drives into the box (see
+  Qais hand-off). Generation went from 0/3 to 12/12 on dataset v4-scenario, 100% faithful.
+- [x] **Search that reads results.** Gemini proposes each batch from the previous batch's scores and
   clips and says why ("gap shrinks at night; try tall occluders next"), within the 60-run budget.
-- [ ] **The failure report** in the design's form (flow 7 example): conditions, measured gap vs
+  *Done for scores:* measured against random search on dataset v5-search: first failure in 11 runs
+  vs 19, 2.9 vs 2.0 failures per 100 runs, faster on every scenario with a failure. Each run keeps
+  its reason (`TestRun.reason`). Clips wait on Qais's clip per test run.
+- [x] **The failure report** in the design's form (flow 7 example): conditions, measured gap vs
   limit, likely cause, suggested fix, with the clip.
-- [ ] **Release gate end to end** (scene 5): the failure enters the regression suite, BigQuery
+  *Done:* conditions, measured vs limit and "it passes with ..." come from the runs, not the model;
+  Gemini gives the cause and a concrete fix (zone, condition, km/h), which is tried in the simulator
+  on the failing and the passing case. Dataset v5-search: fix proposed 1.0, fix works 1.0. Stored as
+  `Scenario.failure_report`. On CARLA the fix is reported "not tried" (the runner cannot change the
+  driving system); the clip waits on Qais's clip per test run.
+- [x] **Release gate end to end** (scene 5): the failure enters the regression suite, BigQuery
   history is read, and the gate reports "1 failing test, release blocked".
-- [ ] **A retrieval library for generation**: validated specs as examples for new requests, as in
+  *Done:* `run_carla_release.sh` on CARLA with Gemini: the search failed SC-0142-v1 in 2 runs, it
+  joined the suite, and the gate reported "2 tests, 1 passed, 1 failed. 1 failing test, release
+  blocked." Release reports are stored (`releases`) and written to BigQuery; the previous release is
+  read back from there. Release 1.1 (the fix) runs only on the quick simulator.
+- [x] **A retrieval library for generation**: validated specs as examples for new requests, as in
   ChatScene (design, flow 6 "The method Marshal keeps").
+  *Done:* `lab/library.py`: five checked seeds plus every reviewed library scenario; a request is
+  shown the two most like it. Dataset v4-scenario (8 requests, both ways): first try 18/24 vs 15/24
+  with the fixed examples, mean attempts 1.33 vs 1.58, all generated and faithful. Small gain; the
+  previous run tied. The fix loop now sees all earlier errors.
 
 ### M4: measured against the design
 - [ ] **Evaluation harness.** Run each flow N times and compute the design's KPIs:
@@ -133,6 +177,14 @@ simulation cannot yet show what the design describes. The target is the design's
   telemetry and camera, failures per item; flow 5 rework rate, cars shipped with an open finding
   (target 0); flow 7 failures per 100 runs, time to first failure. It runs mostly on saved images
   and the offline runner, so it needs little CARLA time.
+  *Started:* `python -m marshal_ai.eval` covers flows 2, 3 and 4 on dataset v1 (7 cases from
+  the 2026-10-09 runs); v2-v5 add damage, reports, generation and search.
+  *Operational KPIs done:* `python -m marshal_ai.shift` runs a 40-car shift on the simulated plant
+  and reports flows 1, 2, 3, 4 and 5 against each car's real faults. 10 shifts: no faulty car
+  ships with a perfect gate; with Gemini's measured damage recall 16 of 68 damaged cars ship while
+  "shipped with an open finding" reads 0. It found and fixed two bugs: cars that found the yard
+  full were never shipped, and the simulated plant missed every dead lamp after the first car.
+  *Still to come:* a larger image dataset (needs CARLA frames from Qais's cars and faults).
 
 ---
 
@@ -184,8 +236,12 @@ at a time, so the code work is parallel and the server time is shared.
 | Qais → Rey | Wrong-colour car, brake-lamp asset | Scene 2 judgements |
 | Qais → Rey | Assistance options executed in CARLA | Scene 3 end to end |
 | Qais → Rey | Full search space compiled; parallel servers; a clip per run | Search that reads results, failure report with clip |
-| Rey → Faris | Record shapes, the `proposals` collection, the assistance card fields | Dashboard screens |
+| Rey → Faris | Record shapes, the `proposals` collection, the assistance card fields (`AssistanceCase.objects`: draw `box_2d` on `image`, scaled from 0-1000), `TestRun.reason` (why the search tried each variant), `Scenario.failure_report` (conditions, measured, passes_when, likely_cause, suggested_fix, speed_fix, fix_check, clip_uri), the `releases` collection (`ReleaseReport`: passed, failed, newly failing/passing since `previous_release`, approved_by) | Dashboard screens |
 | Qais → Faris | Replay clips per run, a live camera | Video on the dashboard |
+| Rey → Qais | BehaviorAgent drives into static props: SC-0142 (scene 3's box) fails `no_contact` on CARLA. The stand-in needs to brake for objects in the lane, as the plant's driving system would | Scene 3 and its test passing |
+| Rey → Qais | The VM's `.env` (`~/marshal-app`) points `GOOGLE_APPLICATION_CREDENTIALS` at a laptop path; scripts that do not export it themselves (`run_carla_lab.sh`) cannot reach Gemini | Lab runs with Gemini on the VM |
+| Rey → Qais | Small changes in your files: `repair()` in `carla_backend.py`, `--rework` in `demo_carla_day4.py`, `MARSHAL_LAB_SOURCE` in `run_carla_lab.sh`, the contact event in `lab/compiler.py` | Review |
+| Rey → Qais | Every run now dresses Town05 as a plant before recording (`dress_plant.py`, called from `carla_recording.sh`; `MARSHAL_DRESS=0` skips it; tagged `marshal-dressing`, none on a plant lane). Films are labelled (`film_labels.py`) and need Pillow: `install_carla_mission_runtime.sh` now installs it - please re-run it on the host | Plant scenes and filmed runs |
 
 ## Suggested first week
 

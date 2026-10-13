@@ -14,3 +14,6 @@ sa-*.json
 service-account*.json
 credentials/
 .adk/
+
+# evaluation reports (python -m marshal_ai.eval)
+eval/results/

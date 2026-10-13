@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from marshal_ai.lab.compiler import compile_spec
+from marshal_ai.lab.library import SEEDS, Example, library_examples, retrieve
 from marshal_ai.lab.reference import unfair_reasons
 from marshal_ai.lab.runner import Runner
 from marshal_ai.lab.spec import FLAG_CRITERIA, METRICS, ActorType, ScenarioSpec, TimeOfDay, Weather
@@ -23,26 +24,21 @@ if TYPE_CHECKING:
 
 MAX_FIXES = 3
 
-EXAMPLE_SPEC = {
-    "id": "SC-0142",
-    "source": "supervisor request",
-    "map_zone": "finishing_corner",
-    "time_of_day": "dusk",
-    "weather": "clear",
-    "ego": {"route": "line_end->finishing", "speed_kmh": 8},
-    "actors": [
-        {"type": "forklift", "state": "parked", "position": "finishing_corner.p3"},
-        {"type": "worker", "start": "behind:forklift", "walk_speed_ms": 1.3,
-         "trigger": {"ego_distance_m": 9}},
-    ],
-    "pass_criteria": ["no_contact", "min_gap_to_person_m >= 1.5", "speed_near_person_kmh <= 5"],
-}
+# The design's flow 6 example and the assistance-desk one; both are seeds of the retrieval library.
+EXAMPLE_SPEC = SEEDS[0].spec
+INCIDENT_EXAMPLE_SPEC = SEEDS[1].spec
+
+# Library examples shown with each request (lab/library.py).
+EXAMPLES_SHOWN = 2
 
 SYSTEM = """You turn plain-language plant situations into scenario specs for simulation tests of a
 driverless car system. Output one JSON object only, never code. Use only the named map points, zones,
-actor types, times of day, weather and pass criteria you are given. Plant speed limit is 10 km/h.
+actor types, times of day, weather and pass criteria you are given, and only the fields the examples
+use. Plant speed limit is 10 km/h. The car starts at the first point of its route, so never place an
+actor there: to recreate something at point X, start the route at a point before X.
 A worker who steps out from behind something uses "start": "behind:<actor type>" and needs
-walk_speed_ms and a trigger. An unknown object blocking the lane (a dropped box, debris) is a "box"
+walk_speed_ms and a trigger; only a forklift, pallet stack or parked car can hide a person. A person
+near a smaller object, such as a box, stands at that object's point. An unknown object blocking the lane (a dropped box, debris) is a "box"
 actor with a position on the ego route; the car must stop before it, so do not require reached_goal.
 Always include pass criteria that capture what safe means here, and that a careful driver could meet:
 the car has to drive its route, so never limit its overall speed to near zero."""
@@ -55,6 +51,7 @@ class GenerationResult:
     errors: list[str] = field(default_factory=list)
     code: str | None = None
     dry_run_metrics: dict | None = None
+    retried_for: list[list[str]] = field(default_factory=list)   # the errors each fix was asked for
 
     @property
     def ok(self) -> bool:
@@ -78,6 +75,17 @@ class ScenarioGenerator:
     def __init__(self, rt: "Runtime", runner: Runner):
         self.rt = rt
         self.runner = runner
+        # False shows the fixed examples instead (the design example, plus the incident one for a
+        # case from the desk): the baseline retrieval is measured against.
+        self.retrieval = True
+        self.hold_out: set[str] = set()        # example ids not to show, for evaluation
+        self.last_examples: list[str] = []
+
+    def examples_for(self, request: str, source: str) -> list[Example]:
+        if not self.retrieval:
+            return SEEDS[:1] + (SEEDS[1:2] if source.startswith("assistance") else [])
+        pool = [e for e in library_examples(self.rt.store) if e.id not in self.hold_out]
+        return retrieve(request, source, pool, EXAMPLES_SHOWN)
 
     def _next_id(self) -> str:
         existing = [int(s.id.split("-")[1]) for s in self.rt.store.list(Scenario) if s.id.count("-") == 1]
@@ -86,17 +94,28 @@ class ScenarioGenerator:
     def generate(self, request: str, source: str = "supervisor request") -> GenerationResult:
         scenario_id = self._next_id()
         context = json.dumps(map_context(self.rt), indent=1)
+        examples = self.examples_for(request, source)
+        self.last_examples = [e.id for e in examples]
         prompt = (f"Situation: {request}\n\nPlant map and allowed values:\n{context}\n\n"
-                  f"Example of a valid spec:\n{json.dumps(EXAMPLE_SPEC, indent=1)}\n\n"
-                  f"Write the spec. Use id {scenario_id} and source {source!r}.")
+                  "Reviewed tests from the library for the most similar situations; follow their form, "
+                  "not their content where the situation differs:\n\n"
+                  + "".join(f"Situation: {e.request}\nSpec:\n{json.dumps(e.spec, indent=1)}\n\n" for e in examples)
+                  + f"Write the spec. Use id {scenario_id} and source {source!r}.")
         raw: dict = {}
         errors: list[str] = []
+        retried_for: list[list[str]] = []
         attempts = 0
         while attempts <= MAX_FIXES:
             attempts += 1
             if errors:
+                # Earlier errors go with the new ones: shown only the latest, Gemini fixed one and
+                # brought back the one before (reached_goal, then an unmeetable speed, then reached_goal).
+                earlier = [e for past in retried_for for e in past if e not in errors]
+                retried_for.append(errors)
                 prompt_now = (f"{prompt}\n\nYour previous spec:\n{json.dumps(raw, indent=1)}\n"
-                              f"It has these errors; fix exactly these:\n- " + "\n- ".join(errors))
+                              f"It has these errors; fix exactly these:\n- " + "\n- ".join(errors)
+                              + ("\nEarlier attempts had these errors; do not bring them back:\n- "
+                                 + "\n- ".join(dict.fromkeys(earlier)) if earlier else ""))
             else:
                 prompt_now = prompt
             try:
@@ -122,12 +141,12 @@ class ScenarioGenerator:
                                 status=ScenarioStatus.DRY_RUN_OK, notes=request,
                                 tags=["from-incident"] if source.startswith("assistance") else [])
             self.rt.store.put(scenario)
-            return GenerationResult(scenario, attempts, [], code, dry.metrics)
+            return GenerationResult(scenario, attempts, [], code, dry.metrics, retried_for)
 
         scenario = Scenario(id=scenario_id, spec=raw, source=source, status=ScenarioStatus.REJECTED,
                             notes="Needs an engineer. Last errors: " + "; ".join(errors))
         self.rt.store.put(scenario)
-        return GenerationResult(scenario, attempts, errors)
+        return GenerationResult(scenario, attempts, errors, retried_for=retried_for)
 
     @staticmethod
     def _dry_run_errors(spec: ScenarioSpec, dry) -> list[str]:
@@ -138,7 +157,9 @@ class ScenarioGenerator:
             if a.trigger is not None and i not in dry.triggered:
                 errors.append(f"actors.{i}: trigger at {a.trigger.ego_distance_m} m never fired in the dry run; "
                               "place the actor on or next to the ego route")
-        blocked = any(a.type == ActorType.BOX for a in spec.actors)     # the car is meant to stop
+        # the car is meant to stop: before a box, or behind a car that brakes and stays in the lane
+        blocked = any(a.type == ActorType.BOX or (a.type == ActorType.CAR and a.state == "braking")
+                      for a in spec.actors)
         if not blocked and not dry.metrics.get("reached_goal") and "reached_goal" not in spec.pass_criteria \
                 and dry.metrics.get("no_contact"):
             errors.append("dry run: ego never reached the end of its route; shorten the route")

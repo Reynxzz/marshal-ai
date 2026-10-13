@@ -11,6 +11,15 @@ from pathlib import Path
 import yaml
 
 DEFAULT_MAP_PATH = Path(__file__).with_name("plant_map.yaml")
+# The plant's own world (scripts/plant_xodr.py), chosen with MARSHAL_CARLA_MAP=MarshalPlant: the same
+# points, zones and segments, with CARLA transforms on the OpenDRIVE plant instead of Town05.
+WORLD_MAP_PATH = Path(__file__).with_name("plant_map_world.yaml")
+PLANT_WORLD = "MarshalPlant"
+
+
+def default_map_path() -> Path:
+    import os
+    return WORLD_MAP_PATH if os.environ.get("MARSHAL_CARLA_MAP") == PLANT_WORLD else DEFAULT_MAP_PATH
 
 
 @dataclass(frozen=True)
@@ -40,7 +49,17 @@ class PlantMap:
         return [p.name for p in self.points.values() if p.zone == zone]
 
     def distance(self, a: str, b: str) -> float:
+        """Straight-line metres between two points, measured where the cars actually are.
+
+        The schematic x/y in plant_map.yaml are a diagram, not a survey, and they ranked the yard
+        slots wrongly: "nearest the loading bay" came out as Y7, which is 47 m from the bay in
+        CARLA, while Y8 is 7 m from it. Cars for the next truck were being parked across the yard
+        from where it loads. So when both points have a CARLA transform, that is what is measured;
+        the schematic is the fallback for points that have none.
+        """
         pa, pb = self.points[a], self.points[b]
+        if pa.carla and pb.carla:
+            return math.hypot(pa.carla["x"] - pb.carla["x"], pa.carla["y"] - pb.carla["y"])
         return math.hypot(pa.x - pb.x, pa.y - pb.y)
 
     def route(self, start: str, goal: str) -> list[str]:
@@ -97,6 +116,10 @@ def _parse(raw: dict) -> PlantMap:
     return PlantMap(zones, points, edges, raw.get("carla_map"))
 
 
+def load_plant_map(path: Path | None = None) -> PlantMap:
+    return _load(Path(path) if path is not None else default_map_path())
+
+
 @lru_cache(maxsize=4)
-def load_plant_map(path: Path = DEFAULT_MAP_PATH) -> PlantMap:
-    return _parse(yaml.safe_load(Path(path).read_text()))
+def _load(path: Path) -> PlantMap:
+    return _parse(yaml.safe_load(path.read_text()))

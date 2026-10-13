@@ -1,0 +1,208 @@
+"""Run one case through the flow's own code, the same path a real run takes, and record the answer.
+
+Each run gets a fresh app with an in-memory store and the fake plant, so nothing reaches
+Firestore and no CARLA server is needed: the evidence comes from the case, not from cameras.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import random
+import time
+from typing import Callable
+
+from marshal_ai.app import MarshalApp
+from marshal_ai.config import Settings
+from marshal_ai.driving.messages import AssistRequest
+from marshal_ai.driving.routines import routine_steps
+from marshal_ai.eval.damage import kinds_of
+from marshal_ai.eval.dataset import (AssistCase, DamageCase, GateCase, MediaCache, ReportCase, ScenarioCase,
+                                     SearchCase, TrackCase)
+from marshal_ai.flows.functional import ROUTINE
+from marshal_ai.lab.spec import ScenarioSpec
+from marshal_ai.llm import LLM, FakeLLM, Media
+from marshal_ai.records import Car, CarState, InspectionResult, Scenario, ScenarioStatus
+from marshal_ai.runtime import build_runtime
+
+ISOLATED = Settings(bus="memory", store="memory", history="none", artifacts="none", driving="fake",
+                    llm="offline", lab="sim")
+
+
+class _QuietBus:
+    """Delivers nothing. A judgement is scored on its own; left wired, a PASS at the gate set off
+    the report flow, which tried to send the evaluation car to the track and failed."""
+
+    async def publish(self, topic, message) -> None:
+        pass
+
+    def subscribe(self, topic, handler) -> None:
+        pass
+
+
+def fresh_app(llm: LLM) -> MarshalApp:
+    rt = build_runtime(ISOLATED, llm=llm)
+    rt.bus = _QuietBus()
+    return MarshalApp(rt)
+
+
+def _jpeg(cache: MediaCache, ref: str, label: str) -> Media:
+    return Media(mime="image/jpeg", data=cache.read(ref), uri=ref if ref.startswith("gs://") else None,
+                 label=label)
+
+
+async def _timed(fn: Callable) -> tuple[object, float]:
+    start = time.perf_counter()
+    out = await fn()
+    return out, time.perf_counter() - start
+
+
+async def run_gate(llm: LLM, case: GateCase, cache: MediaCache) -> dict:
+    app = fresh_app(llm)
+    vin = f"EVAL-{case.id}"
+    app.rt.store.put(Car(vin=vin, build_sheet=case.build_sheet, state=CarState.INSPECTION_GATE,
+                         location="inspection_gate"))
+    # The gate reads the view name from the start of each label, as the cameras write it.
+    images = [_jpeg(cache, ref, f"{view} camera") for view, ref in case.views.items()]
+    if case.reference:
+        app.visual.references = {view: ("EVAL-REFERENCE", _jpeg(cache, ref, f"{view} camera"))
+                                 for view, ref in case.reference.items()}
+    result, seconds = await _timed(lambda: app.visual.inspect(vin, images=images))
+    flagged = [m.split(":", 1)[0].strip().lower() for m in result.build_sheet_mismatches]
+    return {"verdict": result.verdict.value,
+            "findings": [f.model_dump(mode="json", exclude={"image"}) for f in result.findings],
+            "mismatch_items": flagged,
+            "mismatches": result.build_sheet_mismatches,
+            "observations": result.observations,
+            "seconds": round(seconds, 2)}
+
+
+async def run_track(llm: LLM, case: TrackCase, cache: MediaCache) -> dict:
+    app = fresh_app(llm)
+    vin = f"EVAL-{case.id}"
+    clip = _jpeg(cache, case.frame, f"track camera, step {case.step}")
+    if case.reference is not None:
+        # As if a car that passed this step had gone first: its frame becomes the reference.
+        [step] = routine_steps(ROUTINE, [case.step])
+        app.functional.references[step.name] = _jpeg(cache, case.reference, "reference")
+    item, seconds = await _timed(lambda: app.functional.judge_clip(vin, case.step, clip, case.telemetry))
+    return {"camera_ok": item.camera_ok, "camera_confidence": item.camera_confidence,
+            "telemetry_ok": item.telemetry_ok, "passed": item.passed,
+            "observation": item.observation, "seconds": round(seconds, 2)}
+
+
+async def run_assist(llm: LLM, case: AssistCase, cache: MediaCache) -> dict:
+    app = fresh_app(llm)
+    vin = f"EVAL-{case.id}"
+    app.rt.store.put(Car(vin=vin, build_sheet={"model": "sedan", "colour": "black"},
+                         state=CarState.LINE_END, location=case.location or "line_end"))
+    frames = [_jpeg(cache, ref, f"frame {i + 1} of {len(case.frames)} before the stop")
+              for i, ref in enumerate(case.frames)]
+    # The desk asks the driving system for the frames it held when the car stopped; here they
+    # come from the case instead.
+    app.assistance.clip = lambda request: frames
+    request = AssistRequest(case_id=f"AC-{case.id}", vin=vin, location=case.location,
+                            reason=case.reason, options=case.options)
+    result, seconds = await _timed(lambda: app.assistance.on_request(request))
+    risk = {r["option"]: r.get("risk") for r in result.ranking}
+    return {"recommended": result.recommended,
+            "people_or_moving_equipment": result.people_or_moving_equipment,
+            "recommended_risk": risk.get(result.recommended),
+            "confidence": result.confidence, "situation": result.situation,
+            "objects": [{"label": o["label"], "kind": o["kind"], "frame": o["frame"],
+                         "box_2d": o["box_2d"]} for o in result.objects],
+            "seconds": round(seconds, 2)}
+
+
+async def run_damage(llm: LLM, case: DamageCase, cache: MediaCache) -> dict:
+    app = fresh_app(llm)
+    photo = _jpeg(cache, case.image, "inspection photo")
+    reference = _jpeg(cache, case.reference, "reference photo") if case.reference else None
+    (findings, clear, verdict), seconds = await _timed(lambda: app.visual.assess_photo(photo, reference=reference))
+    return {"verdict": verdict.value,
+            "findings": [{"zone": f.zone, "type": f.type, "confidence": f.confidence,
+                          "kinds": sorted(kinds_of(f.type))} for f in findings],
+            "clear_confidence": clear, "seconds": round(seconds, 2)}
+
+
+class _Recording:
+    """Passes calls through and keeps each task's answer: the router corrects Gemini's rework plan
+    against the bay table, so the plan Gemini itself wrote is only visible on the way in."""
+
+    def __init__(self, llm: LLM):
+        self.llm, self.answers = llm, {}
+
+    def generate(self, task, prompt, schema=None, media=None, system=""):
+        self.answers[task] = self.llm.generate(task, prompt, schema, media, system)
+        return self.answers[task]
+
+
+async def run_report(llm: LLM, case: ReportCase, cache: MediaCache) -> dict:
+    recording = _Recording(llm)
+    app = fresh_app(recording)
+    vin = f"EVAL-{case.id}"
+    app.rt.store.put(Car(vin=vin, build_sheet=case.build_sheet, state=CarState.REPORT, location="report_point"))
+    for kind, result in (("visual", case.visual), ("functional", case.functional)):
+        app.rt.store.put(InspectionResult.model_validate({**result, "vin": vin, "kind": kind}))
+    report, seconds = await _timed(lambda: app.router.finalize(vin))
+    draft = recording.answers.get("report.write")
+    [proposal] = app.rt.pending("rework") or [None]
+    return {"verdict": report.verdict.value, "summary": report.summary,
+            "draft_bays": [s.bay for s in draft.steps] if draft else None,
+            "final_bays": [s["bay"] for s in proposal.payload["steps"]] if proposal else [],
+            "seconds": round(seconds, 2)}
+
+
+async def _generate(llm: LLM, case: ScenarioCase, retrieval: bool) -> dict:
+    app = fresh_app(llm)
+    app.generator.retrieval = retrieval
+    result, seconds = await _timed(lambda: asyncio.to_thread(app.generator.generate, case.request, case.source))
+    return {"status": result.scenario.status.value, "attempts": result.attempts, "errors": result.errors,
+            "spec": result.scenario.spec, "examples": app.generator.last_examples,
+            "retried_for": result.retried_for, "seconds": round(seconds, 2)}
+
+
+async def run_scenario(llm: LLM, case: ScenarioCase, cache: MediaCache) -> dict:
+    """Generation on the quick simulator: validated, checked fair and dry-run, but no CARLA.
+
+    With examples retrieved from the library, and with the fixed examples as the baseline: the same
+    generator with retrieval switched off, so the only difference is which examples Gemini sees.
+    """
+    out = await _generate(llm, case, retrieval=True)
+    return {**out, "fixed": await _generate(llm, case, retrieval=False)}
+
+
+def _search(llm: LLM, case: SearchCase, seed: int = 7) -> dict:
+    """One adversarial search from the case's passing scenario, on the quick simulator."""
+    app = fresh_app(llm)
+    spec = ScenarioSpec.model_validate(case.spec)
+    app.rt.store.put(Scenario(id=spec.id, spec=spec.model_dump(mode="json"), source="evaluation",
+                              status=ScenarioStatus.IN_LIBRARY))
+    app.adversarial.budget = case.budget
+    app.adversarial.random = random.Random(seed)
+    start = time.perf_counter()
+    result = app.adversarial.search(spec.id)
+    seconds = time.perf_counter() - start
+    first = result.runs.index(result.failure) + 1 if result.failure else None
+    return {"found": result.failure is not None, "runs_to_failure": first, "runs": len(result.runs),
+            "minimal": result.minimal.changes if result.minimal else None,
+            "failed_criteria": result.minimal.run.failed_criteria if result.minimal else [],
+            "unavoidable": len(result.unavoidable), "reasoning": result.reasoning,
+            "explanation": result.explanation.model_dump() if result.explanation else None,
+            "failure_report": result.failure_report.model_dump(mode="json") if result.failure_report else None,
+            "report": result.report(), "seconds": round(seconds, 2)}
+
+
+async def run_search(llm: LLM, case: SearchCase, cache: MediaCache) -> dict:
+    """Gemini's search, and random search on the same scenario and budget as the baseline.
+
+    With no model answering, the tester samples variations at random (its fallback), so the
+    baseline is the same code with the steering removed: the only difference is Gemini.
+    """
+    guided = await asyncio.to_thread(_search, llm, case)
+    baseline = [await asyncio.to_thread(_search, FakeLLM(), case, seed) for seed in range(1, case.random_seeds + 1)]
+    return {**guided, "random": [{k: b[k] for k in ("found", "runs_to_failure", "runs", "minimal", "unavoidable")}
+                                 for b in baseline]}
+
+
+RUNNERS = {"gate": run_gate, "track": run_track, "assist": run_assist, "damage": run_damage,
+           "report": run_report, "scenario": run_scenario, "search": run_search}

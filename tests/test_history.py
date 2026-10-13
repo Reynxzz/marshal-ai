@@ -153,3 +153,31 @@ def test_reads_and_deletes_pass_through_without_history():
 
     assert store.get(Car, "VIN-1") is None
     assert recorder.appended == [], "only state changes are history"
+
+
+class _QueryClient(_Client):
+    def __init__(self, rows=None, explode=False):
+        super().__init__()
+        self._rows, self._query_explodes, self.sql = rows or [], explode, []
+
+    def query(self, sql, job_config=None):
+        if self._query_explodes:
+            raise RuntimeError("403 bigquery.jobs.create denied")
+        self.sql.append((sql, {p.name: p.value for p in job_config.query_parameters}))
+        rows = self._rows
+        return type("Job", (), {"result": lambda self: rows})()
+
+
+def test_latest_reads_the_newest_row_of_a_kind_except_one_key():
+    client = _QueryClient(rows=[{"payload": json.dumps({"release": "behavior-agent-1.0"})}])
+    history = BigQueryHistory("proj", client=client, retry_delay_s=0.0)
+    assert history.latest("ReleaseReport", exclude_key="behavior-agent-1.1") == {"release": "behavior-agent-1.0"}
+    [(sql, params)] = client.sql
+    assert "ORDER BY recorded_at DESC LIMIT 1" in sql and "key != @key" in sql
+    assert params == {"kind": "ReleaseReport", "key": "behavior-agent-1.1"}
+
+
+def test_latest_is_none_when_history_cannot_be_read():
+    history = BigQueryHistory("proj", client=_QueryClient(explode=True), retry_delay_s=0.0)
+    assert history.latest("ReleaseReport") is None
+    assert NoHistory().latest("ReleaseReport") is None

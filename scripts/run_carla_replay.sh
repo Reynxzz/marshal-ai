@@ -12,7 +12,9 @@ readonly RECORDINGS=/var/lib/carla/recordings
 viewer_was_active=false
 
 cd "$APP_ROOT"
-export PYTHONPATH="$APP_ROOT/src:$APP_ROOT/scripts:/opt/marshal-runtime/vendor:/opt/carla/PythonAPI/carla"
+# MARSHAL_EXTRA_PYTHONPATH: e.g. a folder with Pillow, for the film's labels, on a host whose shared
+# runtime does not have it yet (prepare_carla_host.sh installs it there).
+export PYTHONPATH="$APP_ROOT/src:$APP_ROOT/scripts:/opt/marshal-runtime/vendor:/opt/carla/PythonAPI/carla${MARSHAL_EXTRA_PYTHONPATH:+:$MARSHAL_EXTRA_PYTHONPATH}"
 
 name="${1:-}"
 if [[ -z "$name" || "$name" == --* ]]; then
@@ -42,5 +44,5 @@ trap restore_viewer EXIT
 
 # Load the map up front: CARLA falls back to Town10 after a restart, and a map load inside the
 # replay outlasts the client timeout.
-python3 scripts/ensure_carla_map.py --map Town05 --wait-seconds 600
+python3 scripts/ensure_carla_map.py --map "${MARSHAL_CARLA_MAP:-Town05}" --wait-seconds 600
 python3 scripts/replay_carla.py --name "$name" "$@"

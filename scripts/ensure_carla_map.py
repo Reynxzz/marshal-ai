@@ -32,7 +32,17 @@ def main() -> int:
         raise SystemExit(f"CARLA did not become ready: {last_error}")
 
     current = world.get_map().name.rsplit("/", 1)[-1]
-    if current != args.map:
+    if args.map == "MarshalPlant":
+        # The plant's own world is built from OpenDRIVE every time: a generated world is not one CARLA
+        # can load by name, and a server restart loses it.
+        import sys
+        from pathlib import Path
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from load_plant_world import build
+        from plant_xodr import xodr
+        client.set_timeout(180.0)
+        world = build(client, xodr())
+    elif current != args.map:
         client.set_timeout(180.0)
         world = client.load_world(args.map)
         world.wait_for_tick(60.0)

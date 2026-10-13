@@ -16,5 +16,5 @@ async def running_app() -> MarshalApp:
 
 
 def proposal_view(p) -> dict:
-    return {"proposal_id": p.proposal_id, "kind": p.kind, "summary": p.summary, "status": p.status,
+    return {"proposal_id": p.proposal_id, "kind": p.kind, "summary": p.summary, "status": p.status.value,
             "details": p.payload}

@@ -19,10 +19,43 @@ log = logging.getLogger("marshal")
 T = TypeVar("T", bound=BaseModel)
 
 
+# Gate calls that have not answered after this long are sent again, and the first answer is used.
+# With thinking capped (llm.GATE_THINKING) a gate call answers in 4-7 s, but on the full v6-gate one
+# car took 70 s and another 37 s with no finding and no second check: a single call stalled, not the
+# model thinking. Temperature 0 and a fixed seed make the second call the same question, so this only
+# changes when the answer arrives; it costs a call only on a stall. At 4 s it would have re-sent most
+# calls (81 of 128 defect calls were still out at 4 s) for no gain, so it is set well past a normal one.
+HEDGE_AFTER_S = {"visual.": 10.0}
+
+
+def hedge_after(task: str) -> float | None:
+    return next((s for prefix, s in HEDGE_AFTER_S.items() if task.startswith(prefix)), None)
+
+
 async def ask(rt: "Runtime", task: str, prompt: str, schema: type[T],
               media: list[Media] | None = None, system: str = "") -> T:
     """Call the LLM off the event loop so the plant keeps ticking while Gemini thinks."""
-    return await asyncio.to_thread(rt.llm.generate, task, prompt, schema, media, system)
+    def call():
+        return asyncio.ensure_future(asyncio.to_thread(rt.llm.generate, task, prompt, schema, media, system))
+
+    first = call()
+    after = hedge_after(task)
+    if after is None:
+        return await first
+    done, _ = await asyncio.wait({first}, timeout=after)
+    if done:
+        return first.result()
+    log.info("%s: no answer after %.0f s, asking again", task, after)
+    second = call()
+    done, pending = await asyncio.wait({first, second}, return_when=asyncio.FIRST_COMPLETED)
+    winner = done.pop()
+    if winner.exception() is not None and pending:      # the other may still answer
+        other = pending.pop()
+        await asyncio.wait({other})
+        return other.result()
+    for other in pending:                               # its thread runs on; the answer is not needed
+        other.add_done_callback(lambda t: t.exception())
+    return winner.result()
 
 
 async def ask_or(rt: "Runtime", task: str, prompt: str, schema: type[T], fallback: T,

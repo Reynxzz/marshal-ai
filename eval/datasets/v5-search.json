@@ -1,0 +1,143 @@
+{
+  "name": "v5-search",
+  "description": "Flow 7: passing scenarios to search from on the quick simulator (driving system behavior-agent-1.0). Each case also runs random search, the baseline.",
+  "search": [
+    {
+      "id": "design-sc0142",
+      "spec": {
+        "id": "SC-0142",
+        "source": "supervisor request",
+        "map_zone": "finishing_corner",
+        "time_of_day": "dusk",
+        "weather": "clear",
+        "ego": {
+          "route": "line_end->finishing",
+          "speed_kmh": 8
+        },
+        "actors": [
+          {
+            "type": "forklift",
+            "state": "parked",
+            "position": "finishing_corner.p3"
+          },
+          {
+            "type": "worker",
+            "start": "behind:forklift",
+            "walk_speed_ms": 1.3,
+            "trigger": {
+              "ego_distance_m": 9
+            }
+          }
+        ],
+        "pass_criteria": [
+          "no_contact",
+          "min_gap_to_person_m >= 1.5",
+          "speed_near_person_kmh <= 5"
+        ]
+      },
+      "note": "The design's flow 6 example, the scenario its flow 7 example searches from."
+    },
+    {
+      "id": "test-track-parked-car",
+      "spec": {
+        "id": "SC-0300",
+        "source": "eval",
+        "map_zone": "test_track",
+        "time_of_day": "noon",
+        "weather": "clear",
+        "ego": {
+          "route": "inspection_gate->test_track->report_point",
+          "speed_kmh": 8
+        },
+        "actors": [
+          {
+            "type": "parked_car",
+            "state": "parked",
+            "position": "test_track"
+          },
+          {
+            "type": "worker",
+            "start": "behind:parked_car",
+            "walk_speed_ms": 1.2,
+            "trigger": {
+              "ego_distance_m": 12
+            }
+          }
+        ],
+        "pass_criteria": [
+          "no_contact",
+          "min_gap_to_person_m >= 1.5",
+          "speed_near_person_kmh <= 5"
+        ]
+      },
+      "note": "A worker stepping out from behind a parked car at noon."
+    },
+    {
+      "id": "incident-box-worker",
+      "spec": {
+        "id": "SC-0310",
+        "source": "assistance case AC-VIN-STUCK-1",
+        "map_zone": "test_track",
+        "time_of_day": "noon",
+        "weather": "clear",
+        "ego": {
+          "route": "inspection_gate->test_track->report_point",
+          "speed_kmh": 8
+        },
+        "actors": [
+          {
+            "type": "box",
+            "state": "stationary",
+            "position": "test_track"
+          },
+          {
+            "type": "worker",
+            "state": "moving",
+            "position": "report_point",
+            "walk_speed_ms": 1.3
+          }
+        ],
+        "pass_criteria": [
+          "no_contact",
+          "min_gap_to_person_m >= 1.5",
+          "speed_near_person_kmh <= 5"
+        ]
+      },
+      "note": "Scene 3's incident as the lab wrote it (SC-0142 on 2026-10-10): no occluder or trigger to start from."
+    },
+    {
+      "id": "corner-pallets-noon",
+      "spec": {
+        "id": "SC-0320",
+        "source": "eval",
+        "map_zone": "finishing_corner",
+        "time_of_day": "noon",
+        "weather": "clear",
+        "ego": {
+          "route": "report_point->finishing",
+          "speed_kmh": 8
+        },
+        "actors": [
+          {
+            "type": "pallet_stack",
+            "state": "parked",
+            "position": "finishing_corner.p2"
+          },
+          {
+            "type": "worker",
+            "start": "behind:pallet_stack",
+            "walk_speed_ms": 1.0,
+            "trigger": {
+              "ego_distance_m": 14
+            }
+          }
+        ],
+        "pass_criteria": [
+          "no_contact",
+          "min_gap_to_person_m >= 1.5"
+        ]
+      },
+      "note": "A worker stepping out from behind a pallet stack in the corner at noon."
+    }
+  ]
+}

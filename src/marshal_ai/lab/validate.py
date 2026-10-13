@@ -57,6 +57,14 @@ def validate_spec(raw: dict, plant_map: PlantMap) -> SpecCheck:
     touched_zones: set[str] = set()
     for i, actor in enumerate(spec.actors):
         where = f"actors.{i}"
+        # The car spawns at the route's first point, so an actor there starts inside it: contact
+        # at t=0, which no driver could avoid. Gemini did this on every try at scene 3's incident
+        # and, told only that "no_contact is not achievable", loosened the criteria instead.
+        for field_name in ("position", "start"):
+            if getattr(actor, field_name) == route[0]:
+                errors.append(f"{where}.{field_name}: {route[0]} is where the car starts, so it would start "
+                              f"inside this {actor.type.value}; start the route at an earlier point that "
+                              f"leads to {route[0]}, or place the {actor.type.value} further along the route")
         if actor.position is None and actor.start is None:
             errors.append(f"{where}: needs a position or a start")
         if actor.position is not None:

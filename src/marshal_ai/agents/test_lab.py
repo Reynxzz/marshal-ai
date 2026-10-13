@@ -66,7 +66,7 @@ async def evaluate_release(release: str) -> dict:
 def approve_release(release: str, engineer: str) -> dict:
     """Record an engineer approving a release. Refused while any regression test fails."""
     gate = get_app().release_gate
-    report = next((r for r in reversed(gate.history) if r.release == release), None)
+    report = gate.report(release)
     if report is None:
         return {"error": f"{release} has not been evaluated"}
     try:

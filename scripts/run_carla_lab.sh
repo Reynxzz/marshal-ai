@@ -10,6 +10,8 @@ readonly OUTPUT="${MARSHAL_LAB_OUTPUT:-/tmp/marshal-lab}"
 readonly RUNTIME_PATH="$APP_ROOT/src:/opt/marshal-runtime/vendor:/opt/carla/PythonAPI/carla"
 readonly ADVERSARIAL="${MARSHAL_LAB_ADVERSARIAL:-0}"
 readonly REQUEST="${MARSHAL_LAB_REQUEST:-}"
+readonly SOURCE="${MARSHAL_LAB_SOURCE:-}"        # e.g. "assistance case AC-..." for an incident
+readonly RELEASE="${MARSHAL_LAB_RELEASE:-}"      # e.g. behavior-agent-1.0: run the release gate last
 viewer_was_active=false
 
 cd "$APP_ROOT"
@@ -48,7 +50,7 @@ if ! carla_healthy; then
   echo "CARLA not answering; restarting the service..." >&2
   sudo systemctl restart carla
 fi
-python3 scripts/ensure_carla_map.py --map Town05 --wait-seconds 600
+python3 scripts/ensure_carla_map.py --map "${MARSHAL_CARLA_MAP:-Town05}" --wait-seconds 600
 start_recording lab
 
 rm -rf "$OUTPUT"
@@ -57,6 +59,12 @@ mkdir -p "$OUTPUT"
 args=(--output "$OUTPUT" --adversarial "$ADVERSARIAL")
 if [[ -n "$REQUEST" ]]; then
   args+=(--request "$REQUEST")
+fi
+if [[ -n "$SOURCE" ]]; then
+  args+=(--source "$SOURCE")
+fi
+if [[ -n "$RELEASE" ]]; then
+  args+=(--release "$RELEASE")
 fi
 
 python3 scripts/demo_carla_lab.py "${args[@]}"

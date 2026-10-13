@@ -51,6 +51,12 @@ lamp named, e.g. a brake light test needs left, right and third brake lamps lit.
 # never catch the fault it exists for. Given a known-good reference frame of the same step to
 # compare against, the same model answered correctly at 0.99 both ways. End-of-line rigs
 # compare against a golden reference for the same reason.
+# Two whole frames were not enough on the plant world, in daylight: the lamps are a small part of a
+# 1280x720 frame, and Gemini failed every healthy car compared with another ("the headlights are off
+# in the frame under test, just as they are in the reference frame"), whatever the prompt said
+# (dataset v8-track: 0.44 accuracy, every healthy car rejected). High media resolution would help, but
+# Vertex allows it for a single image only. So the two are cropped to the front of the car and
+# stacked into one labelled image (pair_image), sent at high resolution.
 SEQUENCE_SYSTEM = """You are shown several frames of one test-track step, in order, a fraction of a
 second apart. Judge whether the expected result happens anywhere across them - an indicator counts as
 blinking if it is lit in some frames and dark in others, and a movement counts if the car's position
@@ -60,6 +66,57 @@ REFERENCE_SYSTEM = """You compare two frames of the same test-track step. The FI
 recorded from a car that passed this step. The SECOND is the car under test. Decide whether the
 expected result is present in the SECOND frame, judging by how it differs from the reference.
 Report what you actually see. Do not assume the car behaved correctly."""
+
+PAIR_SYSTEM = """You compare two crops of the same test-track step, one above the other in a single
+image. The TOP crop, labelled REFERENCE, is from a car that passed this step: the expected result is
+present in it. The BOTTOM crop, labelled UNDER TEST, is the car being checked. Look only at the lamps
+the step names, in both, side by side; other lights (fog, bumper or grille lights) and differences in
+framing, distance or angle do not count. If the lamps named show the same light as in the reference -
+the same glowing strips or bulbs, about as bright - the result is present. If a lamp named glows in the
+reference but is dark, grey or clearly dimmer under test, it is not. Report what you see in each crop.
+Do not assume the car behaved correctly."""
+
+
+# The front of the car in a track camera frame, as fractions of its width and height: the camera
+# sits at the same place relative to every car, straight ahead of it (driving/carla_backend.py).
+FRONT_CROP = (0.22, 0.50, 0.78, 0.88)
+
+
+def pair_image(reference: Media, clip: Media) -> Media | None:
+    """The reference and the frame under test, cropped to the lamps and stacked into one image.
+
+    None when either has no bytes (a gs:// URI only) or Pillow is not installed: the caller then
+    sends the two frames as they are.
+    """
+    if reference.data is None or clip.data is None:
+        return None
+    try:
+        import io
+        from PIL import Image, ImageDraw, ImageFont
+    except ImportError:
+        return None
+    crops = []
+    for media in (reference, clip):
+        try:
+            im = Image.open(io.BytesIO(media.data)).convert("RGB")
+        except (OSError, ValueError):       # not an image Pillow can read: send the frames as they are
+            return None
+        w, h = im.size
+        box = (int(w * FRONT_CROP[0]), int(h * FRONT_CROP[1]), int(w * FRONT_CROP[2]), int(h * FRONT_CROP[3]))
+        crops.append(im.crop(box))
+    cw, ch = crops[0].size
+    bar = max(28, ch // 9)
+    out = Image.new("RGB", (cw, 2 * (ch + bar)), (20, 20, 20))
+    draw = ImageDraw.Draw(out)
+    font = ImageFont.load_default(size=bar * 2 // 3) if hasattr(ImageFont, "load_default") else None
+    for i, (crop, label) in enumerate(zip(crops, ("REFERENCE (passed this step)", "UNDER TEST"))):
+        top = i * (ch + bar)
+        draw.text((10, top + bar // 6), label, fill=(255, 255, 255), font=font)
+        out.paste(crop.resize((cw, ch)), (0, top + bar))
+    buf = io.BytesIO()
+    out.save(buf, "JPEG", quality=92)
+    return Media(mime="image/jpeg", data=buf.getvalue(), uri=clip.uri,
+                 label="reference above, car under test below", truth=clip.truth)
 
 
 @dataclass
@@ -168,14 +225,22 @@ class FunctionalChecker:
                                  observation=seen.observation, clip_uri=frames[-1].uri)
 
         reference = self.references.get(step.name)
-        if reference is not None:
+        pair = pair_image(reference, clip) if reference is not None else None
+        if pair is not None:
+            prompt = (f"Step {step.step}: {step.command}.\n"
+                      f"Expected under test: {step.expected_on_camera}.")
+            seen, _ = await ask_or(self.rt, "track.step", prompt, StepSeen, NOT_JUDGED, [pair],
+                                   PAIR_SYSTEM)
+        elif reference is not None:
             # Both frames reach Gemini prefixed with their label, so they must be labelled
             # differently: sent as two identical "[track camera]" images the model could not
             # tell which was the reference and confirmed a dark lamp.
+            # truth goes along too: dropping it left the simulated plant comparing every later car
+            # with nothing, so a dead lamp after the first passing car was never caught there
             first = Media(mime=reference.mime, data=reference.data, uri=reference.uri,
-                          label=f"reference frame: a car that passed step {step.step}")
+                          label=f"reference frame: a car that passed step {step.step}", truth=reference.truth)
             second = Media(mime=clip.mime, data=clip.data, uri=clip.uri,
-                           label="frame under test: the car being checked now")
+                           label="frame under test: the car being checked now", truth=clip.truth)
             prompt = (f"Step {step.step}: {step.command}.\n"
                       f"Expected in the frame under test: {step.expected_on_camera}.")
             seen, _ = await ask_or(self.rt, "track.step", prompt, StepSeen, NOT_JUDGED,
@@ -214,6 +279,18 @@ class FunctionalChecker:
         update_car(self.rt, vin, state=CarState.REPORT, location="report_point", mission_id=None)
         await self.rt.bus.publish(Topic.INSPECTION_RESULTS, result)
         return result
+
+    async def judge_clip(self, vin: str, step_no: int, clip: Media, telemetry: dict) -> ChecklistItem:
+        """Judge one routine step from evidence already in hand, exactly as a run would.
+
+        For callers holding their own frames, such as the evaluation harness. A reference set in
+        `references` for the step is used, as it would be after a passing car.
+        """
+        [step] = routine_steps(ROUTINE, [step_no])
+        reported = TrackStep(vin=vin, mission_id="judge-clip", routine=ROUTINE, step=step_no,
+                             name=step.name, telemetry=telemetry)
+        run = _Run(vin, [step], reported={step_no: reported}, clips={step_no: clip})
+        return await self._judge(run, step)
 
     def kpis(self) -> dict:
         results = [r for r in self.rt.store.list(InspectionResult) if r.kind == "functional"]

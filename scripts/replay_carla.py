@@ -28,12 +28,16 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from carla_recorder import DEFAULT_DIR, duration_s, recording_path  # noqa: E402
+from film_labels import Labeller, plant_points, run_title, zone_for  # noqa: E402
+import film_notes  # noqa: E402
 
 SETTLE_TICKS = 10
 MOVING_M_PER_TICK = 0.01  # 0.2 m/s at 0.05 s ticks; a parked car jitters far less
 TELEPORT_M_PER_TICK = 1.0  # 72 km/h; more is the replayer spawning or removing a car, not driving
 OPENING_AFTER_TICKS = 4  # let freshly replayed cars drop onto the road first
-SHOT_MAX_M = 30.0  # a longer drive is split, so the car stays big enough in each frame
+NOTE_SHOW_S = 30.0  # recording seconds a decision stays in the film's feed (7.5 s of film at 4x)
+NOTE_LINES = 3  # decisions shown at once, newest last
+SHOT_MAX_M = 22.0  # a longer drive is split, so the car stays big and the road around it small
 SHOT_MIN_TICKS = 20  # 1 s; shorter is a car settling as the replayer spawns it, not a drive, and
                      # moving the camera about while cars are spawned is what crashes the server
 
@@ -135,7 +139,7 @@ def look_at(camera: Point, target: Point) -> tuple[float, float]:
             math.degrees(math.atan2(dy, dx)))
 
 
-def side_pose(points: list[Point], fov_deg: float = 90.0, side: str = "right"
+def side_pose(points: list[Point], fov_deg: float = 90.0, side: str = "right", low: bool = False
               ) -> tuple[Point, float, float]:
     """A still camera beside a stretch of road, a little ahead, far enough back to fit it all.
 
@@ -152,7 +156,12 @@ def side_pose(points: list[Point], fov_deg: float = 90.0, side: str = "right"
     span = max(length, 8.0)
     back = span / 2 / math.tan(math.radians(fov_deg) / 2) + 6.0
     ahead = span * 0.25
-    up = 6.0 + 0.3 * back  # high enough to see over the medians' fences
+    up = 8.0 + 0.3 * back  # over the medians' fences, and the horizon (the city) low in the frame
+    if low:
+        # as a person filming from beside the road would: closer, at a few metres, the buildings
+        # behind the car in frame and less of the empty ground in front of it
+        back = span / 2 / math.tan(math.radians(fov_deg) / 2) + 2.0
+        up = 2.2 + 0.12 * back
     sign = 1.0 if side == "right" else -1.0
     # right of travel is (uy, -ux) in CARLA's left-handed x/y
     location = (cx + sign * uy * back + ux * ahead, cy - sign * ux * back + uy * ahead, cz + up)
@@ -198,9 +207,79 @@ def next_image(images: queue.Queue, frame: int):
             return image
 
 
+DRESSING_ROLE = "marshal-dressing"  # scripts/dress_plant.py tags the plant's scenery with it
+
+
+# How the film looks. The replay's own weather and camera only: the recording is not changed, so a
+# film can be made again in either look.
+LOOKS = {
+    "plain": {"film": {"speed": 4, "delta": 0.05, "width": 1280, "height": 720}, "weather": {},
+              "camera": {"fov": 90, "low": False}},
+    # Late-afternoon sun for long shadows; wet concrete with puddles, which reflects the halls and the
+    # cars and breaks up the plain ground; light haze, which gives depth and softens the edge of the
+    # world beyond the halls. Half the step and twice the frame rate (40 fps), so motion is smooth;
+    # the same every-4th-frame keeps it at 4x.
+    "cinematic": {"film": {"speed": 4, "delta": 0.025, "width": 1920, "height": 1080},
+                  "weather": {"sun_altitude_angle": 18.0, "sun_azimuth_angle": 235.0, "cloudiness": 25.0,
+                              "wetness": 70.0, "precipitation_deposits": 45.0, "fog_density": 8.0,
+                              "fog_distance": 40.0, "fog_falloff": 1.0, "scattering_intensity": 1.0,
+                              "mie_scattering_scale": 0.03},
+                  # a longer lens, lower and closer (side_pose low); motion blur off, as the step is
+                  # short enough for smooth motion and blur smears the labelled zones
+                  "camera": {"fov": 62, "low": True, "attributes": {"motion_blur_intensity": 0.0}}},
+}
+
+
+def purge_dressing(world) -> int:
+    """Remove the plant dressing from the live world.
+
+    The recording holds the dressing, and the replayer re-creates it. Left in place, the live copy
+    stood under the replayed one, and the replayer did not remove everything it had made: after two
+    filmings 155 dressing actors had built up, some drifted onto the yard slots.
+
+    The plant world's factory halls (static meshes) are left: the replayer cannot place them (see
+    drop_stranded_meshes), so the ones place_meshes puts in the live world are the ones filmed.
+    """
+    tagged = [a for a in world.get_actors()
+              if a.attributes.get("role_name") == DRESSING_ROLE and a.type_id != "static.prop.mesh"]
+    for a in tagged:
+        a.destroy()
+    return len(tagged)
+
+
+def drop_stranded_meshes(world) -> int:
+    """The replayer spawns each actor 1 km above the origin and then moves it into place, and a static
+    mesh (a plant-world factory hall) cannot be moved: left there, it blocks every later spawn, the
+    filmed cars included. dress_plant.py spawns the halls last, so after the first tick they are the
+    only thing created; remove them before any car is."""
+    stranded = [a for a in world.get_actors().filter("static.prop.mesh") if a.get_location().z > 500.0]
+    for a in stranded:
+        a.destroy()
+    return len(stranded)
+
+
+def place_meshes(world) -> int:
+    """The halls and ground slabs, in the live world, where dress_plant.py put them for the run: the replay's own copies
+    are stranded, and loading the plant world for the replay rebuilt it empty. Once per world: the
+    second pass finds them still there (purge_dressing leaves them)."""
+    # on the ground: the stranded copies just destroyed are still listed until the next tick
+    if any(a.get_location().z < 500.0 for a in world.get_actors().filter("static.prop.mesh")):
+        return 0
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import dress_plant
+    d = dress_plant.Dresser(world)
+    dress_plant.plant_meshes(d, world.get_map(), dress_plant.road_lengths())
+    return len(d.spawned)
+
+
 def start_replay(client, world, path: str, args) -> None:
     client.set_replayer_ignore_spectator(True)
+    purge_dressing(world)
+    world.tick()
     client.replay_file(path, args.start, args.duration, 0, False)
+    world.tick()
+    if drop_stranded_meshes(world):
+        place_meshes(world)
     # Spawning a sensor while the replayer is still creating the recorded actors can segfault the
     # server, so let it settle first. Both passes do the same, so their ticks line up.
     for _ in range(SETTLE_TICKS):
@@ -228,6 +307,8 @@ def scout(client, world, path: str, ticks: int, args) -> list[Shot]:
         samples.append((vin, keep, positions.get(vin) if vin else None))
         world.tick()
     client.stop_replayer(False)
+    world.tick()
+    purge_dressing(world)
     shots = plan_shots(samples)
     if opening is not None:
         shots = [s for s in shots if s.end > opening.start]
@@ -249,19 +330,31 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--out", default=None, help="MP4 path (default /tmp/marshal-replays/NAME.mp4)")
     ap.add_argument("--start", type=float, default=0.0, help="seconds into the recording")
     ap.add_argument("--duration", type=float, default=0.0, help="seconds to film (0 = to the end)")
-    ap.add_argument("--speed", type=int, default=4, help="playback speed-up, by keeping every Nth frame")
+    ap.add_argument("--speed", type=int, default=None,
+                    help="playback speed-up, by keeping every Nth frame (the film runs at 1/delta fps)")
     ap.add_argument("--side", choices=("right", "left"), default="right",
                     help="which side of the road, seen in the direction of travel, to film from; "
                          "in Town05 a camera left of the yard lane, looking west, segfaults the "
                          "server, so keep the default there")
-    ap.add_argument("--delta", type=float, default=0.05, help="replay step, seconds")
-    ap.add_argument("--width", type=int, default=1280)
-    ap.add_argument("--height", type=int, default=720)
+    ap.add_argument("--delta", type=float, default=None,
+                    help="replay step, seconds (default 0.05; 0.025 with --look cinematic)")
+    ap.add_argument("--width", type=int, default=None, help="default 1280; 1920 with --look cinematic")
+    ap.add_argument("--height", type=int, default=None, help="default 720; 1080 with --look cinematic")
+    ap.add_argument("--look", choices=sorted(LOOKS), default="plain",
+                    help="cinematic: low sun, wet ground, light haze, 1080p, 40 fps. Only "
+                         "the film changes: the recording, and what Gemini saw in the run, do not")
     ap.add_argument("--sun-altitude", type=float, default=45.0,
                     help="daylight for the replay; the recording does not restore the weather")
+    ap.add_argument("--title", default=None, help="label for the film (default: from the recording name)")
+    ap.add_argument("--no-labels", action="store_true", help="do not burn in the run and zone labels")
+    ap.add_argument("--no-notes", action="store_true",
+                    help="leave out the feed of the run's decisions (scripts/film_notes.py)")
     ap.add_argument("--host", default="localhost")
     ap.add_argument("--port", type=int, default=2000)
     args = ap.parse_args(argv)
+    for name, value in LOOKS[args.look]["film"].items():
+        if getattr(args, name) is None:
+            setattr(args, name, value)
     if args.speed < 1 or args.delta <= 0:
         raise SystemExit("speed must be >= 1 and delta > 0")
 
@@ -291,6 +384,8 @@ def main(argv: list[str] | None = None) -> int:
         world.apply_settings(settings)
         weather = world.get_weather()
         weather.sun_altitude_angle = args.sun_altitude
+        for name, value in LOOKS[args.look]["weather"].items():
+            setattr(weather, name, value)
         world.set_weather(weather)
 
         shots = scout(client, world, path, ticks, args)
@@ -304,9 +399,34 @@ def main(argv: list[str] | None = None) -> int:
         bp = world.get_blueprint_library().find("sensor.camera.rgb")
         bp.set_attribute("image_size_x", str(args.width))
         bp.set_attribute("image_size_y", str(args.height))
-        bp.set_attribute("fov", "90")
+        cam = LOOKS[args.look]["camera"]
+        bp.set_attribute("fov", str(cam["fov"]))
+        for name, value in cam.get("attributes", {}).items():
+            if bp.has_attribute(name):
+                bp.set_attribute(name, str(value))
         images: queue.Queue = queue.Queue()
         writer = ffmpeg_writer(out, args.width, args.height, 1.0 / args.delta)
+        labeller = Labeller(args.width, args.height)
+        if args.no_labels:
+            labeller.ok = False
+        elif not labeller.ok:
+            emit({"type": "replay.no_labels", "why": "Pillow is not installed"})
+        named, title = plant_points(), args.title or run_title(args.name)
+        notes = film_notes.load(args.name) if not args.no_notes else []
+        if notes:
+            emit({"type": "replay.notes", "count": len(notes)})
+
+        def feed_at(tick: int) -> list[dict]:
+            """The last few decisions made by this point of the recording, each shown for a while."""
+            now = args.start + (tick + SETTLE_TICKS) * args.delta
+            recent = [n for n in notes if now - NOTE_SHOW_S <= n["t"] <= now]
+            return [{**n, "age": now - n["t"]} for n in recent[-NOTE_LINES:]]
+
+        def caption(s: Shot) -> tuple[str | None, str | None]:
+            if s.still:
+                return "Plant overview", None
+            who = s.vin if (s.vin or "").startswith("VIN-") else "Test-lab scenario car"
+            return zone_for(s.points, named), who
 
         start_replay(client, world, path, args)
         emit({"type": "replay.filming"})
@@ -320,7 +440,8 @@ def main(argv: list[str] | None = None) -> int:
                     yaw = shot.yaw
                     (x, y, z), pitch = overview_pose(shot.points, yaw)
                 else:
-                    (x, y, z), pitch, yaw = side_pose(shot.points, side=args.side)
+                    (x, y, z), pitch, yaw = side_pose(shot.points, fov_deg=cam["fov"], side=args.side,
+                                                      low=cam["low"])
                 pose = carla.Transform(carla.Location(x=x, y=y, z=z),
                                        carla.Rotation(pitch=pitch, yaw=yaw))
                 # A fresh camera per shot: teleporting one a few tens of metres with set_transform
@@ -336,13 +457,14 @@ def main(argv: list[str] | None = None) -> int:
             if camera is not None:
                 image = next_image(images, frame)  # always drained, or frames pile up in memory
                 if filming and shot.still:
-                    still = bytes(image.raw_data)
+                    still = labeller.draw(bytes(image.raw_data), title, *caption(shot), feed_at(tick))
                     held = round(args.opening_s / args.delta)
                     for _ in range(held):
                         writer.stdin.write(still)
                     written += held
                 elif filming and (tick - shot.start) % args.speed == 0:
-                    writer.stdin.write(bytes(image.raw_data))
+                    writer.stdin.write(labeller.draw(bytes(image.raw_data), title, *caption(shot),
+                                                     feed_at(tick)))
                     written += 1
             if shot is not None and tick >= shot.end:
                 shot_index += 1
@@ -360,6 +482,7 @@ def main(argv: list[str] | None = None) -> int:
         # Each step on its own: a failing one must not hide the error that got us here, and the
         # world must still go back to asynchronous mode, or every later run hangs.
         steps = [("stop_replayer", lambda: client.stop_replayer(False)),
+                 ("purge_dressing", lambda: (world.tick(), purge_dressing(world))),
                  ("restore_weather", lambda: world.set_weather(original_weather)),
                  ("restore_settings", lambda: world.apply_settings(original_settings))]
         if camera is not None:

@@ -71,6 +71,27 @@ a sunroof, a badge or a spoiler, that is not a claim the car has none. Report ea
 build sheet's value as expected, what you see as observed, and your confidence."""
 
 
+class FindingCheck(BaseModel):
+    index: int = Field(description="the number of the reported defect")
+    real: bool = Field(description="true only if it is a mark on the car under test that the reference car does not have")
+    reason: str = Field(default="", description="one sentence")
+
+
+class FindingChecks(BaseModel):
+    checks: list[FindingCheck]
+
+
+VERIFY_SYSTEM = """You check defects another inspector reported on a finished car at a drive-through
+gate. You get two photos from the same gate camera: FIRST a reference car that passed this gate, THEN
+the car under test. For each reported defect, decide whether it is a real mark on the car under test.
+
+Anything the reference car shows too is how cars look to this camera in this light, not a defect:
+reflections, highlights, shadows, shading or texture along the lower edge of the doors, an even
+pattern across a panel. A real defect is a mark at one place on the car under test - a scratch,
+chip, dent, gap, run or missing part - that the reference car does not have. Judge only what the
+photos show."""
+
+
 def declared_items(sheet: BuildSheet) -> set[str]:
     """The build sheet fields a mismatch may be reported against."""
     return {"colour", "model", "trim"} | {o.strip().lower() for o in sheet.options}
@@ -104,6 +125,36 @@ class VisualInspector:
     def __init__(self, app: "MarshalApp"):
         self.app = app
         self.rt = app.rt
+        # The latest car that passed, per view: what a clean car looks like to that camera in the
+        # current light. Findings are checked against it (see _confirm).
+        self.references: dict[str, tuple[str, Media]] = {}
+        # Photos of cars waiting on a review card. A car a person clears is a clean car in the current
+        # light, as good a reference as one that passed; without this the first car of a run, which
+        # has no reference, left the next ones without one too whenever it went to review.
+        self.awaiting_review: dict[str, list[tuple[str, Media]]] = {}
+
+    async def _confirm(self, reference: Media, image: Media, findings: list[Finding]) -> list[Finding]:
+        """Keep only findings that are on this car and not on a car that passed this camera.
+
+        On clean cars the gate reported "a pixelated or checkerboard pattern" across both doors,
+        "cloud-like, irregular patterns" and "rough texture along the lower edge of the door", at
+        0.6-0.9 (dataset v6-gate, and the multi-car plant runs on branch qais): reflections of a low
+        sun and the shading along the sills. Telling the model so in the defect prompt fixed some
+        cars and made another worse; the passed car shows the same light, so it is compared with
+        instead, as flow 4 compares a lamp with a car that passed the step.
+        """
+        listed = "\n".join(f"#{i}: {f.zone}, {f.type}, confidence {f.confidence:.2f}: {f.observation}"
+                           for i, f in enumerate(findings))
+        ref = Media(mime=reference.mime, data=reference.data, uri=reference.uri, truth=reference.truth,
+                    label="reference: a car that passed this gate camera")
+        test = Media(mime=image.mime, data=image.data, uri=image.uri, truth=image.truth,
+                     label="car under test")
+        # no answer: nothing is cleared, every finding stands for the thresholds and a person
+        everything = FindingChecks(checks=[FindingCheck(index=i, real=True) for i in range(len(findings))])
+        checked, _ = await ask_or(self.rt, "visual.verify", f"Reported defects:\n{listed}",
+                                  FindingChecks, everything, [ref, test], VERIFY_SYSTEM)
+        unreal = {c.index for c in checked.checks if not c.real}
+        return [f for i, f in enumerate(findings) if i not in unreal]
 
     async def _view(self, image: Media, zones: list[str]) -> ViewAssessment:
         prompt = f"Zones visible in this image: {zones}. Report defects in these zones only."
@@ -134,6 +185,19 @@ class VisualInspector:
                      [d.item for d in dropped])
         return seen.model_copy(update={"mismatches": kept})
 
+    async def assess_photo(self, image: Media, zones: list[str] | None = None, reference: Media | None = None
+                           ) -> tuple[list[Finding], float, Verdict]:
+        """The defect check on one photo, judged as the gate judges a view: findings under the
+        review bar dropped, the verdict from the same thresholds. For photos that are not one of
+        the four gate views, such as the evaluation's damage set; zones default to all eight.
+        """
+        view = await self._view(image, zones or BODY_ZONES)
+        kept = [f for f in view.findings
+                if f.zone in (zones or BODY_ZONES) and f.confidence >= REVIEW_CONFIDENCE]
+        if kept and reference is not None:
+            kept = await self._confirm(reference, image, kept)
+        return kept, view.clear_confidence, visual_verdict(kept, [], [view.clear_confidence])
+
     async def inspect(self, vin: str, views: list[str] | None = None, check_variant: bool = True,
                       images: list[Media] | None = None) -> InspectionResult:
         """Inspect a car at the gate. Re-inspection passes only the views that had findings.
@@ -162,12 +226,23 @@ class VisualInspector:
         view_results: list[ViewAssessment] = results[:len(images)]
         variant: VariantAssessment | None = results[len(images)] if check_variant else None
 
+        candidates = [[f for f in va.findings if f.zone in GATE_VIEWS[name] and f.confidence >= REVIEW_CONFIDENCE]
+                      for name, va in zip(view_names, view_results)]
+        # Each view with findings is checked against the latest passed car's photo from that camera.
+        checks = {i: self._confirm(self.references[name][1], img, fs)
+                  for i, (img, name, fs) in enumerate(zip(images, view_names, candidates))
+                  if fs and name in self.references and self.references[name][0] != vin}
+        confirmed = dict(zip(checks, await asyncio.gather(*checks.values())))
+        dropped_notes = []
+        for i, fs in confirmed.items():
+            dropped_notes += [f"{view_names[i]}: {f.type} on {f.zone} not confirmed; the passed car shows the same"
+                              for f in candidates[i] if f not in fs]
+            candidates[i] = fs
+
         findings: list[ZoneFinding] = []
         kept: list[Finding] = []
-        for img, name, va in zip(images, view_names, view_results):
-            for f in va.findings:
-                if f.zone not in GATE_VIEWS[name] or f.confidence < REVIEW_CONFIDENCE:
-                    continue
+        for img, name, fs in zip(images, view_names, candidates):
+            for f in fs:
                 kept.append(f)
                 findings.append(ZoneFinding(zone=f.zone, type=f.type, size_cm=f.size_cm,
                                             confidence=f.confidence, image=img.uri,
@@ -185,13 +260,18 @@ class VisualInspector:
         # indistinguishable from a stub that always passes, which is exactly the doubt a second
         # source is supposed to remove.
         observations = [f"{name}: {va.observation}" for name, va in zip(view_names, view_results)
-                        if va.observation]
+                        if va.observation] + dropped_notes
+        if verdict == Verdict.PASS:
+            # this car is now what a clean car looks like to each camera in the current light
+            for img, name in zip(images, view_names):
+                self.references[name] = (vin, img)
         result = InspectionResult(vin=vin, kind="visual", verdict=verdict, findings=findings,
                                   build_sheet_mismatches=[mismatch_text(m) for m in mismatches],
                                   observations=observations,
                                   created_at=self.rt.clock())
         self.rt.store.put(result)
         if verdict == Verdict.REVIEW:
+            self.awaiting_review[vin] = list(zip(view_names, images))
             update_car(self.rt, vin, state=CarState.REVIEW, location="inspection_gate")
             self.rt.propose("review", f"Visual review for {vin}",
                             {"vin": vin, "findings": [f.model_dump() for f in findings],
@@ -203,17 +283,17 @@ class VisualInspector:
 
     async def decide_review(self, proposal_id: str, confirm_defect: bool, by: str) -> InspectionResult:
         """Supervisor looks at the review card: confirm the defect (to rework) or clear it (to the track)."""
-        p = self.rt.proposals[proposal_id]
-        if p.kind != "review" or p.status != "pending":
-            raise ValueError(f"{proposal_id} is not a pending visual review")
-        p.status, p.decided_by = ("approved" if confirm_defect else "rejected"), by
+        p = self.rt.decide(proposal_id, "review", confirm_defect, by, what="visual review")
         vin = p.payload["vin"]
         result = self.rt.store.get(InspectionResult, f"{vin}:visual")
+        photos = self.awaiting_review.pop(vin, [])
         if confirm_defect:
             result = result.model_copy(update={"verdict": Verdict.FAIL})
         else:
             result = result.model_copy(update={"verdict": Verdict.PASS, "findings": [],
                                                "build_sheet_mismatches": []})
+            for name, img in photos:          # a person says this car is clean: compare the next ones with it
+                self.references[name] = (vin, img)
         self.rt.store.put(result)
         await self.rt.bus.publish(Topic.INSPECTION_RESULTS, result)
         return result

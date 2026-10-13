@@ -38,6 +38,12 @@ def visual_defects(call: LLMCall) -> dict:
     return {"findings": findings, "clear_confidence": 0.96}
 
 
+def visual_verify(call: LLMCall) -> dict:
+    """The offline findings come from the ground truth, so every one is real."""
+    n = len(re.findall(r"^#\d+:", call.prompt, re.M))
+    return {"checks": [{"index": i, "real": True, "reason": "in the ground truth"} for i in range(n)]}
+
+
 def visual_variant(call: LLMCall) -> dict:
     sheet = json.loads(re.search(r"Build sheet: (\{.*\})", call.prompt).group(1))
     truth = call.media[0].truth or {}
@@ -52,7 +58,7 @@ def visual_variant(call: LLMCall) -> dict:
 
 
 def track_step(call: LLMCall) -> dict:
-    truth = call.media[0].truth or {}
+    truth = call.media[-1].truth or {}            # the frame under test comes after any reference
     step = truth.get("step")
     dead = STEP_LAMPS.get(step, set()) & set(truth.get("dead_lamps", []))
     if dead:
@@ -88,6 +94,17 @@ def assist_assess(call: LLMCall) -> dict:
         situation += f"; worker {scene['people'][0].get('distance_m', '?')} m away"
     return {"situation": situation + ".", "people_or_moving_equipment": people, "ranking": ranking,
             "recommended": ranking[0]["option"] if ranking else None, "confidence": 0.86}
+
+
+def assist_locate(call: LLMCall) -> dict:
+    """Boxes where a stopped car's camera would see them: the object ahead, people to its side."""
+    scene = (call.media[0].truth if call.media else None) or {}
+    objects = [{"label": scene.get("object", "object"), "kind": "obstacle", "frame": 0,
+                "box_2d": [520, 430, 700, 570], "distance_m": scene.get("distance_m")}]
+    objects += [{"label": "worker", "kind": "person", "frame": 0,
+                 "box_2d": [300, 620 + 120 * i, 720, 700 + 120 * i], "distance_m": p.get("distance_m")}
+                for i, p in enumerate(scene.get("people", []))]
+    return {"objects": objects}
 
 
 # ---------- reasoning ----------
@@ -255,16 +272,24 @@ def adversarial_report(call: LLMCall) -> dict:
     fix = "reduce speed near finishing_corner to 5 km/h in low light" if changes.get("light") in ("night", "dusk") \
         else "reduce approach speed near occluded crossings to 5 km/h"
     gap = metrics.get("min_gap_to_person_m")
+    zones = _section(call.prompt, "Zones the car drives through: ") or []
+    if isinstance(zones, str):
+        zones = re.findall(r"'([^']+)'", zones)
+    zone = "finishing_corner" if "finishing_corner" in zones else (zones[0] if zones else None)
+    light = changes.get("light", "noon")
+    speed_fix = {"zone": zone, "time_of_day": [light], "max_speed_kmh": 4.0} if zone else None
     return {"summary": f"With {changes}, the car came within {gap} m of the worker ({failed}).",
-            "likely_cause": cause, "suggested_fix": fix}
+            "likely_cause": cause, "suggested_fix": fix, "speed_fix": speed_fix}
 
 
 def offline_llm() -> FakeLLM:
     return FakeLLM({
         "visual.defects": visual_defects,
+        "visual.verify": visual_verify,
         "visual.variant": visual_variant,
         "track.step": track_step,
         "assist.assess": assist_assess,
+        "assist.locate": assist_locate,
         "yard.exception": yard_exception,
         "report.write": report_write,
         "scenario.spec": scenario_spec,

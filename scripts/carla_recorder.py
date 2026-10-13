@@ -46,6 +46,10 @@ def main(argv: list[str] | None = None) -> int:
         path = recording_path(args.name, args.dir)
         # additional_data=True also keeps lights and kinematics, so headlights show in the replay
         client.start_recorder(path, True)
+        # recording time 0 on the simulator's clock, so decisions noted during the run can be
+        # placed in the film (scripts/film_notes.py)
+        from film_notes import mark_start
+        mark_start(args.name, client.get_world().get_snapshot().timestamp.elapsed_seconds)
         print(json.dumps({"type": "recorder.started", "file": path}))
     elif args.action == "stop":
         client.stop_recorder()

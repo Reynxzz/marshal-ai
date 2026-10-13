@@ -1,4 +1,7 @@
-"""The six records every agent shares (design doc: "Shared data, events and human authority").
+"""The records every agent shares (design doc: "Shared data, events and human authority").
+
+The design's six, plus proposals: the decisions an agent proposes and a human makes (the design's
+"Human authority" table), kept so the dashboard can show and decide them.
 
 Live copies go to Firestore, history to BigQuery; images and clips are Cloud Storage URIs.
 """
@@ -63,6 +66,9 @@ class AssistanceCase(BaseModel):
     clip_uri: str | None = None
     options: list[str]                                 # offered by the driving system, never invented
     ranking: list[dict] = Field(default_factory=list)  # [{"option", "reason", "risk"}], best first
+    # What the dashboard boxes on the clip, the object in the way first:
+    # [{"label", "kind", "frame", "image", "box_2d": [ymin, xmin, ymax, xmax] 0-1000 or None, "distance_m"}]
+    objects: list[dict] = Field(default_factory=list)
     people_or_moving_equipment: bool = False
     recommended: str | None = None
     confidence: float | None = None
@@ -154,6 +160,8 @@ class Scenario(BaseModel):
     owner: str | None = None
     tags: list[str] = Field(default_factory=list)       # e.g. "regression", "from-incident"
     notes: str = ""                                    # validator errors, failure report
+    # A regression test found by the search: marshal_ai.lab.adversarial.FailureReport as JSON
+    failure_report: dict | None = None
     created_at: datetime = Field(default_factory=now)
 
 
@@ -168,4 +176,61 @@ class TestRun(BaseModel):
     passed: bool
     failed_criteria: list[str] = Field(default_factory=list)
     clip_uri: str | None = None
+    # Why this variant was run: the search's reasoning for its batch, or a shrinking step. The
+    # design has Gemini say why it searches where it does; kept here, the dashboard can show it.
+    reason: str | None = None
     created_at: datetime = Field(default_factory=now)
+
+
+class ProposalStatus(str, Enum):
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+
+
+class Proposal(BaseModel):
+    """Something an agent proposes and a human must decide: a re-plan, a rework, a visual review."""
+
+    proposal_id: str                                   # P-001, unique across runs
+    kind: Literal["replan", "rework", "review"]
+    summary: str
+    payload: dict = Field(default_factory=dict)        # what deciding acts on, e.g. the plan or VIN
+    status: ProposalStatus = ProposalStatus.PENDING
+    decided_by: str | None = None
+    created_at: datetime = Field(default_factory=now)
+    decided_at: datetime | None = None
+
+
+
+class ReleaseReport(BaseModel):
+    """A driving system release run against the whole regression suite (design, flow 7 "Closing
+    the loop"): tests run, passed, failed, and what changed since the release evaluated before it.
+    Marshal only produces it; an engineer approves, and only when nothing fails."""
+
+    release: str                                       # e.g. behavior-agent-1.0; re-evaluating replaces it
+    total: int
+    passed: list[str] = Field(default_factory=list)
+    failed: dict[str, list[str]] = Field(default_factory=dict)   # scenario id -> failed criteria
+    previous_release: str | None = None
+    newly_failing: list[str] = Field(default_factory=list)
+    newly_passing: list[str] = Field(default_factory=list)
+    approved_by: str | None = None
+    evaluated_at: datetime = Field(default_factory=now)
+
+    @property
+    def blocked(self) -> bool:
+        return bool(self.failed)
+
+    def summary(self) -> str:
+        head = (f"Release {self.release}: {self.total} tests, {len(self.passed)} passed, "
+                f"{len(self.failed)} failed.")
+        if self.blocked:
+            head += f" {len(self.failed)} failing test{'s' if len(self.failed) > 1 else ''}, release blocked."
+        else:
+            head += " Ready for engineer approval." if not self.approved_by else f" Approved by {self.approved_by}."
+        since = f"since {self.previous_release}" if self.previous_release else "since the last release"
+        if self.newly_failing:
+            head += f" Newly failing {since}: {', '.join(self.newly_failing)}."
+        if self.newly_passing:
+            head += f" Now passing {since}: {', '.join(self.newly_passing)}."
+        return head
