@@ -19,7 +19,9 @@ export MARSHAL_LLM=gemini MARSHAL_DRIVING=carla
 export GOOGLE_APPLICATION_CREDENTIALS
 export GOOGLE_GENAI_USE_VERTEXAI="${GOOGLE_GENAI_USE_VERTEXAI:-TRUE}"
 export GOOGLE_CLOUD_PROJECT="${GOOGLE_CLOUD_PROJECT:-id-rd-ca-hanif-ali}"
-export GOOGLE_CLOUD_LOCATION="${GOOGLE_CLOUD_LOCATION:-us-central1}"
+# Gemini in the region nearest the CARLA host (Singapore): a decision call took 0.9 s there against
+# 2.4 s in us-central1, and a full answer 2.0 s against 3.5 s, from this side of the world.
+export GOOGLE_CLOUD_LOCATION="${GOOGLE_CLOUD_LOCATION:-asia-southeast1}"
 # store the photos behind the verdicts, so the gs:// URIs in records resolve
 export MARSHAL_ARTIFACTS="${MARSHAL_ARTIFACTS:-gcs}"
 # and keep the trail of state changes behind them

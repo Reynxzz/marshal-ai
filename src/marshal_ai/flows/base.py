@@ -58,6 +58,19 @@ async def ask(rt: "Runtime", task: str, prompt: str, schema: type[T],
     return winner.result()
 
 
+def use_decisions(rt: "Runtime", task: str) -> bool:
+    """Whether to ask `task` as a decision: settings.decisions names it (or "all"), and the model can
+    answer it. A test double that answers only the full task is asked in full, as before."""
+    settings = getattr(rt, "settings", None)
+    wanted = str(getattr(settings, "decisions", "") or "").strip().lower()
+    if wanted in ("", "0", "false", "no", "none"):
+        return False
+    if wanted not in ("1", "all", "true", "yes") and not any(task.startswith(t.strip()) for t in wanted.split(",") if t.strip()):
+        return False
+    handlers = getattr(rt.llm, "handlers", None)
+    return handlers is None or task in handlers
+
+
 async def ask_or(rt: "Runtime", task: str, prompt: str, schema: type[T], fallback: T,
                  media: list[Media] | None = None, system: str = "") -> tuple[T, bool]:
     """Like ask(), but a failed call (network, quota, bad output) returns the flow's safe fallback.

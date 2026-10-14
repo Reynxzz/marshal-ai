@@ -42,6 +42,13 @@ class Settings:
         default_factory=lambda: float(os.getenv("CARLA_TIMEOUT_S", "20"))
     )
     carla_version: str = field(default_factory=lambda: os.getenv("CARLA_VERSION", "0.9.16"))
+    # Judgements asked of Gemini as a decision model: one option number back, its probability from the
+    # token's log-probability (llm.Decision). Comma-separated task names or prefixes; "0" for none,
+    # "all" for every task that has a decision form. On by default for the lamp check only, where it
+    # measured 1.0 s against 3.2 s with no wrong verdict (v8-track). The gate's screens (visual.screen,
+    # visual.match) are opt-in: in Singapore they matched the full answers' accuracy at the same median
+    # and a worse tail (v6-gate 4.88 s against 4.84 s), since the gate waits on reading the images.
+    decisions: str = field(default_factory=lambda: os.getenv("MARSHAL_DECISIONS", "track.decide"))
 
 
 settings = Settings()

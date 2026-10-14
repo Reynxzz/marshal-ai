@@ -67,6 +67,28 @@ def track_step(call: LLMCall) -> dict:
     return {"seen": True, "confidence": 0.95, "observation": f"{step} as expected"}
 
 
+# ---------- decisions: the same ground truth, as a choice with probabilities ----------
+
+def _decided(choice: str, other: str, p: float) -> dict:
+    return {"choice": choice, "probs": {choice: p, other: round(1 - p, 4)}}
+
+
+def visual_screen(call: LLMCall) -> dict:
+    defects = (call.media[0].truth or {}).get("defects", [])
+    return (_decided("defect visible", "no defect visible", 0.97) if defects
+            else _decided("no defect visible", "defect visible", 0.96))
+
+
+def visual_match(call: LLMCall) -> dict:
+    found = visual_variant(call)["mismatches"]
+    return _decided("does not match", "matches", 0.96) if found else _decided("matches", "does not match", 0.97)
+
+
+def track_decide(call: LLMCall) -> dict:
+    seen = track_step(call)
+    return _decided("yes", "no", 0.95) if seen["seen"] else _decided("no", "yes", 0.93)
+
+
 def assist_assess(call: LLMCall) -> dict:
     scene = (call.media[0].truth if call.media else None) or {}
     options = _section(call.prompt, "Offered options: ", "\nCar state") or []
@@ -288,6 +310,9 @@ def offline_llm() -> FakeLLM:
         "visual.verify": visual_verify,
         "visual.variant": visual_variant,
         "track.step": track_step,
+        "visual.screen": visual_screen,
+        "visual.match": visual_match,
+        "track.decide": track_decide,
         "assist.assess": assist_assess,
         "assist.locate": assist_locate,
         "yard.exception": yard_exception,
