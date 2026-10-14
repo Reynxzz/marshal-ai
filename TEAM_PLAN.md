@@ -24,7 +24,7 @@ simulation cannot yet show what the design describes. The target is the design's
 | Demo scene | Design | Today on real CARLA | Gap |
 | --- | --- | --- | --- |
 | 1 Normal flow | Cars leave the line; one passes gate and track with a clean report | One car end to end on the plant world (`MARSHAL_CARLA_MAP=MarshalPlant run_carla_scene1.sh`); five cars to the yard by truck, filmed with the decision feed (`MARSHAL_PLANT_CARS=5 run_carla_plant.sh`) | The late-truck re-plan on film (fixed, not yet re-run); the gate photographs a parked car, not one rolling through at 5 km/h |
-| 2 Two faults | Wrong colour flagged at the gate; dead **left brake light** (telemetry ON, camera OFF); both booked into rework | Dead **headlight** caught, repaired in the electrical bay and re-checked (`MARSHAL_DAY4_REWORK=1 run_carla_day4.sh`); wrong colour flagged at 1.00 in 3 of 3 (`MARSHAL_PLANT_WRONG_COLOUR=2 run_carla_plant.sh`) | A brake-lamp fault the asset can show |
+| 2 Two faults | Wrong colour flagged at the gate; dead **left brake light** (telemetry ON, camera OFF); both booked into rework | Dead **headlight** caught, repaired in the electrical bay and re-checked (`MARSHAL_DAY4_REWORK=1 run_carla_day4.sh`); wrong colour flagged at 1.00 in 3 of 3 (`MARSHAL_PLANT_WRONG_COLOUR=2 run_carla_plant.sh`) | Dead brake lights (both lamps) are caught in 3 of 3 runs (`run_carla_day4.sh --fault-step brake_lights`); a dead *left* one can't be shown: CARLA has one Brake bit (`probe_lamps.py`) |
 | 3 Stuck car | Box in lane, worker nearby, "wait" recommended, case sent to the lab | Works (`run_carla_day5.sh`); the car stops short of the box and does what was chosen - waits, passes at 3 km/h or reroutes through lane C (`--choose`) | The case turned into a lab scenario on CARLA |
 | 4 Test lab | Plain-language request → spec → run → passes; adversarial search finds a night / pallet-stack failure, report with clip | Generation and a serial search work (`run_carla_lab.sh`) | Search over light, weather, occluder, second actor; 8 runs in parallel; failure report with its clip |
 | 5 Close | Failure joins the regression suite; release gate shows "1 failing test, release blocked" | Run end to end on CARLA (`run_carla_release.sh`): blocked by the search's failure, reports in BigQuery | Release gate end to end on real runs and BigQuery history |
@@ -71,9 +71,23 @@ simulation cannot yet show what the design describes. The target is the design's
   driving process, or sensors that stream into a buffer.
 - [x] **A wrong-colour car** at the gate (scene 2) (`qais`: `MARSHAL_PLANT_WRONG_COLOUR=2 run_carla_plant.sh`; flagged at 1.00 in 3 of 3 runs, booked to production control): spawn a car whose colour or model differs from its
   build sheet. The variant check is the stand-in the design names for CARLA (flow 3, "What is real").
-- [ ] **A brake-lamp fault the camera can see** (scene 2 wants a dead left brake light). This asset
+- [~] **A brake-lamp fault the camera can see** (scene 2 wants a dead left brake light). This asset
   draws one continuous brake bar and no left blinker (README, "Flow 4 on the whole R-12 routine").
   Find a blueprint with separate lamps, or document why the headlight stays the demo fault.
+  *Qais:* a dead **left** brake light can't be shown in CARLA 0.9.16. Its light API has one `Brake`
+  bit for both brake lamps, so one side can't be switched off. The trick of lighting the turn
+  signal instead (`RightBlinker` lights only one side) only works where the signal is red and inside
+  the tail lamp. `scripts/probe_lamps.py` photographed the rear of all 33 four-wheeled blueprints at
+  night under Brake / LeftBlinker / RightBlinker. Every signal that lights is amber, or a separate
+  lamp; none is a red tail lamp. Several assets have separate left and right brake lamps (Mustang,
+  Impala, Crown, Audi TT, Mercedes coupe 2020, Patrol 2021, Model 3), but the one bit still drives
+  both. On the Lincoln MKZ 2020 the brake bar is red and both blinkers now render at the rear camera
+  (amber, each side).
+  What does work is **a dead brake light, both lamps**: `--fault-step brake_lights`
+  (`MARSHAL_DAY4_STEPS=3 bash scripts/run_carla_day4.sh --fault-step brake_lights`). In 3 of 3
+  runs the faulty car FAILed (camera "off" at 0.98-1.00, telemetry "on") and was booked into the
+  electrical bay, and the healthy car PASSed at 0.96-0.98. So scene 2 can use the brake light
+  instead of the headlight, as "dead brake lights" rather than "dead left brake light".
 - [~] **Track steps that actually happen.** (`qais`: reverse and brake test driven and measured; full-lock still telemetry-only) The car is held still during the routine, so reverse
   does not move it and the brake test (step 5) and full-lock turn (step 6) are telemetry-only. The
   design puts the brake test in CARLA scope (flow 4, "What is real"): drive it from 20 km/h and

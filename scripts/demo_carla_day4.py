@@ -32,9 +32,10 @@ from marshal_ai.runtime import build_runtime
 
 SUPERVISOR = "supervisor-ana"
 
-# headlights is the only step Gemini confirms reliably from a still (front view, lit road);
-# brake reads as a running light on this vehicle and a blinker needs a clip, so a dark-lamp
-# demo built on those would be ambiguous rather than convincing.
+# headlights is the default dark lamp, the one Gemini confirmed first. The brake lights work too
+# (--fault-step brake_lights: caught in 3 of 3 runs at night, the healthy car passing). Only both
+# brake lamps can go dark: CARLA has one Brake light bit, so a dead *left* brake light cannot be
+# shown (scripts/probe_lamps.py). A blinker needs a clip, so it stays out of this demo.
 FAULT_STEP = "headlights"
 
 
