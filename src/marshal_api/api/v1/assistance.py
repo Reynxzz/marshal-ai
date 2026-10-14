@@ -5,20 +5,35 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query
+from pydantic import BaseModel, Field
 
-from marshal_api.core.deps import RequireRole, get_assistance_service
-from marshal_api.core.idempotency import get_idempotency_key
+from marshal_api.core.deps import (
+    RequireRole,
+    get_assist_ingest_service,
+    get_assistance_service,
+    get_idempotency_key,
+)
 from marshal_api.schemas import (
     AssistanceCase,
     AssistanceKpis,
     DecideAssistanceRequest,
     Page,
 )
-from marshal_api.services import AssistanceService
+from marshal_api.services import AssistIngestService, AssistanceService
 
 router = APIRouter(tags=["assistance"])
 
 _supervisor = RequireRole(["supervisor"])
+
+
+class IngestAssistanceRequest(BaseModel):
+    """A CARLA clip already in Cloud Storage, plus the options the car would offer."""
+
+    clip_uri: str = Field(description="gs://bucket/object of the stored evidence")
+    vin: str
+    location: str = "unknown"
+    options: list[str]
+    situation: str | None = None
 
 
 @router.get("/assistance/cases", response_model=Page[AssistanceCase])
@@ -36,6 +51,28 @@ async def list_cases(
 async def get_case(
     case_id: str, service: AssistanceService = Depends(get_assistance_service)
 ) -> AssistanceCase:
+    return await service.get_case(case_id)
+
+
+@router.post(
+    "/assistance/cases",
+    response_model=AssistanceCase,
+    status_code=201,
+    dependencies=[Depends(_supervisor)],
+)
+async def ingest_case(
+    body: IngestAssistanceRequest,
+    ingest: AssistIngestService = Depends(get_assist_ingest_service),
+    service: AssistanceService = Depends(get_assistance_service),
+) -> AssistanceCase:
+    """Assess a stored CARLA clip with Gemini and open the assistance case on the dashboard."""
+    case_id = await ingest.ingest(
+        clip_uri=body.clip_uri,
+        vin=body.vin,
+        location=body.location,
+        options=body.options,
+        situation=body.situation,
+    )
     return await service.get_case(case_id)
 
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 
+from sqlalchemy import or_
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -25,7 +26,12 @@ class MediaService:
             await self.session.execute(
                 select(MediaArtifact).where(
                     MediaArtifact.tenant_id == self.tenant_id,
-                    MediaArtifact.media_id == media_id,
+                    # Cases store the artifact's internal id (clip_media_id FK), while a media_id
+                    # from elsewhere is the public one; accept both so evidence always resolves.
+                    or_(
+                        MediaArtifact.media_id == media_id,
+                        MediaArtifact.id == media_id,
+                    ),
                 )
             )
         ).scalars().first()

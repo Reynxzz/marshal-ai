@@ -39,6 +39,9 @@ class Settings(BaseSettings):
 
     idempotency_ttl_seconds: int = 24 * 60 * 60
 
+    # Gemini/Vertex model used by the clip-ingest service (MARSHAL_MODEL).
+    model: str = "gemini-2.5-flash"
+
     # Phase 6/7 seams, wired but unused by the scaffolding.
     event_bus: str = "memory"
     carla_host: str = "localhost"

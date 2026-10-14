@@ -17,6 +17,7 @@ from marshal_api.core.idempotency import get_idempotency_key
 from marshal_api.db.session import async_session_maker
 from marshal_api.schemas.common import Actor, Role
 from marshal_api.services import (
+    AssistIngestService,
     AssistanceService,
     LabService,
     MediaService,
@@ -28,6 +29,7 @@ from marshal_api.workers.job_runner import JobRunner, get_job_runner
 
 __all__ = [
     "RequireRole",
+    "get_assist_ingest_service",
     "get_assistance_service",
     "get_current_actor",
     "get_current_tenant",
@@ -35,6 +37,7 @@ __all__ = [
     "get_idempotency_key",
     "get_job_runner",
     "get_lab_service",
+    "get_llm",
     "get_media_service",
     "get_mission_client",
     "get_plant_state",
@@ -127,3 +130,19 @@ def get_media_service(
     tenant_id: str = Depends(get_current_tenant),
 ) -> MediaService:
     return MediaService(session, tenant_id)
+
+
+def get_llm():
+    """The Gemini client used by the clip-ingest service (Vertex/API key from the env)."""
+    from marshal_ai.llm import GeminiLLM
+
+    return GeminiLLM(get_settings().model)
+
+
+def get_assist_ingest_service(
+    session: AsyncSession = Depends(get_session),
+    llm=Depends(get_llm),
+    event_bus: EventBus = Depends(get_event_bus),
+    tenant_id: str = Depends(get_current_tenant),
+) -> AssistIngestService:
+    return AssistIngestService(session, llm, event_bus, tenant_id)
