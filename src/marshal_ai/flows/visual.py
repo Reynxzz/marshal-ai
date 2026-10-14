@@ -113,6 +113,14 @@ def mismatch_text(m: Mismatch) -> str:
     return f"{m.item}: build sheet says {m.expected}, car shows {m.observed} ({m.confidence:.2f})"
 
 
+def mismatch_finding(m: Mismatch, image: str | None) -> ZoneFinding:
+    """A build-sheet mismatch as a structured finding: the whole car, the kind of mismatch, the photo."""
+    item = m.item.strip().lower()
+    kind = f"wrong_{item}" if item in ("colour", "model", "trim") else "missing_option"
+    return ZoneFinding(zone="whole_car", type=kind, confidence=m.confidence, image=image,
+                       observation=mismatch_text(m))
+
+
 def visual_verdict(findings: list[Finding | ZoneFinding], mismatches: list[Mismatch],
                    clear_confidences: list[float], variant_confidence: float = 1.0) -> Verdict:
     """Fail on anything over 0.9, review on anything 0.6 to 0.9 or any uncertain all-clear, else pass.
@@ -305,8 +313,12 @@ class VisualInspector:
             # this car is now what a clean car looks like to each camera in the current light
             for img, name in zip(images, view_names):
                 self.references[name] = (vin, img)
+        # the side view shows colour and model best; else the first the variant check saw
+        shown = next((img.uri for img, name in zip(images, view_names) if name in ("left", "right")),
+                     images[0].uri if images else None)
         result = InspectionResult(vin=vin, kind="visual", verdict=verdict, findings=findings,
                                   build_sheet_mismatches=[mismatch_text(m) for m in mismatches],
+                                  mismatch_findings=[mismatch_finding(m, shown) for m in mismatches],
                                   observations=observations,
                                   created_at=self.rt.clock())
         self.rt.store.put(result)

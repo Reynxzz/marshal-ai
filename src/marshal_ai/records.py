@@ -118,6 +118,10 @@ class InspectionResult(BaseModel):
     verdict: Verdict
     findings: list[ZoneFinding] = Field(default_factory=list)
     build_sheet_mismatches: list[str] = Field(default_factory=list)
+    # The same mismatches as structured findings, in the design's form (zone, type, confidence,
+    # image): zone "whole_car", type wrong_colour / wrong_model / wrong_trim / missing_option, the
+    # photo that shows it, the text above as the observation.
+    mismatch_findings: list[ZoneFinding] = Field(default_factory=list)
     checklist: list[ChecklistItem] = Field(default_factory=list)
     # What the inspector saw, per view, in its own words - kept for a pass as well as a failure. A
     # PASS with nothing to read is indistinguishable from a stub that always passes.

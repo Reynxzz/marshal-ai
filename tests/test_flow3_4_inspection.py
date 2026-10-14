@@ -30,6 +30,9 @@ async def test_wrong_colour_fails_against_the_build_sheet(plant):
     v = result(app, "VIN-231", "visual")
     assert v.verdict == Verdict.FAIL
     assert any(m.startswith("colour: build sheet says white, car shows red") for m in v.build_sheet_mismatches)
+    # and as a structured finding, in the design's form: zone, type, confidence, image
+    [f] = [f for f in v.mismatch_findings if f.type == "wrong_colour"]
+    assert f.zone == "whole_car" and f.confidence > 0.9 and f.image and "build sheet says white" in f.observation
     assert result(app, "VIN-231", "functional") is None            # a failed car does not run the track
 
 
