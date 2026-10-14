@@ -65,7 +65,7 @@ simulation cannot yet show what the design describes. The target is the design's
   *Rey, for review:* an approved re-plan sends a real mission per car, a car whose new slot is still
   taken waits for it to empty, and a plan that would park an uninspected car is rejected (02391ae).
   Not yet shown on CARLA: the filmed run's plan named a stale car and was rejected (fixed, 03dbc4a).
-- [ ] **Drive-through gate.** The design photographs the car rolling through at 5 km/h with four
+- [x] **Drive-through gate.** (`qais`: cars photographed rolling through at 4.3-4.5 km/h, 3/3 shipped) The design photographs the car rolling through at 5 km/h with four
   cameras (flow 3). Today the car stops, because a capture and a running driving loop in one process
   deadlock (comment in `run_carla_scene1.sh`). Find a way: a capture process separate from the
   driving process, or sensors that stream into a buffer.

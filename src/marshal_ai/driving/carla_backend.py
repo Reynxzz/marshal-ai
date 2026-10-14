@@ -194,6 +194,14 @@ CAMERA_TICK_S = 0.2
 # only its front half, and Gemini reported a "panel gap" at 0.9 on a car it could barely see. Scene 1
 # never showed it because it spawns the car on the mark.
 PRECISE_STOPS = {"inspection_gate"}
+# Points a car drives through instead of stopping at: the design's gate photographs each car rolling
+# through at walking speed (flow 3, 5 km/h). The car holds its mission speed onto the mark, arrives
+# - and is photographed - as its centre crosses it, and is not braked: the gate's verdict and the
+# next mission come while the simulation is paused for them, so the car carries straight on to the
+# track. Only a car with nowhere to go next (a REVIEW) slows to a halt just past the gate.
+# Off (drive_through_gate=False), the gate is a precise stop, as before.
+DRIVE_THROUGH = {"inspection_gate"}
+DRIVE_THROUGH_DEFAULT_KMH = 5.0
 STOP_TOLERANCE_M = 0.4
 CREEP_MAX_S = 30.0                 # give up creeping after this long, rather than wait forever
 # A pull_over point (plant_map.yaml) is off the driving lanes - a bay or yard slot on the shoulder -
@@ -246,7 +254,7 @@ class CarlaDrivingSystem:
                  auto_assist: bool = True, blocked_after_s: float = 5.0,
                  blocked_speed_kmh: float = 0.6, obstacle_range_m: float = 14.0,
                  assist_options: list[str] | None = None, sweep_stale_sensors: bool = True,
-                 camera_tick_s: float | None = CAMERA_TICK_S):
+                 camera_tick_s: float | None = CAMERA_TICK_S, drive_through_gate: bool = True):
         if carla is None:
             raise RuntimeError(
                 "CARLA client not available. Install the 0.9.16 wheel bundled with the server "
@@ -287,6 +295,9 @@ class CarlaDrivingSystem:
         # Simulated seconds between frames for every Marshal camera; None renders on every tick.
         # See _camera_blueprint.
         self.camera_tick_s = camera_tick_s
+        self.drive_through_gate = drive_through_gate
+        # vin -> km/h at the moment it crossed a drive-through point, i.e. when it was photographed
+        self.passes: dict[str, float] = {}
         self._simulated_s = 0.0               # see realtime_ratio()
         self._sim_started_at: float | None = None
         # Replaced by the runtime when MARSHAL_ARTIFACTS=gcs, so the gs:// URI a record
@@ -571,7 +582,11 @@ class CarlaDrivingSystem:
             await self._routine_step(v)
             return
         if v.agent.done():
-            if self._precise(v.remaining[0]) and not self._creep(v):
+            through = self._drives_through(v.remaining[0])
+            if through:
+                if not self._pass_through(v):
+                    return                      # rolling onto the mark at gate speed
+            elif self._precise(v.remaining[0]) and not self._creep(v):
                 return                          # still edging onto the mark
             v.creep_s = 0.0
             v.location = v.remaining.pop(0)
@@ -585,7 +600,10 @@ class CarlaDrivingSystem:
                 self._next_destination(v)
             else:
                 mission, v.mission = v.mission, None
-                v.actor.apply_control(carla.VehicleControl(throttle=0.0, brake=1.0))
+                if not through:
+                    v.actor.apply_control(carla.VehicleControl(throttle=0.0, brake=1.0))
+                # A drive-through car keeps rolling: if the handlers give it its next mission, as
+                # a gate PASS does, it never stops; if not, the next step brakes it.
                 await emit(self._handlers, MissionDone(
                     mission_id=mission.mission_id, vin=v.vin, location=v.location,
                 ))
@@ -640,6 +658,49 @@ class CarlaDrivingSystem:
             throttle=0.3 if speed < 1.0 else 0.0,          # about 3.6 km/h
             steer=max(-limit, min(limit, 1.5 * error)),
             brake=0.0))
+        return False
+
+    def _drives_through(self, point: str) -> bool:
+        return getattr(self, "drive_through_gate", False) and point in DRIVE_THROUGH
+
+    def _pass_through(self, v: _Vehicle) -> bool:
+        """Roll onto a drive-through mark at the mission's speed. True as the car's centre crosses it.
+
+        BehaviorAgent reports done 3-4 m out, so these last metres are driven here: hold the lane by
+        aiming past the mark along the point's heading, hold the mission speed, brake only for
+        something in front. The speed at the crossing is kept in self.passes, since it is the claim.
+        """
+        point = v.remaining[0]
+        mark = self.transform(point)
+        here = v.actor.get_transform()
+        forward = here.get_forward_vector()
+        dx, dy = mark.location.x - here.location.x, mark.location.y - here.location.y
+        along = dx * forward.x + dy * forward.y
+        velocity = v.actor.get_velocity()
+        kmh = 3.6 * math.hypot(velocity.x, velocity.y)
+        if along <= 0.0:
+            self.passes[v.vin] = round(kmh, 1)
+            log.info("%s drove through %s at %.1f km/h", v.vin, point, kmh)
+            return True
+        v.creep_s += self.fixed_delta_s
+        if v.creep_s > CREEP_MAX_S:
+            log.warning("%s did not reach %s in %.0f s; counted as through", v.vin, point, CREEP_MAX_S)
+            self.passes[v.vin] = round(kmh, 1)
+            return True
+        obstacle, distance = self._obstacle_ahead(v)
+        if obstacle is not None and distance < along + 4.0:
+            v.actor.apply_control(carla.VehicleControl(throttle=0.0, brake=1.0))
+            return False
+        lane = mark.get_forward_vector()
+        aim_x, aim_y = dx + lane.x * 6.0, dy + lane.y * 6.0
+        error = ((math.atan2(aim_y, aim_x) - math.atan2(forward.y, forward.x) + math.pi)
+                 % (2 * math.pi) - math.pi)
+        target = (v.mission.max_speed_kmh if v.mission and v.mission.max_speed_kmh
+                  else DRIVE_THROUGH_DEFAULT_KMH)
+        throttle = 0.4 if kmh < target - 0.5 else 0.0
+        brake = 0.3 if kmh > target + 1.5 else 0.0
+        v.actor.apply_control(carla.VehicleControl(
+            throttle=throttle, brake=brake, steer=max(-0.3, min(0.3, 1.5 * error))))
         return False
 
     def _square_up(self, v: _Vehicle, point: str) -> None:

@@ -396,6 +396,8 @@ async def run(args) -> dict:
         "gap_to_nearest_released_car_m": watch.release_gaps,
         "line_to_yard_sim_s": line_to_yard,
         "gate_false_alarms": FALSE_ALARMS,
+        # The speed each car was photographed at by the gate: the design's drive-through, 5 km/h.
+        "gate_pass_kmh": dict(getattr(rt.driving, "passes", {})),
         "simulated_s": watch.sim_s(),
         "realtime_ratio": rt.driving.realtime_ratio(),
     }
