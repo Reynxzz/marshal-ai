@@ -23,8 +23,8 @@ simulation cannot yet show what the design describes. The target is the design's
 
 | Demo scene | Design | Today on real CARLA | Gap |
 | --- | --- | --- | --- |
-| 1 Normal flow | Cars leave the line; one passes gate and track with a clean report | One car end to end (`run_carla_scene1.sh`) | Several cars flowing at once; the gate photographs a parked car, not one rolling through at 5 km/h |
-| 2 Two faults | Wrong colour flagged at the gate; dead **left brake light** (telemetry ON, camera OFF); both booked into rework | Dead **headlight** caught (`run_carla_day4.sh`); wrong colour not run on CARLA | Wrong-colour car on CARLA; a brake-lamp fault the asset can show; cars driven to rework bays and re-inspected |
+| 1 Normal flow | Cars leave the line; one passes gate and track with a clean report | One car end to end on the plant world (`MARSHAL_CARLA_MAP=MarshalPlant run_carla_scene1.sh`); five cars to the yard by truck, filmed with the decision feed (`MARSHAL_PLANT_CARS=5 run_carla_plant.sh`) | The late-truck re-plan on film (fixed, not yet re-run); the gate photographs a parked car, not one rolling through at 5 km/h |
+| 2 Two faults | Wrong colour flagged at the gate; dead **left brake light** (telemetry ON, camera OFF); both booked into rework | Dead **headlight** caught, repaired in the electrical bay and re-checked (`MARSHAL_DAY4_REWORK=1 run_carla_day4.sh`); wrong colour flagged at 1.00 in 3 of 3 (`MARSHAL_PLANT_WRONG_COLOUR=2 run_carla_plant.sh`) | A brake-lamp fault the asset can show |
 | 3 Stuck car | Box in lane, worker nearby, "wait" recommended, case sent to the lab | Works (`run_carla_day5.sh`) | The chosen option executed by the car; the case turned into a lab scenario on CARLA |
 | 4 Test lab | Plain-language request → spec → run → passes; adversarial search finds a night / pallet-stack failure, report with clip | Generation and a serial search work (`run_carla_lab.sh`) | Search over light, weather, occluder, second actor; 8 runs in parallel; failure report with its clip |
 | 5 Close | Failure joins the regression suite; release gate shows "1 failing test, release blocked" | Run end to end on CARLA (`run_carla_release.sh`): blocked by the search's failure, reports in BigQuery | Release gate end to end on real runs and BigQuery history |
@@ -62,6 +62,9 @@ simulation cannot yet show what the design describes. The target is the design's
   the gate queue, 25 m apart, slots by truck nearest the loading bay (design, flow 1).
 - [ ] **Missions that move cars.** Yard re-slotting after a late truck changes only the records
   today; the cars should drive to their new slots (design, flow 1 "Send missions").
+  *Rey, for review:* an approved re-plan sends a real mission per car, a car whose new slot is still
+  taken waits for it to empty, and a plan that would park an uninspected car is rejected (02391ae).
+  Not yet shown on CARLA: the filmed run's plan named a stale car and was rejected (fixed, 03dbc4a).
 - [ ] **Drive-through gate.** The design photographs the car rolling through at 5 km/h with four
   cameras (flow 3). Today the car stops, because a capture and a running driving loop in one process
   deadlock (comment in `run_carla_scene1.sh`). Find a way: a capture process separate from the
@@ -77,6 +80,8 @@ simulation cannot yet show what the design describes. The target is the design's
   measure the stopping distance; roll the reverse 3 m.
 - [ ] **Rework bays on the map.** Cars driven to the bay the router booked, then back to the gate for
   re-inspection of the failed items (design, flow 5).
+  *Rey, for review:* runs on the plant world for the lamp fault (electrical bay, back round to the
+  gate, step 1 re-run, PASS; film pw-day4). Cars now square up on a slot or bay once they reach it.
 - [ ] **The chosen assistance option executed.** After `assist.choose`, the car does what was chosen
   (wait, pass in the left lane at 3 km/h, reroute), driven by BehaviorAgent (design, flow 2).
   Today the `AssistChoose` branch in `driving/carla_backend.py` only clears the case; the
@@ -97,8 +102,19 @@ simulation cannot yet show what the design describes. The target is the design's
 ## Rey: AI
 
 ### M2: the judgements in demo scenes 1–3
-- [ ] **Wrong colour flagged** at the gate on Qais's car, with the finding written as the design's
+- [x] **Wrong colour flagged** at the gate on Qais's car, with the finding written as the design's
   structured output (zone, type, confidence, image) and the verdict from the 0.6 / 0.9 thresholds.
+  *Done:* flagged at 1.00 in 3 of 3 plant runs (Qais). Each mismatch is now also a structured finding,
+  `InspectionResult.mismatch_findings` (zone `whole_car`, type `wrong_colour`, confidence, the side
+  photo, the text as observation); the text list stays for the code that reads it (3bdf1ec).
+- [x] **Lamp check in daylight.** Healthy cars failed the headlight check on the plant world ("off,
+  just as in the reference"). The reference and the car under test are cropped to the lamps and sent
+  as one high-resolution image, and the check looks only at the lamps the step names. Dataset
+  v8-track (healthy and dark lamps, sun 15 / 45 / dusk): 0.44 -> 0.90, every dark lamp caught.
+- [x] **Gemini as a decision model.** Judgements that are a choice answer one option number, the
+  probability from its log-probability (`llm.Decision`, `MARSHAL_DECISIONS`). Default for the lamp
+  check (0.99 s against 3.2 s, no wrong verdict) and the gate's screens (same accuracy as full
+  answers). Gemini now runs in asia-southeast1, nearest the CARLA host: a call 0.9 s against 2.4 s.
 - [x] **Scratches and dents** from a public car-damage image set (the design's stated stand-in,
   "What is real"): findings per zone for the eight body zones, against labelled ground truth.
   *Done:* dataset v2-damage (Humans in the Loop, CC0): 30 damaged photos, 16 clean crops.
@@ -185,8 +201,23 @@ simulation cannot yet show what the design describes. The target is the design's
   "shipped with an open finding" reads 0. It found and fixed two bugs: cars that found the yard
   full were never shipped, and the simulated plant missed every dead lamp after the first car.
   *Still to come:* a larger image dataset (needs CARLA frames from Qais's cars and faults).
+  *Since:* v6-gate (gate, 43 cases), v7-assist (assistance, 11 stops), v8-track (daylight lamps);
+  every eval runs with decisions on or off and in either region.
 
 ---
+
+### Plant world and films (Rey, 2026-10-10 to 10-14)
+- [x] **The plant's own world** (`MARSHAL_CARLA_MAP=MarshalPlant`): a 498 m OpenDRIVE loop with the
+  gate, track, five bays, eight slots and the loading bay; CARLA's factory halls, concrete slabs,
+  bollards, trucks and workers around it. The replay places the halls and slabs itself (the replayer
+  strands static meshes).
+- [x] **Films that explain themselves**: the demos note each decision on the simulator's clock and
+  the replay draws a feed of them (YARD RULES / GEMINI / SUPERVISOR); `--look cinematic` for a low
+  camera, late sun, wet concrete and 1080p.
+- [x] **Five cars to the yard on the plant world.** For Qais to review, in `driving/`: parked cars
+  are not traffic for BehaviorAgent or the obstacle check; yard slots moved past the bend; a car
+  squares up on its slot or bay. Without these, the third car stopped behind the second at the yard.
+- [ ] **The late-truck re-plan on film**, and a clip per step of every flow (backlog). Need the VM.
 
 ## Faris: dashboard
 
