@@ -3,7 +3,8 @@
 The CARLA host uploads the frame behind each verdict when ``MARSHAL_ARTIFACTS=gcs``
 (see ``marshal_ai.artifacts``), so the ``gs://bucket/object`` a record carries is
 where the real bytes live. Gemini reads a still inline; a clip over the inline
-limit is passed by URI, which Vertex fetches itself.
+limit is passed by URI, which Vertex fetches itself. ``download_bytes`` backs the
+media endpoint that streams the same object to the browser.
 """
 
 from __future__ import annotations
@@ -38,12 +39,11 @@ def guess_mime(name: str) -> str:
     return "application/octet-stream"
 
 
-def load_gcs_media(uri: str, client=None) -> Media:
-    """The bytes (or the URI) of a ``gs://`` object, ready to hand to Gemini."""
+def _blob(uri: str, client=None):
+    """The existing GCS blob for ``gs://bucket/object``, or an ApiError."""
     bucket_name, path = split_uri(uri)
     if not bucket_name or not path:
         raise ApiError(422, "invalid_media_uri", f"{uri!r} is not a gs://bucket/object URI")
-
     if client is None:
         try:
             from google.cloud import storage
@@ -51,8 +51,13 @@ def load_gcs_media(uri: str, client=None) -> Media:
             raise ApiError(
                 503, "gcs_unavailable", "google-cloud-storage is not installed"
             ) from exc
-        client = storage.Client()
-
+        try:
+            client = storage.Client()
+        except Exception as exc:
+            # No GOOGLE_APPLICATION_CREDENTIALS / ADC: a clean 503, not a 500.
+            raise ApiError(
+                503, "gcs_unavailable", f"no usable GCS credentials: {exc}"
+            ) from exc
     try:
         blob = client.bucket(bucket_name).blob(path)
         if not blob.exists():
@@ -62,15 +67,31 @@ def load_gcs_media(uri: str, client=None) -> Media:
         raise
     except Exception as exc:
         raise ApiError(502, "gcs_read_failed", f"could not read {uri}: {exc}") from exc
+    return blob
 
+
+def _mime_of(blob, path: str) -> str:
     declared = blob.content_type
-    mime = declared if declared and declared != "application/octet-stream" else guess_mime(path)
-    size = blob.size or 0
-    if mime.startswith("video/") and size > INLINE_MAX_BYTES:
-        return Media(mime=mime, uri=uri, label="evidence clip")
+    return declared if declared and declared != "application/octet-stream" else guess_mime(path)
 
+
+def _download(blob, uri: str) -> bytes:
     try:
-        data = blob.download_as_bytes()
+        return blob.download_as_bytes()
     except Exception as exc:
         raise ApiError(502, "gcs_read_failed", f"could not download {uri}: {exc}") from exc
-    return Media(mime=mime, data=data, uri=uri, label="evidence clip")
+
+
+def load_gcs_media(uri: str, client=None) -> Media:
+    """The bytes (or the URI) of a ``gs://`` object, ready to hand to Gemini."""
+    blob = _blob(uri, client)
+    _, path = split_uri(uri)
+    mime = _mime_of(blob, path)
+    if mime.startswith("video/") and (blob.size or 0) > INLINE_MAX_BYTES:
+        return Media(mime=mime, uri=uri, label="evidence clip")
+    return Media(mime=mime, data=_download(blob, uri), uri=uri, label="evidence clip")
+
+
+def download_bytes(uri: str, client=None) -> bytes:
+    """The whole object, for the media endpoint that streams it to the browser."""
+    return _download(_blob(uri, client), uri)

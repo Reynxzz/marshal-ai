@@ -68,6 +68,12 @@ async def api(tmp_path, monkeypatch):
         "load_gcs_media",
         lambda uri, client=None: Media(mime="image/jpeg", data=b"jpeg", uri=uri, label="evidence clip"),
     )
+    monkeypatch.setattr(gcs, "download_bytes", lambda uri, client=None: b"jpeg")
+    # Deterministic fallback: pretend no signer is available, whatever the environment has.
+    monkeypatch.setattr(
+        "marshal_api.services.media_service._signed_gcs_url",
+        lambda uri, ttl_minutes=60: None,
+    )
     llm = FakeLLM().on("assist.assess", lambda call: _assessment())
 
     app.dependency_overrides[get_session] = _session
@@ -132,6 +138,12 @@ async def test_ingest_clip_opens_case_with_gemini_recommendation(api) -> None:
         await client.get(f"/api/v1/media/{body['media_ids'][0]}", headers={"X-Tenant-ID": TENANT})
     ).json()
     assert media["available"] is True and media["kind"] == "image"
+    assert media["url"] == f"/api/v1/media/{body['media_ids'][0]}/file"
+
+    file_response = await client.get(media["url"], headers={"X-Tenant-ID": TENANT})
+    assert file_response.status_code == 200
+    assert file_response.headers["content-type"] == "image/jpeg"
+    assert file_response.content == b"jpeg"
 
 
 async def test_ingest_requires_an_option(api) -> None:
