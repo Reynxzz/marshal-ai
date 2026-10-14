@@ -271,6 +271,8 @@ async def supervise(app, rt) -> None:
 async def run(args) -> dict:
     rt = build_runtime(Settings(driving="carla", llm="gemini"), host=args.host, port=args.port)
     app = MarshalApp(rt)
+    # MARSHAL_PARKING=gemini: Gemini parks each car in its slot; its choices go in the film's feed
+    rt.driving.park_note = lambda text: note(rt.driving.world, text, "gemini")
     if type(rt.llm).__name__ != "GeminiLLM":
         raise RuntimeError(f"expected GeminiLLM, got {type(rt.llm).__name__}")
 

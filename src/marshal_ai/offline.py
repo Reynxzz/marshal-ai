@@ -304,6 +304,21 @@ def adversarial_report(call: LLMCall) -> dict:
             "likely_cause": cause, "suggested_fix": fix, "speed_fix": speed_fix}
 
 
+def drive_park(call: LLMCall) -> dict:
+    """The parking planner's next move, from the view's ground truth (driving/parking.py)."""
+    from marshal_ai.driving.parking import OPTIONS, Box, Pose, planned_move
+
+    truth = (call.media[0].truth if call.media else None) or {}
+    pose = Pose(*truth["pose"])
+    obstacles = [Box(*b) for b in truth.get("obstacles", [])]
+    options = truth.get("options") or list(OPTIONS)
+    # paths mode: the shortest path the planner proposed (listed first); moves mode: its next move
+    choice = options[0] if options[0].startswith(("path_", "parked")) else planned_move(pose, obstacles)
+    if options == ["ask_a_person"] or choice not in options:
+        choice = "ask_a_person"
+    return {"choice": choice, "probs": {o: (0.9 if o == choice else 0.1 / max(1, len(options) - 1)) for o in options}}
+
+
 def offline_llm() -> FakeLLM:
     return FakeLLM({
         "visual.defects": visual_defects,
@@ -313,6 +328,7 @@ def offline_llm() -> FakeLLM:
         "visual.screen": visual_screen,
         "visual.match": visual_match,
         "track.decide": track_decide,
+        "drive.park": drive_park,
         "assist.assess": assist_assess,
         "assist.locate": assist_locate,
         "yard.exception": yard_exception,

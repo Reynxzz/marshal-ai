@@ -6,6 +6,7 @@
 #   MARSHAL_PLANT_CARS=4 MARSHAL_PLANT_STEPS=1,3 bash scripts/run_carla_plant.sh
 #   MARSHAL_PLANT_CARS=6 MARSHAL_PLANT_TRUCKS=T-1:20,T-2:45 MARSHAL_PLANT_LATE_TRUCK=T-1:40 \
 #     bash scripts/run_carla_plant.sh                   # flow 1 in full, with the late truck
+#   MARSHAL_PARKING=gemini bash scripts/run_carla_plant.sh   # Gemini parks each car (driving/parking.py)
 set -Eeuo pipefail
 
 readonly APP_ROOT="$(cd "$(dirname "$0")/.." && pwd)"

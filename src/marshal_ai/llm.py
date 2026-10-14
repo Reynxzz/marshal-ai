@@ -105,6 +105,10 @@ GATE_THINKING = 512
 # pair_image), where a lit strip and a dark lens are a few pixels apart at the default resolution.
 TASK_SINGLE_IMAGE_RESOLUTION = {"track.step": "high", "track.decide": "high"}
 
+# Decisions think not at all. MARSHAL_PARK_THINKING gives parking (drive.park) a budget for
+# experiments: in the moves mode, 1024 tokens made it slower (3.5 s a move) and no better.
+DECISION_THINKING = {"drive.park": int(__import__("os").getenv("MARSHAL_PARK_THINKING", "0"))}
+
 TASK_THINKING_BUDGET = {"assist.locate": 0, "assist.assess": 0, "visual.defects": GATE_THINKING,
                         "visual.variant": GATE_THINKING, "visual.verify": GATE_THINKING}
 
@@ -232,8 +236,9 @@ class GeminiLLM:
             response_schema={"type": "STRING", "enum": numbers},
             response_logprobs=True,
             logprobs=min(len(numbers), 20),
-            # a decision is the answer itself: thinking would cost the time this is meant to save
-            thinking_config=types.ThinkingConfig(thinking_budget=0),
+            # a decision is the answer itself: thinking would cost the time this is meant to save,
+            # except for a task that has to plan ahead (DECISION_THINKING)
+            thinking_config=types.ThinkingConfig(thinking_budget=DECISION_THINKING.get(task, 0)),
             system_instruction=system or None,
             media_resolution=(getattr(types.MediaResolution, f"MEDIA_RESOLUTION_{resolution.upper()}")
                               if resolution else None),

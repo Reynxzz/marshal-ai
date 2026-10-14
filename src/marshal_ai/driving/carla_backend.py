@@ -35,6 +35,7 @@ from marshal_ai.driving.api import EventHandler, emit
 from marshal_ai.driving.messages import (
     AssistChoose, AssistRequest, Command, MissionDone, MissionGo, MissionHold, MissionResume, Status, TrackStep,
 )
+from marshal_ai.driving import parking
 from marshal_ai.driving.routines import RoutineStep, routine_steps
 from marshal_ai.fakeworld import GATE_VIEWS
 from marshal_ai.llm import Media
@@ -175,6 +176,11 @@ class _Vehicle:
     onboard_frames: object | None = None   # _FrameBuffer of its frames
     # view name -> (sensor, _FrameBuffer). Track evidence rides with the car; see _attach_evidence.
     evidence: dict = field(default_factory=dict)
+    parking: object | None = None          # parking.ParkingSession while Gemini parks it
+    park_task: object | None = None        # the decision being asked, an asyncio future
+    park_asked_at: float = 0.0
+    park_view: object | None = None        # what Gemini was shown for the decision being asked
+    park_fallback: bool = False            # Gemini's session ended without parking: the stand-in parks it
 
 
 # The options the driving system offers when it stops. The desk may only choose among these;
@@ -202,6 +208,12 @@ CREEP_MAX_S = 30.0                 # give up creeping after this long, rather th
 PULL_OVER_RUN_M = 12.0
 PULL_OVER_AIM_M = 4.0              # steer for this far beyond the spot, along it, to arrive straight
 SETTLE_MAX_M = 3.0                 # a car this close to its slot or bay is squared up on it (_square_up)
+# When Gemini parks (parking_driver set, MARSHAL_PARKING=gemini): the steer value for "wheel full
+# left/right". The parking session plans with 30 degrees at the front wheels; the MKZ's wheels turn
+# 70 degrees at steer 1.0, so about 0.45. Not yet tuned on the VM: the session re-measures after
+# every move, so a different real angle costs moves, not safety.
+CARLA_PARK_STEER = 0.45
+PARK_SCENE_RADIUS_M = 15.0         # cars, people and props this close to the slot are obstacles
 
 # Every sensor Marshal spawns carries this role_name, so leftovers can be found and cleared. Runs used
 # to leave cameras alive in the world - 28 built up in one session, each rendering every frame on the
@@ -246,7 +258,7 @@ class CarlaDrivingSystem:
                  auto_assist: bool = True, blocked_after_s: float = 5.0,
                  blocked_speed_kmh: float = 0.6, obstacle_range_m: float = 14.0,
                  assist_options: list[str] | None = None, sweep_stale_sensors: bool = True,
-                 camera_tick_s: float | None = CAMERA_TICK_S):
+                 camera_tick_s: float | None = CAMERA_TICK_S, parking_driver=None):
         if carla is None:
             raise RuntimeError(
                 "CARLA client not available. Install the 0.9.16 wheel bundled with the server "
@@ -292,6 +304,11 @@ class CarlaDrivingSystem:
         # Replaced by the runtime when MARSHAL_ARTIFACTS=gcs, so the gs:// URI a record
         # carries points at the actual photo behind the verdict.
         self.artifacts: Artifacts = NoArtifacts()
+        # Who drives the last metres into a yard slot or bay. None: the stand-in (_creep, then
+        # _square_up). A parking.GeminiParker: Gemini, one manoeuvre at a time (_gemini_park).
+        self.parking_driver = parking_driver
+        self.parking_log: dict[str, list[dict]] = {}      # vin -> each parking session, for the film
+        self.park_note = None                 # callable(text): each parking decision, for the film's feed
         if sweep_stale_sensors:
             self.sweep_sensors()
 
@@ -574,6 +591,7 @@ class CarlaDrivingSystem:
             if self._precise(v.remaining[0]) and not self._creep(v):
                 return                          # still edging onto the mark
             v.creep_s = 0.0
+            v.park_fallback = False
             v.location = v.remaining.pop(0)
             if v.location == "test_track" and v.mission.routine and not v.routine_done:
                 v.routine_done = True
@@ -602,6 +620,9 @@ class CarlaDrivingSystem:
         plant if something it cannot see is in the way.
         """
         point = v.remaining[0]
+        if (getattr(self, "parking_driver", None) is not None and not v.park_fallback
+                and (self.map.points[point].carla or {}).get("pull_over")):
+            return self._gemini_park(v, point)
         target = self.transform(point).location
         here = v.actor.get_transform()
         forward = here.get_forward_vector()
@@ -641,6 +662,127 @@ class CarlaDrivingSystem:
             steer=max(-limit, min(limit, 1.5 * error)),
             brake=0.0))
         return False
+
+    # ---------- Gemini parks the car (parking.py) ----------
+
+    def _gemini_park(self, v: _Vehicle, point: str) -> bool:
+        """One tick of Gemini parking the car in a slot or bay. True once it is parked.
+
+        The car stops while Gemini decides (about a second), drives the chosen manoeuvre at walking
+        pace under the session's safety check, stops, and is asked again. The decision runs on a
+        thread, so the world keeps ticking and the other cars keep moving meanwhile. If the session
+        ends without parking - Gemini asked for a person, ran out of moves, or a call failed - the
+        stand-in parks the car as before, and the log says so.
+        """
+        session = v.parking
+        if session is None:
+            session = v.parking = parking.ParkingSession(
+                v.vin, point.rsplit(".", 1)[-1], mode=getattr(self.parking_driver, "mode", "paths"))
+            log.info("%s: Gemini parks it in %s", v.vin, point)
+        pose, obstacles = self._park_scene(v, point)
+        if v.park_task is not None:
+            if not v.park_task.done():
+                self._park_brake(v)
+                return False
+            task, v.park_task = v.park_task, None
+            try:
+                view, decision = task.result()
+            except Exception as exc:              # network, quota, a bad answer
+                log.warning("%s: parking decision failed (%s)", v.vin, exc)
+                session.finish("error")
+            else:
+                v.park_view = view
+                if decision is not None:
+                    session.apply(decision, pose, time.monotonic() - v.park_asked_at, view)
+                step = session.trace[-1]
+                self._note_park(v, session, step, view)
+                log.info("%s park %s #%d: %s (%.2f) at %+.1f m / %+.1f m / %+.0f deg", v.vin,
+                         session.slot, step["n"], step["choice"], step["p"], pose.x, pose.y, pose.yaw_deg)
+        if not session.done and session.needs_decision:
+            # Planning the paths (up to parking.PLAN_BUDGET_S) and asking Gemini both happen on a
+            # thread: the world keeps ticking and the other cars keep moving while this one waits.
+            v.park_asked_at = time.monotonic()
+            v.park_task = asyncio.ensure_future(asyncio.to_thread(self._park_ask, session, pose, obstacles))
+            self._park_brake(v)
+            return False
+        if session.done:
+            self._park_brake(v)
+            self.parking_log.setdefault(v.vin, []).append({
+                "slot": point, "outcome": session.outcome, "decisions": session.decisions,
+                "safety_stops": session.safety_stops, "trace": list(session.trace),
+                "final": {"along_m": round(pose.x, 2), "side_m": round(pose.y, 2),
+                          "yaw_deg": round(pose.yaw_deg, 1)}})
+            v.parking = None
+            if session.outcome == "parked":
+                log.info("%s: parked by Gemini in %s after %d decisions", v.vin, point, session.decisions)
+                return True
+            log.warning("%s: Gemini did not park it in %s (%s); the stand-in parks it",
+                        v.vin, point, session.outcome)
+            v.park_fallback, v.creep_s = True, 0.0
+            return False
+        here = v.actor.get_transform()
+        forward, velocity = here.get_forward_vector(), v.actor.get_velocity()
+        speed = velocity.x * forward.x + velocity.y * forward.y
+        cmd = session.control(pose, obstacles, speed, self.fixed_delta_s)
+        if cmd.brake:
+            self._park_brake(v)
+            return False
+        target = abs(cmd.speed)
+        v.actor.apply_control(carla.VehicleControl(
+            throttle=0.35 if abs(speed) < target else 0.0,
+            brake=0.3 if abs(speed) > target + 0.4 else 0.0,
+            steer=-cmd.wheel * CARLA_PARK_STEER,      # CARLA steers right for positive values
+            reverse=cmd.speed < 0))
+        return False
+
+    def _note_park(self, v: _Vehicle, session, step: dict, view) -> None:
+        hook = getattr(self, "park_note", None)
+        if hook is None:
+            return
+        choice = step["choice"]
+        if choice.startswith("path_"):
+            path = next((p for p in view.paths if p.option == choice), None)
+            what = f"path {choice[-1]}" + (f", {path.strategy}" if path is not None and path.strategy else "")
+        else:
+            what = choice.replace("_", " ")
+        try:
+            hook(f"{v.vin} parking {session.slot}: {what} ({step['p']:.2f})")
+        except Exception as exc:                  # the film must never stop the car
+            log.warning("could not note a parking decision: %s", exc)
+
+    def _park_ask(self, session, pose, obstacles):
+        """What Gemini is shown, and its decision; no decision when there is nothing to choose."""
+        view = session.view(pose, obstacles)
+        if session.done:                          # no path into the slot: a person decides
+            return view, None
+        return view, self.parking_driver.decide(view, parking.render(view))
+
+    def _park_brake(self, v: _Vehicle) -> None:
+        v.actor.apply_control(carla.VehicleControl(throttle=0.0, brake=1.0))
+
+    def _park_scene(self, v: _Vehicle, point: str):
+        """The car's pose and the obstacles around the slot, in the slot's frame (parking.py)."""
+        slot = self.transform(point)
+        here = v.actor.get_transform()
+        pose = parking.to_slot_frame(slot.location.x, slot.location.y, slot.rotation.yaw,
+                                     here.location.x, here.location.y, here.rotation.yaw)
+        obstacles = [parking.kerb()]
+        for actor in self.world.get_actors():
+            if actor.id == v.actor.id or not actor.type_id.startswith(("vehicle.", "walker.", "static.prop")):
+                continue
+            t = actor.get_transform()
+            if t.location.distance(slot.location) > PARK_SCENE_RADIUS_M:
+                continue
+            extent = actor.bounding_box.extent
+            if actor.type_id.startswith("static.prop") and extent.z < 0.15:
+                continue                        # flat on the ground: plates and slabs are driven over
+            p = parking.to_slot_frame(slot.location.x, slot.location.y, slot.rotation.yaw,
+                                      t.location.x, t.location.y, t.rotation.yaw)
+            name = actor.attributes.get("role_name") or ""
+            label = (f"the car {name}" if actor.type_id.startswith("vehicle.") and name
+                     else "a person" if actor.type_id.startswith("walker.") else "an obstacle")
+            obstacles.append(parking.Box(p.x, p.y, p.yaw, 2 * extent.x, 2 * extent.y, label))
+        return pose, obstacles
 
     def _square_up(self, v: _Vehicle, point: str) -> None:
         """Square a car up in its slot or bay once it has crept onto it.

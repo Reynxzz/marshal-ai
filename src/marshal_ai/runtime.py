@@ -136,6 +136,9 @@ def build_runtime(s: Settings = default_settings, llm: LLM | None = None,
             llm = offline_llm()
         else:
             llm = GeminiLLM(s.model)
+    if s.parking == "gemini" and hasattr(driving, "parking_driver"):
+        from marshal_ai.driving.parking import GeminiParker
+        driving.parking_driver = GeminiParker(llm, s.park_mode)
     if s.driving == "carla":
         from marshal_ai.driving.carla_backend import CarlaGateCamera, CarlaTrackCamera
         gate, track = CarlaGateCamera(driving), CarlaTrackCamera(driving)
