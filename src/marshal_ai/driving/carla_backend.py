@@ -49,8 +49,10 @@ except ImportError:  # local development without the compiled CARLA client
 
 try:
     from agents.navigation.behavior_agent import BehaviorAgent
+    from agents.navigation.local_planner import RoadOption
 except ImportError:  # bundled under CARLA_ROOT/PythonAPI/carla, not in the PyPI client wheel
     BehaviorAgent = None
+    RoadOption = None
 
 
 # The design asks for a 3 s clip of each track step and a 10 s clip before a stop. Frames are held
@@ -172,6 +174,10 @@ class _Vehicle:
     creep_s: float = 0.0                   # time spent creeping onto a precise stop; see _creep
     manoeuvre: dict | None = None          # state of a routine step being driven; see _manoeuvre
     assists_raised: int = 0
+    # what blocked the car when it asked for help: (actor id, carla.Location); see _execute_option
+    assist_obstacle: tuple | None = None
+    waiting_case: str | None = None        # "wait_for_removal" chosen: held until the lane is clear
+    detour: dict | None = None             # "pass_left_3kmh" / "reroute_lane_c" being driven
     onboard: object | None = None          # forward camera on the car; see assist_clip()
     onboard_frames: object | None = None   # _FrameBuffer of its frames
     # view name -> (sensor, _FrameBuffer). Track evidence rides with the car; see _attach_evidence.
@@ -181,6 +187,25 @@ class _Vehicle:
 # The options the driving system offers when it stops. The desk may only choose among these;
 # it never invents a path. "wait" first so a rule-bound desk always has a safe choice.
 ASSIST_OPTIONS = ["wait_for_removal", "pass_left_3kmh", "reroute_lane_c"]
+
+# Objects in the lane. BehaviorAgent brakes for vehicles and people on its route but not for props,
+# so scene 3's car drove into the box (the lab's SC-0142 failed no_contact on it). The stand-in
+# brakes for a prop or a person in its path, as the plant's driving system would, and stops with
+# room to pull out round it: its centre this far from the object, plus the braking distance.
+OBJECT_STOP_M = 9.0
+OBJECT_LATERAL_M = 1.8             # in the car's path: half its width (1.1 m), half a box, margin
+OBJECT_DECEL_MS2 = 4.0             # for the braking distance at the car's speed
+
+# Driving a chosen assistance option (design, flow 2). Passing and rerouting both leave the lane
+# for the next one in the same direction - the left lane for a pass, the lane through `lane_c` for
+# a reroute - and are driven by BehaviorAgent on a plan built here. A pass is at 3 km/h and returns
+# to the lane once the object is behind; a reroute is at the mission's speed and stays in lane C
+# until just before the next stop. Either one is offered only where it can be driven.
+PASS_KMH = 3.0
+LANE_CHANGE_M = 7.0                # forward run of one lane change
+PASS_CLEAR_M = 6.0                 # the car turns back once its centre is this far past the object
+REJOIN_BEFORE_STOP_M = 5.0         # back in lane this far before the next stop
+DETOUR_MAX_S = 90.0                # a detour not finished by then is given up; the car waits
 
 # Simulated seconds between frames for every Marshal camera (CARLA's sensor_tick). Measured on the
 # T4 with three cameras per car: at the default of rendering every tick, simulated time ran at 1.26x
@@ -310,6 +335,8 @@ class CarlaDrivingSystem:
         self.drive_through_gate = drive_through_gate
         # vin -> km/h at the moment it crossed a drive-through point, i.e. when it was photographed
         self.passes: dict[str, float] = {}
+        # case_id -> what the car did with the option chosen for it; see _execute_option
+        self.assist_outcomes: dict[str, dict] = {}
         self._simulated_s = 0.0               # see realtime_ratio()
         self._sim_started_at: float | None = None
         # Replaced by the runtime when MARSHAL_ARTIFACTS=gcs, so the gs:// URI a record
@@ -399,6 +426,8 @@ class CarlaDrivingSystem:
         left three cameras behind.
         """
         cams = [v.onboard] + [cam for cam, _buffer in v.evidence.values()]
+        if v.detour and v.detour.get("sensor") is not None:
+            cams.append(v.detour.pop("sensor"))
         for cam in cams:
             if cam is None:
                 continue
@@ -502,6 +531,9 @@ class CarlaDrivingSystem:
     async def send(self, command: Command) -> None:
         if isinstance(command, MissionGo):
             v = self.vehicles[command.vin]
+            if v.detour:
+                self._end_detour(v, "replaced by a new mission")
+            v.waiting_case = None
             v.mission, v.remaining = command, list(command.waypoints)
             v.routine_queue, v.routine_done = [], False
             v.agent._behavior.max_speed = command.max_speed_kmh
@@ -515,23 +547,26 @@ class CarlaDrivingSystem:
         elif isinstance(command, AssistChoose):
             v = self.vehicles[command.vin]
             if v.assist_case == command.case_id:
+                self._execute_option(v, command.case_id, command.option)
                 v.assist_case = None
-                # day 3: translate the chosen option (wait / pass left / reroute) here
 
     def _precise(self, point: str) -> bool:
         spec = self.map.points[point].carla or {}
         return point in PRECISE_STOPS or bool(spec.get("pull_over"))
 
     def _next_destination(self, v: _Vehicle) -> None:
-        point = v.remaining[0]
+        v.agent.set_destination(self._destination_location(v.remaining[0]))
+
+    def _destination_location(self, point: str):
+        """Where BehaviorAgent is routed for a point: the point, or for a pull_over spot off the
+        driving lanes, the lane beside it a run-up before it."""
         target = self.transform(point).location
         if (self.map.points[point].carla or {}).get("pull_over"):
-            # Off the driving lanes: route to the lane beside the spot, a run-up before it.
             wp = self.world.get_map().get_waypoint(target, project_to_road=True,
                                                    lane_type=carla.LaneType.Driving)
             back = wp.previous(PULL_OVER_RUN_M) if wp is not None else []
             target = (back[0] if back else wp).transform.location if wp is not None else target
-        v.agent.set_destination(target)
+        return target
 
     async def start(self) -> None:
         settings = self.world.get_settings()
@@ -593,6 +628,11 @@ class CarlaDrivingSystem:
         if v.routine_queue:
             await self._routine_step(v)
             return
+        if v.waiting_case and not self._lane_cleared(v):
+            v.actor.apply_control(carla.VehicleControl(throttle=0.0, brake=1.0))
+            return
+        if v.detour:
+            self._follow_detour(v)
         if v.agent.done():
             through = self._drives_through(v.remaining[0])
             if through:
@@ -602,6 +642,8 @@ class CarlaDrivingSystem:
                 return                          # still edging onto the mark
             v.creep_s = 0.0
             v.location = v.remaining.pop(0)
+            if v.detour:
+                self._end_detour(v, f"arrived at {v.location}")
             if v.location == "test_track" and v.mission.routine and not v.routine_done:
                 v.routine_done = True
                 v.routine_queue = routine_steps(v.mission.routine, v.mission.routine_steps)
@@ -620,6 +662,11 @@ class CarlaDrivingSystem:
                     mission_id=mission.mission_id, vin=v.vin, location=v.location,
                 ))
                 return
+        if self._object_in_path(v) is not None:
+            # A prop or a person in the path: stop short of it, and ask for help if it stays.
+            v.actor.apply_control(carla.VehicleControl(throttle=0.0, brake=1.0))
+            await self._check_blocked(v)
+            return
         if await self._check_blocked(v):
             return
         v.actor.apply_control(v.agent.run_step())
@@ -878,7 +925,7 @@ class CarlaDrivingSystem:
 
     async def _check_blocked(self, v: _Vehicle) -> bool:
         """Raise assist.request once the agent has stalled mid-mission behind something."""
-        if not self.auto_assist or v.assist_case or v.routine_queue:
+        if not self.auto_assist or v.assist_case or v.routine_queue or v.waiting_case:
             return False
         velocity = v.actor.get_velocity()
         speed_kmh = 3.6 * (velocity.x ** 2 + velocity.y ** 2 + velocity.z ** 2) ** 0.5
@@ -903,13 +950,251 @@ class CarlaDrivingSystem:
         what = {"walker": "a person", "vehicle": "a vehicle", "static": "an object"}.get(
             kind, "an object")
         case_id = f"AC-{v.vin}-{v.assists_raised + 1}"
+        v.assist_obstacle = (obstacle.id, obstacle.get_location())
         await self.raise_assist(
             v.vin, case_id,
             f"unknown object in lane: {what} ({obstacle.type_id}) {distance:.1f} m ahead",
-            self.assist_options,
+            self._executable_options(v, v.assist_obstacle[1]),
         )
         v.stalled_s = 0.0
         return True
+
+    # ---------- flow 2: the car does what was chosen ----------
+
+    def _actors(self) -> list:
+        """The world's actors, fetched once per simulated tick: _object_in_path runs every tick."""
+        cached = getattr(self, "_actors_cache", None)
+        if cached is None or cached[0] != self._simulated_s:
+            cached = self._actors_cache = (self._simulated_s, list(self.world.get_actors()))
+        return cached[1]
+
+    def _object_in_path(self, v: _Vehicle):
+        """A prop or a person in the car's path within its stopping distance: (actor, metres ahead).
+
+        Vehicles are left to BehaviorAgent, which already queues behind them. The object a detour
+        is driving round is not in the way of that detour.
+        """
+        velocity = v.actor.get_velocity()
+        speed = math.hypot(velocity.x, velocity.y)
+        stop_m = OBJECT_STOP_M + speed * speed / (2 * OBJECT_DECEL_MS2)
+        here = v.actor.get_transform()
+        forward = here.get_forward_vector()
+        ignore = v.detour.get("obstacle_id") if v.detour else None
+        best = None
+        for actor in self._actors():
+            if actor.id in (v.actor.id, ignore) or not actor.type_id.startswith(("walker.", "static.prop")):
+                continue
+            offset = actor.get_location() - here.location
+            ahead = offset.x * forward.x + offset.y * forward.y
+            if ahead <= 0 or ahead > stop_m:
+                continue
+            if abs(offset.x * -forward.y + offset.y * forward.x) > OBJECT_LATERAL_M:
+                continue
+            if best is None or ahead < best[1]:
+                best = (actor, ahead)
+        return best
+
+    def _executable_options(self, v: _Vehicle, obstacle_location) -> list[str]:
+        """The options this car can be given where it stands. Waiting always; a pass or a reroute
+        only where there is a lane to drive it in and room past the object before the next stop.
+        The desk only chooses among what it is offered, so nothing it chooses is undrivable."""
+        out = []
+        for option in self.assist_options:
+            if option in ("pass_left_3kmh", "reroute_lane_c"):
+                plan, why = self._detour_plan(v, obstacle_location, option)
+                if plan is None:
+                    log.info("%s not offered to %s: %s", option, v.vin, why)
+                    continue
+            out.append(option)
+        return out
+
+    def _detour_plan(self, v: _Vehicle, obstacle_location, option: str):
+        """BehaviorAgent's plan round an object, as (plan, details), or (None, why it cannot be).
+
+        Into the next lane in the same direction, along it past the object, back into the car's own
+        lane, then the agent's own route to the next stop. Assumes the stretch is straight, as the
+        plant's lanes past the test track are; anything else is not offered.
+        """
+        if RoadOption is None or obstacle_location is None or not v.remaining:
+            return None, "nothing to plan round"
+        world_map = getattr(self, "_driving_map", None)
+        if world_map is None:
+            world_map = self._driving_map = self.world.get_map()
+        driving = carla.LaneType.Driving
+        here = v.actor.get_transform()
+        own = world_map.get_waypoint(here.location, project_to_road=True, lane_type=driving)
+        if own is None:
+            return None, "the car is not on a driving lane"
+
+        def same_way(wp) -> bool:
+            return (wp is not None and wp.lane_type == driving and wp.road_id == own.road_id
+                    and wp.lane_id * own.lane_id > 0)
+
+        left, right = own.get_left_lane(), own.get_right_lane()
+        if option == "pass_left_3kmh":
+            if not same_way(left):
+                return None, "no lane to the left in the same direction"
+            side, change, back, kmh = left, RoadOption.CHANGELANELEFT, RoadOption.CHANGELANERIGHT, PASS_KMH
+        else:
+            spec = self.map.points.get("lane_c")
+            if spec is None or not spec.carla:
+                return None, "lane C is not on this map"
+            lane_c = world_map.get_waypoint(self.transform("lane_c").location, project_to_road=True,
+                                            lane_type=driving)
+            kmh = v.mission.max_speed_kmh if v.mission else PASS_KMH
+            if same_way(left) and lane_c is not None and (lane_c.road_id, lane_c.lane_id) == (left.road_id, left.lane_id):
+                side, change, back = left, RoadOption.CHANGELANELEFT, RoadOption.CHANGELANERIGHT
+            elif same_way(right) and lane_c is not None and (lane_c.road_id, lane_c.lane_id) == (right.road_id, right.lane_id):
+                side, change, back = right, RoadOption.CHANGELANERIGHT, RoadOption.CHANGELANELEFT
+            else:
+                return None, "lane C is not beside the car's lane"
+
+        forward = here.get_forward_vector()
+
+        def along(loc) -> float:
+            return (loc.x - here.location.x) * forward.x + (loc.y - here.location.y) * forward.y
+
+        obstacle_at = along(obstacle_location)
+        destination = self._destination_location(v.remaining[0])
+        dest_wp = world_map.get_waypoint(destination, project_to_road=True, lane_type=driving)
+        on_this_lane = dest_wp is not None and (dest_wp.road_id, dest_wp.lane_id) == (own.road_id, own.lane_id)
+        dest_at = along(destination) if on_this_lane else math.inf
+        turn_back = obstacle_at + PASS_CLEAR_M
+        if turn_back + LANE_CHANGE_M + REJOIN_BEFORE_STOP_M > dest_at:
+            return None, (f"{v.remaining[0]} is {dest_at - obstacle_at:.0f} m past the object, "
+                          "too close to get back into the lane")
+        if option == "reroute_lane_c" and math.isfinite(dest_at):
+            # stay in lane C to just before the stop, and be back in lane before BehaviorAgent
+            # counts itself arrived (3-4 m out)
+            turn_back = max(turn_back, dest_at - LANE_CHANGE_M - REJOIN_BEFORE_STOP_M)
+        rejoin_at = turn_back + LANE_CHANGE_M
+
+        plan = [(own, RoadOption.LANEFOLLOW)]
+        s = LANE_CHANGE_M
+        while s <= turn_back:
+            ahead = side.next(s)
+            if not ahead:
+                return None, "the lane ends before the object is passed"
+            plan.append((ahead[0], change if s == LANE_CHANGE_M else RoadOption.LANEFOLLOW))
+            s += 1.0
+        rejoin = own.next(rejoin_at)
+        if not rejoin:
+            return None, "the car's lane ends past the object"
+        plan.append((rejoin[0], back))
+        plan += v.agent.trace_route(rejoin[0], dest_wp)
+        return plan, {
+            "lane": side.lane_id, "own_lane": own.lane_id, "kmh": kmh,
+            "obstacle_at_m": round(obstacle_at, 2), "turn_back_m": round(turn_back, 2),
+            "rejoin_m": round(rejoin_at, 2),
+            "origin": (here.location.x, here.location.y), "forward": (forward.x, forward.y),
+        }
+
+    def _execute_option(self, v: _Vehicle, case_id: str, option: str) -> None:
+        """Turn the chosen option into driving. Results land in assist_outcomes[case_id].
+
+        Waiting is also what happens when the chosen option cannot be driven after all: a car
+        that cannot do what it was told stays where it is.
+        """
+        obstacle_id, obstacle_location = v.assist_obstacle or (None, None)
+        if obstacle_location is None:              # raised by hand (raise_assist), not by a stall
+            found, _distance = self._obstacle_ahead(v)
+            if found is not None:
+                obstacle_id, obstacle_location = found.id, found.get_location()
+        outcome = self.assist_outcomes[case_id] = {
+            "vin": v.vin, "option": option, "chosen_at_s": round(self._simulated_s, 2)}
+        if option in ("pass_left_3kmh", "reroute_lane_c"):
+            plan, details = self._detour_plan(v, obstacle_location, option)
+            if plan is not None:
+                v.agent._behavior.max_speed = details["kmh"]
+                v.agent.set_global_plan(plan, stop_waypoint_creation=True, clean_queue=True)
+                contacts: list[str] = []
+                v.detour = dict(details, case_id=case_id, option=option, obstacle_id=obstacle_id,
+                                obstacle=(obstacle_location.x, obstacle_location.y),
+                                started_s=self._simulated_s, min_centre_m=math.inf, max_kmh=0.0,
+                                max_kmh_alongside=0.0, contacts=contacts,
+                                sensor=self._attach_collision(v, contacts))
+                outcome.update(executed="driving", lane=details["lane"], from_lane=details["own_lane"],
+                               kmh=details["kmh"], obstacle_at_m=details["obstacle_at_m"])
+                log.info("%s %s: into lane %s at %.0f km/h, object %.1f m ahead", v.vin, option,
+                         details["lane"], details["kmh"], details["obstacle_at_m"])
+                return
+            outcome["not_possible"] = details
+            log.warning("%s cannot %s (%s); it waits instead", v.vin, option, details)
+        elif not option.startswith("wait"):
+            outcome["not_possible"] = "unknown option"
+            log.warning("%s was given unknown option %r; it waits instead", v.vin, option)
+        v.waiting_case = case_id
+        outcome["executed"] = "waiting"
+
+    def _lane_cleared(self, v: _Vehicle) -> bool:
+        """For a car told to wait: True, once, when nothing but plant traffic is in front of it."""
+        obstacle, _distance = self._obstacle_ahead(v)
+        if obstacle is not None and not self._is_plant_car(obstacle):
+            return False
+        outcome = self.assist_outcomes.setdefault(v.waiting_case, {"vin": v.vin})
+        waited = self._simulated_s - outcome.get("chosen_at_s", self._simulated_s)
+        outcome.update(executed="waited", resumed_after_s=round(waited, 1))
+        log.info("%s: lane clear after %.1f s, resuming", v.vin, waited)
+        v.waiting_case, v.stalled_s = None, 0.0
+        return True
+
+    def _follow_detour(self, v: _Vehicle) -> None:
+        """Measure a detour as it is driven, and end it once the car is back in its lane."""
+        d = v.detour
+        here = v.actor.get_location()
+        (ox, oy), (fx, fy), (bx, by) = d["origin"], d["forward"], d["obstacle"]
+        along = (here.x - ox) * fx + (here.y - oy) * fy
+        velocity = v.actor.get_velocity()
+        kmh = 3.6 * math.hypot(velocity.x, velocity.y)
+        d["max_kmh"] = max(d["max_kmh"], kmh)
+        d["min_centre_m"] = min(d["min_centre_m"], math.hypot(here.x - bx, here.y - by))
+        if abs(along - d["obstacle_at_m"]) <= 3.0:          # alongside the object
+            d["max_kmh_alongside"] = max(d["max_kmh_alongside"], kmh)
+            lateral = abs((here.x - bx) * -fy + (here.y - by) * fx)
+            d["alongside_lateral_m"] = min(d.get("alongside_lateral_m", math.inf), lateral)
+        if along >= d["rejoin_m"] - 1.0:
+            self._end_detour(v, "back in lane")
+        elif self._simulated_s - d["started_s"] > DETOUR_MAX_S:
+            self._end_detour(v, f"not back in lane after {DETOUR_MAX_S:.0f} s")
+
+    def _end_detour(self, v: _Vehicle, how: str) -> None:
+        d, v.detour = v.detour, None
+        sensor = d.get("sensor")
+        if sensor is not None:
+            try:
+                sensor.stop()
+                sensor.destroy()
+            except Exception as exc:
+                log.warning("could not release the collision sensor on %s: %s", v.vin, exc)
+        if v.mission is not None:
+            v.agent._behavior.max_speed = v.mission.max_speed_kmh
+        outcome = self.assist_outcomes.setdefault(d["case_id"], {"vin": v.vin})
+        outcome.update(
+            executed=d["option"], result=how,
+            duration_s=round(self._simulated_s - d["started_s"], 1),
+            min_centre_distance_m=round(d["min_centre_m"], 2),
+            alongside_lateral_m=(round(d["alongside_lateral_m"], 2)
+                                 if "alongside_lateral_m" in d else None),
+            max_kmh=round(d["max_kmh"], 1), max_kmh_alongside=round(d["max_kmh_alongside"], 1),
+            contacts=sorted(set(d["contacts"])),
+        )
+        log.info("%s %s: %s in %.1f s, %.2f m to the side of the object, %.1f km/h alongside, "
+                 "contacts %s", v.vin, d["option"], how, outcome["duration_s"],
+                 outcome["alongside_lateral_m"] or -1, outcome["max_kmh_alongside"],
+                 outcome["contacts"] or "none")
+
+    def _attach_collision(self, v: _Vehicle, into: list):
+        """A collision sensor for the length of a detour, so 'no contact' is measured, not assumed."""
+        try:
+            bp = self.world.get_blueprint_library().find("sensor.other.collision")
+            if bp.has_attribute("role_name"):
+                bp.set_attribute("role_name", SENSOR_ROLE)
+            sensor = self.world.spawn_actor(bp, carla.Transform(), attach_to=v.actor)
+            sensor.listen(lambda event: into.append(event.other_actor.type_id))
+            return sensor
+        except Exception as exc:
+            log.warning("no collision sensor on %s: %s: %s", v.vin, type(exc).__name__, exc)
+            return None
 
     def _set_lights(self, v: _Vehicle, step: RoutineStep | None) -> None:
         state = carla.VehicleLightState.NONE

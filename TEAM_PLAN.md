@@ -25,7 +25,7 @@ simulation cannot yet show what the design describes. The target is the design's
 | --- | --- | --- | --- |
 | 1 Normal flow | Cars leave the line; one passes gate and track with a clean report | One car end to end on the plant world (`MARSHAL_CARLA_MAP=MarshalPlant run_carla_scene1.sh`); five cars to the yard by truck, filmed with the decision feed (`MARSHAL_PLANT_CARS=5 run_carla_plant.sh`) | The late-truck re-plan on film (fixed, not yet re-run); the gate photographs a parked car, not one rolling through at 5 km/h |
 | 2 Two faults | Wrong colour flagged at the gate; dead **left brake light** (telemetry ON, camera OFF); both booked into rework | Dead **headlight** caught, repaired in the electrical bay and re-checked (`MARSHAL_DAY4_REWORK=1 run_carla_day4.sh`); wrong colour flagged at 1.00 in 3 of 3 (`MARSHAL_PLANT_WRONG_COLOUR=2 run_carla_plant.sh`) | A brake-lamp fault the asset can show |
-| 3 Stuck car | Box in lane, worker nearby, "wait" recommended, case sent to the lab | Works (`run_carla_day5.sh`) | The chosen option executed by the car; the case turned into a lab scenario on CARLA |
+| 3 Stuck car | Box in lane, worker nearby, "wait" recommended, case sent to the lab | Works (`run_carla_day5.sh`); the car stops short of the box and does what was chosen - waits, passes at 3 km/h or reroutes through lane C (`--choose`) | The case turned into a lab scenario on CARLA |
 | 4 Test lab | Plain-language request → spec → run → passes; adversarial search finds a night / pallet-stack failure, report with clip | Generation and a serial search work (`run_carla_lab.sh`) | Search over light, weather, occluder, second actor; 8 runs in parallel; failure report with its clip |
 | 5 Close | Failure joins the regression suite; release gate shows "1 failing test, release blocked" | Run end to end on CARLA (`run_carla_release.sh`): blocked by the search's failure, reports in BigQuery | Release gate end to end on real runs and BigQuery history |
 
@@ -88,10 +88,28 @@ simulation cannot yet show what the design describes. The target is the design's
   re-inspection of the failed items (design, flow 5).
   *Rey, for review:* runs on the plant world for the lamp fault (electrical bay, back round to the
   gate, step 1 re-run, PASS; film pw-day4). Cars now square up on a slot or bay once they reach it.
-- [ ] **The chosen assistance option executed.** After `assist.choose`, the car does what was chosen
+- [x] **The chosen assistance option executed.** After `assist.choose`, the car does what was chosen
   (wait, pass in the left lane at 3 km/h, reroute), driven by BehaviorAgent (design, flow 2).
-  Today the `AssistChoose` branch in `driving/carla_backend.py` only clears the case; the
-  translation of each option is still a placeholder ("day 3: translate the chosen option here").
+  *Qais:* `_execute_option` in `driving/carla_backend.py`. Wait holds the car until nothing but
+  plant traffic is in front of it. Pass and reroute give BehaviorAgent a plan: into the next lane
+  in the same direction, past the object, and back into the car's lane. A pass goes into the left
+  lane at 3 km/h and comes back once the car is 6 m past the object. A reroute goes into the lane
+  through `lane_c` at the mission's speed and stays there until 5 m before the next stop. A
+  collision sensor rides along so contact is measured. The car is only offered options it can drive
+  where it stands, e.g. not a pass when the next stop is too close past the object. What the car
+  did is in `assist_outcomes[case_id]`. The stand-in now also brakes for props and people in its
+  path (9 m short, plus braking distance); before, it drove into the box. Scene 3 now starts at
+  buffer zone B with the box on the test-track mark, so all three options can be offered.
+  `run_carla_day5.sh --choose <option>` picks one. Each case reached the report point, 2 runs each:
+  - wait (worker present): resumed 17.5 s after the choice, once the box and worker were cleared.
+  - pass, no worker: lane -2 to -1 at 2.8-2.9 km/h alongside, 2.6 m to the side of the box, no
+    contact.
+  - reroute, no worker: at 7.9 km/h alongside, 2.5 m to the side, no contact.
+  *Rey:* `assist.locate` once returned truncated JSON ("response did not match schema"), and the
+  card fell back to no boxes. Without a worker the desk recommended pass in 3 runs and wait in 1;
+  both are allowed. Not from this change, seen in the same regression: the yard's truck-delay
+  re-plan failed 2 of 3 runs because Gemini sent cars with no PASS report to shipping slots
+  (yard.Y4/Y5/Y8). The rules rejected the plan, so no proposal reached a human.
 
 ### M3: the test lab at the design's scale
 - [ ] **The full search space** (design, flow 7 table): light noon/dusk/night, weather
@@ -275,7 +293,7 @@ at a time, so the code work is parallel and the server time is shared.
 | Qais → Rey | Full search space compiled; parallel servers; a clip per run | Search that reads results, failure report with clip |
 | Rey → Faris | Record shapes, the `proposals` collection, the assistance card fields (`AssistanceCase.objects`: draw `box_2d` on `image`, scaled from 0-1000), `TestRun.reason` (why the search tried each variant), `Scenario.failure_report` (conditions, measured, passes_when, likely_cause, suggested_fix, speed_fix, fix_check, clip_uri), the `releases` collection (`ReleaseReport`: passed, failed, newly failing/passing since `previous_release`, approved_by) | Dashboard screens |
 | Qais → Faris | Replay clips per run, a live camera | Video on the dashboard |
-| Rey → Qais | BehaviorAgent drives into static props: SC-0142 (scene 3's box) fails `no_contact` on CARLA. The stand-in needs to brake for objects in the lane, as the plant's driving system would | Scene 3 and its test passing |
+| Rey → Qais | BehaviorAgent drives into static props: SC-0142 (scene 3's box) fails `no_contact` on CARLA. The stand-in needs to brake for objects in the lane, as the plant's driving system would. *Qais: done in the plant's driving system (`_object_in_path`); the lab's compiled scenarios (`lab/compiler.py`) drive their own BehaviorAgent and do not have it yet* | Scene 3 and its test passing |
 | Rey → Qais | The VM's `.env` (`~/marshal-app`) points `GOOGLE_APPLICATION_CREDENTIALS` at a laptop path; scripts that do not export it themselves (`run_carla_lab.sh`) cannot reach Gemini | Lab runs with Gemini on the VM |
 | Rey → Qais | Small changes in your files: `repair()` in `carla_backend.py`, `--rework` in `demo_carla_day4.py`, `MARSHAL_LAB_SOURCE` in `run_carla_lab.sh`, the contact event in `lab/compiler.py` | Review |
 | Rey → Qais | Every run now dresses Town05 as a plant before recording (`dress_plant.py`, called from `carla_recording.sh`; `MARSHAL_DRESS=0` skips it; tagged `marshal-dressing`, none on a plant lane). Films are labelled (`film_labels.py`) and need Pillow: `install_carla_mission_runtime.sh` now installs it - please re-run it on the host | Plant scenes and filmed runs |

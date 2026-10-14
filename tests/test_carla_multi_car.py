@@ -32,7 +32,8 @@ def _stub_carla(monkeypatch):
 
 def _actor(type_id: str, role: str = ""):
     return SimpleNamespace(id=hash((type_id, role)) & 0xFFFF, type_id=type_id,
-                           attributes={"role_name": role})
+                           attributes={"role_name": role},
+                           get_location=lambda: SimpleNamespace(x=0.0, y=6.0, z=0.0))
 
 
 def _stalled_backend(obstacle, plant_vins=("VIN-1",)) -> tuple[CarlaDrivingSystem, _Vehicle]:
@@ -46,6 +47,7 @@ def _stalled_backend(obstacle, plant_vins=("VIN-1",)) -> tuple[CarlaDrivingSyste
     backend.assist_options = ["wait_for_removal"]
     backend.raise_assist = lambda *a, **k: _record(backend, a)
     backend._obstacle_ahead = lambda v: (obstacle, 6.0)
+    backend._executable_options = lambda v, where: list(backend.assist_options)
     stopped = SimpleNamespace(get_velocity=lambda: SimpleNamespace(x=0.0, y=0.0, z=0.0))
     backend.vehicles = {vin: _Vehicle(vin=vin, actor=stopped, agent=None, location="gate")
                         for vin in plant_vins}

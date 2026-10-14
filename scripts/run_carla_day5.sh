@@ -4,6 +4,7 @@
 #
 #   bash scripts/run_carla_day5.sh
 #   MARSHAL_DAY5_NO_WORKER=1 bash scripts/run_carla_day5.sh   # box only
+#   bash scripts/run_carla_day5.sh --no-with-worker --choose reroute_lane_c   # any option offered
 set -Eeuo pipefail
 
 readonly APP_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -59,5 +60,5 @@ args=(--output "$OUTPUT")
 if [[ -n "${MARSHAL_DAY5_NO_WORKER:-}" ]]; then
   args+=(--no-with-worker)
 fi
-python3 scripts/demo_carla_day5.py "${args[@]}"
+python3 scripts/demo_carla_day5.py "${args[@]}" "$@"
 echo "Day 5 artifacts: $OUTPUT"
