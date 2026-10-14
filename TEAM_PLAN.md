@@ -60,11 +60,29 @@ simulation cannot yet show what the design describes. The target is the design's
 ### M2: the plant behaves as the design describes
 - [x] **Several cars at once** (scene 1). (`qais`: `run_carla_plant.sh`, 3 cars to 2 trucks, all shipped) Cars leave the line on the design's rules: fewer than 2 in
   the gate queue, 25 m apart, slots by truck nearest the loading bay (design, flow 1).
-- [ ] **Missions that move cars.** Yard re-slotting after a late truck changes only the records
+- [x] **Missions that move cars.** Yard re-slotting after a late truck changes only the records
   today; the cars should drive to their new slots (design, flow 1 "Send missions").
   *Rey, for review:* an approved re-plan sends a real mission per car, a car whose new slot is still
   taken waits for it to empty, and a plan that would park an uninspected car is rejected (02391ae).
   Not yet shown on CARLA: the filmed run's plan named a stale car and was rejected (fixed, 03dbc4a).
+  *Qais:* shown on CARLA (`MARSHAL_PLANT_TRUCKS=T-1:20,T-2:45 MARSHAL_PLANT_LATE_TRUCK=T-1:40
+  run_carla_plant.sh`). Gemini re-slotted P1 Y7→Y8, P3 Y6→Y5 and P2 Y2→Y7. P2 waited for P1 to leave
+  Y7. All three ended on their slots, straight (0°), and shipped on their trucks (T-1: P1, P3; T-2:
+  P2). Three fixes were needed:
+  - The plant loop's "re-slotted cars still driving" `continue` skipped the loop's sleep. It spun
+    without yielding, so the simulation froze the moment the missions were sent.
+  - A car in a slot is now moved along the shoulder when the shoulder is clear (`_shoulder_move`):
+    forward with the creep, backwards in reverse with the reverse lamp lit, and not at all when the
+    plan names the slot it is in. Routed by BehaviorAgent, the run-up point before the next slot
+    was beside or behind the car, so it turned round across the road. P3 ended 7 m off Y5 facing
+    the wrong way. A slot behind with a parked car in between is reached by reversing down the lane
+    beside the shoulder, then back in. There is no route back up road 34: the planner returned a
+    single point, which read as arrived, and P1 was booked into Y3 standing 46 m away. A car
+    leaving a slot by the lane now plans from the lane beside it, not from its last route's
+    target (P2 had turned round at the yard entry).
+  - A stopped run's cars are cleared by prefix, not just this run's VINs.
+  The driving loop also no longer dies silently when one car's step raises. The run reports each
+  car's final offset and angle against its slot (`parked`).
 - [x] **Drive-through gate.** (`qais`: cars photographed rolling through at 4.3-4.5 km/h, 3/3 shipped) The design photographs the car rolling through at 5 km/h with four
   cameras (flow 3). Today the car stops, because a capture and a running driving loop in one process
   deadlock (comment in `run_carla_scene1.sh`). Find a way: a capture process separate from the

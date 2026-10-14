@@ -184,3 +184,61 @@ def test_the_car_brakes_for_a_prop_in_its_path_but_not_beside_it():
     ds._simulated_s += 0.05
     v.detour = {"obstacle_id": BOX.id}               # the object a detour drives round
     assert ds._object_in_path(v) is None
+
+
+# ---------- slot to slot along the shoulder (yard re-slotting) ----------
+
+class _Loc(_Vec):
+    def distance(self, other):
+        return math.hypot(self.x - other.x, self.y - other.y)
+
+
+def _slot_backend(car_x=0.0, others=()):
+    """Slots S1 at x=0 and S2 at x=10 on a shoulder running +x; the car parked in S1."""
+    ds, v, car = _backend()
+    car.x = car_x
+    car.get_location = lambda: _Loc(x=car.x, y=0.0, z=0.0)
+    car.get_transform = lambda: SimpleNamespace(location=car.get_location(),
+                                                get_forward_vector=lambda: _Vec(x=1.0, y=0.0, z=0.0))
+    spots = {"S1": 0.0, "S2": 10.0, "LANE": 20.0}
+    ds.map = SimpleNamespace(points={
+        "S1": SimpleNamespace(carla={"pull_over": True}),
+        "S2": SimpleNamespace(carla={"pull_over": True}),
+        "LANE": SimpleNamespace(carla={}),
+    })
+    ds.transform = lambda point: SimpleNamespace(location=_Loc(x=spots[point], y=0.0, z=0.0))
+    vehicles = [car] + [SimpleNamespace(id=10 + i, get_location=lambda x=x, y=y: _Vec(x=x, y=y, z=0.0))
+                        for i, (x, y) in enumerate(others)]
+    ds.world = SimpleNamespace(get_actors=lambda: SimpleNamespace(filter=lambda pattern: vehicles))
+    v.location = "S1"
+    return ds, v
+
+
+def test_a_slot_ahead_on_a_clear_shoulder_is_reached_along_the_shoulder():
+    ds, v = _slot_backend()
+    assert ds._shoulder_move(v, "S2") == "forward"
+
+
+def test_the_slot_a_car_is_already_in_needs_no_drive():
+    ds, v = _slot_backend()
+    assert ds._shoulder_move(v, "S1") == "here"
+
+
+def test_a_slot_behind_is_reversed_onto_and_one_past_a_parked_car_is_routed_by_the_lane():
+    ds, v = _slot_backend(car_x=0.0)
+    ds.transform = (lambda f: (lambda point: SimpleNamespace(
+        location=_Loc(x={"S1": 0.0, "S2": -10.0}[point], y=0.0, z=0.0))))(ds.transform)
+    assert ds._shoulder_move(v, "S2") == "back", "behind it, on a clear shoulder: reversed onto"
+
+    ds, v = _slot_backend(others=[(5.0, 0.3)])
+    assert ds._shoulder_move(v, "S2") is None, "a parked car is in between"
+
+    ds, v = _slot_backend(others=[(5.0, 3.5)])
+    assert ds._shoulder_move(v, "S2") == "forward", "a car in the lane beside is not in the way"
+
+
+def test_only_slot_to_slot_moves_use_the_shoulder():
+    ds, v = _slot_backend()
+    assert ds._shoulder_move(v, "LANE") is None
+    v.location = "LANE"
+    assert ds._shoulder_move(v, "S2") is None

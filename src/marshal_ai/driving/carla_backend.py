@@ -178,6 +178,8 @@ class _Vehicle:
     assist_obstacle: tuple | None = None
     waiting_case: str | None = None        # "wait_for_removal" chosen: held until the lane is clear
     detour: dict | None = None             # "pass_left_3kmh" / "reroute_lane_c" being driven
+    shoulder_move: str | None = None       # "forward" / "back" / "back_lane" / "here"; see _shoulder_move
+    reverse_path: list = field(default_factory=list)   # aim points for "back_lane"
     onboard: object | None = None          # forward camera on the car; see assist_clip()
     onboard_frames: object | None = None   # _FrameBuffer of its frames
     # view name -> (sensor, _FrameBuffer). Track evidence rides with the car; see _attach_evidence.
@@ -241,6 +243,12 @@ BRAKE_TEST_RUN_UP_MAX_M = 12.0     # brake here even if 20 km/h was not reached;
 MANOEUVRE_MAX_S = 25.0
 STOP_TOLERANCE_M = 0.4
 CREEP_MAX_S = 30.0                 # give up creeping after this long, rather than wait forever
+SHOULDER_MOVE_MAX_S = 60.0         # a slot-to-slot move along the shoulder, at creep speed
+SHOULDER_WIDTH_M = 1.8             # a vehicle this close to the line between two slots is in the way
+PULL_OUT_M = 5.0                   # a car leaving a slot joins the lane this far ahead of itself
+REVERSE_STEP_M = 3.0               # aim points along the lane when backing down it to a slot
+REVERSE_TURN_IN_M = 7.0            # leave the lane for the slot this far before it
+REVERSE_LANE_MAX_S = 120.0
 # A pull_over point (plant_map.yaml) is off the driving lanes - a bay or yard slot on the shoulder -
 # and BehaviorAgent only routes on driving lanes. So the car is routed to the lane this far before
 # the spot, then steers onto it. 12 m is enough to move one lane over at walking pace.
@@ -555,7 +563,116 @@ class CarlaDrivingSystem:
         return point in PRECISE_STOPS or bool(spec.get("pull_over"))
 
     def _next_destination(self, v: _Vehicle) -> None:
-        v.agent.set_destination(self._destination_location(v.remaining[0]))
+        v.shoulder_move = self._shoulder_move(v, v.remaining[0])
+        if v.shoulder_move is not None:
+            v.creep_s = 0.0
+            return
+        v.agent.set_destination(self._destination_location(v.remaining[0]),
+                                start_location=self._pull_out_start(v))
+
+    def _pull_out_start(self, v: _Vehicle):
+        """Where a car parked off the lanes starts its route: the lane beside it, a little ahead.
+
+        Without it BehaviorAgent plans from its local planner's last target, which for a parked car
+        is wherever its previous route was heading. VIN-P2, re-slotted from Y2 to Y7, planned from
+        there, turned round at the yard entry and stopped facing the plant's dressing. None for a
+        car on a driving lane, which keeps planning from just ahead of itself, as before.
+        """
+        if not hasattr(carla, "LaneType"):
+            return None
+        here = v.actor.get_transform()
+        world_map = getattr(self, "_driving_map", None)
+        if world_map is None:
+            world_map = self._driving_map = self.world.get_map()
+        on = world_map.get_waypoint(here.location, project_to_road=False, lane_type=carla.LaneType.Any)
+        if on is not None and on.lane_type == carla.LaneType.Driving:
+            return None
+        lane = world_map.get_waypoint(here.location, project_to_road=True, lane_type=carla.LaneType.Driving)
+        if lane is None:
+            return None
+        ahead = lane.next(PULL_OUT_M)
+        return (ahead[0] if ahead else lane).transform.location
+
+    def _shoulder_move(self, v: _Vehicle, point: str) -> str | None:
+        """How a car parked in a slot or bay reaches another one along the same shoulder, or None.
+
+        Yard re-slotting moves a car from one slot to the next one along. Routed by BehaviorAgent,
+        the run-up point PULL_OVER_RUN_M before the new slot was beside or behind the car, and the
+        route planner sent it round the block: on the plant run's late truck, VIN-P1 turned round
+        between Y7 and Y8 and stalled across the shoulder. So:
+        "here" - it is already on the spot (a plan can name the slot a car is in);
+        "forward" - the spot is ahead and the shoulder up to it is free: creep along it;
+        "back" - the spot is behind and the shoulder free: reverse along it. Routed by the lane, a
+        car sent to a slot behind it turned round across the road and stopped 7 m off the slot,
+        facing the wrong way (VIN-P3, Y6 to Y5);
+        "back_lane" - behind, with a parked car in between: reverse along the lane beside the
+        shoulder, then back into the spot. There is no route back up road 34: the planner returns
+        a single point, which read as arrived, and VIN-P1 was booked into Y3 standing 46 m away;
+        None - route by the lane as usual (ahead, with a parked car in between).
+        """
+        target_spec = self.map.points[point].carla or {}
+        start = self.map.points.get(v.location)
+        if not target_spec.get("pull_over") or start is None or not (start.carla or {}).get("pull_over"):
+            return None
+        here = v.actor.get_transform()
+        if here.location.distance(self.transform(v.location).location) > SETTLE_MAX_M:
+            return None                          # not standing on its spot
+        target = self.transform(point).location
+        if here.location.distance(target) <= SETTLE_MAX_M:
+            return "here"
+        forward = here.get_forward_vector()
+        ahead = (target.x - here.location.x) * forward.x + (target.y - here.location.y) * forward.y
+        if not self._shoulder_clear(v, target):
+            if ahead <= 0 and self._reverse_path(v, target):
+                log.info("%s: a car is parked on the shoulder before %s; reversing along the lane",
+                         v.vin, point)
+                return "back_lane"
+            log.info("%s: a car is parked on the shoulder before %s; routing by the lane", v.vin, point)
+            return None
+        return "forward" if ahead > 0 else "back"
+
+    def _reverse_path(self, v: _Vehicle, target) -> bool:
+        """Aim points for backing down the lane beside the shoulder to `target`; kept in v.reverse_path."""
+        if not hasattr(carla, "LaneType"):
+            return False
+        world_map = getattr(self, "_driving_map", None)
+        if world_map is None:
+            world_map = self._driving_map = self.world.get_map()
+        driving = carla.LaneType.Driving
+        lane = world_map.get_waypoint(v.actor.get_location(), project_to_road=True, lane_type=driving)
+        beside = world_map.get_waypoint(target, project_to_road=True, lane_type=driving)
+        if lane is None or beside is None:
+            return False
+        points, wp = [], lane
+        for _ in range(60):                         # at most 180 m
+            back = wp.previous(REVERSE_STEP_M)
+            if not back:
+                return False
+            wp = back[0]
+            if wp.transform.location.distance(beside.transform.location) <= REVERSE_TURN_IN_M:
+                break
+            points.append((wp.transform.location.x, wp.transform.location.y))
+        else:
+            return False
+        points.append((target.x, target.y))
+        v.reverse_path = points
+        return True
+
+    def _shoulder_clear(self, v: _Vehicle, target) -> bool:
+        """No other vehicle between the car and `target`, within a car's width of the line."""
+        here = v.actor.get_location()
+        dx, dy = target.x - here.x, target.y - here.y
+        length = math.hypot(dx, dy)
+        ux, uy = dx / length, dy / length
+        for actor in self.world.get_actors().filter("vehicle.*"):
+            if actor.id == v.actor.id:
+                continue
+            loc = actor.get_location()
+            along = (loc.x - here.x) * ux + (loc.y - here.y) * uy
+            lateral = abs((loc.x - here.x) * -uy + (loc.y - here.y) * ux)
+            if 0.0 < along < length + 2.5 and lateral < SHOULDER_WIDTH_M:
+                return False
+        return True
 
     def _destination_location(self, point: str):
         """Where BehaviorAgent is routed for a point: the point, or for a pull_over spot off the
@@ -606,9 +723,20 @@ class CarlaDrivingSystem:
 
     async def _run(self) -> None:
         self._sim_started_at = time.monotonic()
+        failing: set[tuple[str, str]] = set()
         while True:
             for v in list(self.vehicles.values()):
-                await self._step(v)
+                try:
+                    await self._step(v)
+                except Exception as exc:
+                    # One car's step must not stop the world. An exception here used to end this
+                    # task silently - asyncio only reports it when the task is collected - and the
+                    # simulation froze with every car in it, while the scene kept polling.
+                    key = (v.vin, type(exc).__name__)
+                    if key not in failing:
+                        failing.add(key)
+                        log.exception("driving step failed for %s; braking it", v.vin)
+                    v.actor.apply_control(carla.VehicleControl(throttle=0.0, brake=1.0))
             await asyncio.to_thread(self._tick_world)
             self._simulated_s += self.fixed_delta_s
             self._since_status += self.fixed_delta_s
@@ -633,12 +761,24 @@ class CarlaDrivingSystem:
             return
         if v.detour:
             self._follow_detour(v)
-        if v.agent.done():
-            through = self._drives_through(v.remaining[0])
+        arrived = False
+        if v.shoulder_move:
+            # along the shoulder to the next slot; time allowed scales with the distance
+            if v.shoulder_move == "forward" and not self._creep(v, max_s=SHOULDER_MOVE_MAX_S):
+                return
+            if v.shoulder_move == "back" and not self._reverse_creep(v):
+                return
+            if v.shoulder_move == "back_lane" and not self._reverse_follow(v):
+                return
+            if v.shoulder_move == "here":
+                self._square_up(v, v.remaining[0])
+            v.shoulder_move, arrived = None, True
+        if arrived or v.agent.done():
+            through = not arrived and self._drives_through(v.remaining[0])
             if through:
                 if not self._pass_through(v):
                     return                      # rolling onto the mark at gate speed
-            elif self._precise(v.remaining[0]) and not self._creep(v):
+            elif not arrived and self._precise(v.remaining[0]) and not self._creep(v):
                 return                          # still edging onto the mark
             v.creep_s = 0.0
             v.location = v.remaining.pop(0)
@@ -671,11 +811,11 @@ class CarlaDrivingSystem:
             return
         v.actor.apply_control(v.agent.run_step())
 
-    def _creep(self, v: _Vehicle) -> bool:
+    def _creep(self, v: _Vehicle, max_s: float = CREEP_MAX_S) -> bool:
         """Edge the car onto its stop mark at walking pace. True once it is there.
 
         Measured along the car's heading, so a car that has rolled past the mark counts as there.
-        It brakes for anything in front, and gives up after CREEP_MAX_S rather than hold up the
+        It brakes for anything in front, and gives up after max_s (CREEP_MAX_S) rather than hold up the
         plant if something it cannot see is in the way.
         """
         point = v.remaining[0]
@@ -687,9 +827,9 @@ class CarlaDrivingSystem:
         pulling_over = bool((self.map.points[point].carla or {}).get("pull_over"))
         v.creep_s += self.fixed_delta_s
         close = math.hypot(dx, dy) <= 1.0
-        if along <= STOP_TOLERANCE_M or close or v.creep_s > CREEP_MAX_S:
+        if along <= STOP_TOLERANCE_M or close or v.creep_s > max_s:
             v.actor.apply_control(carla.VehicleControl(throttle=0.0, brake=1.0))
-            if v.creep_s > CREEP_MAX_S:
+            if v.creep_s > max_s:
                 log.warning("%s stopped %.1f m short of %s", v.vin, along, v.remaining[0])
             elif pulling_over:
                 self._square_up(v, point)
@@ -717,6 +857,76 @@ class CarlaDrivingSystem:
             throttle=0.3 if speed < 1.0 else 0.0,          # about 3.6 km/h
             steer=max(-limit, min(limit, 1.5 * error)),
             brake=0.0))
+        return False
+
+    def _reverse_creep(self, v: _Vehicle, max_s: float = SHOULDER_MOVE_MAX_S) -> bool:
+        """Back the car along the shoulder onto a spot behind it, at walking pace. True once there.
+
+        The mirror of _creep: it steers the car's tail for a point past the spot, so the car arrives
+        straight, with the reverse lamp lit. Reversing, the wheel turns the car the other way
+        (measured: steer +0.3 for 3 m backwards turned it -21 degrees), hence the minus sign.
+        """
+        point = v.remaining[0]
+        spot = self.transform(point)
+        target = spot.location
+        here = v.actor.get_transform()
+        forward = here.get_forward_vector()
+        dx, dy = target.x - here.location.x, target.y - here.location.y
+        behind = -(dx * forward.x + dy * forward.y)
+        v.creep_s += self.fixed_delta_s
+        if behind <= STOP_TOLERANCE_M or math.hypot(dx, dy) <= 1.0 or v.creep_s > max_s:
+            v.actor.apply_control(carla.VehicleControl(throttle=0.0, brake=1.0))
+            v.actor.set_light_state(carla.VehicleLightState(carla.VehicleLightState.NONE))
+            if v.creep_s > max_s:
+                log.warning("%s stopped %.1f m short of %s, reversing", v.vin, behind, point)
+            self._square_up(v, point)
+            return True
+        obstacle, distance = self._obstacle_ahead(v, backwards=True)
+        if obstacle is not None and distance < behind + 3.0:
+            v.actor.apply_control(carla.VehicleControl(throttle=0.0, brake=1.0, reverse=True))
+            return False
+        along = spot.get_forward_vector()
+        aim_x, aim_y = dx - along.x * PULL_OVER_AIM_M, dy - along.y * PULL_OVER_AIM_M
+        backwards = math.atan2(-forward.y, -forward.x)
+        error = (math.atan2(aim_y, aim_x) - backwards + math.pi) % (2 * math.pi) - math.pi
+        velocity = v.actor.get_velocity()
+        speed = math.hypot(velocity.x, velocity.y)
+        v.actor.set_light_state(carla.VehicleLightState(carla.VehicleLightState.Reverse))
+        v.actor.apply_control(carla.VehicleControl(
+            throttle=0.3 if speed < 1.0 else 0.0, steer=max(-0.6, min(0.6, -1.5 * error)),
+            brake=0.0, reverse=True))
+        return False
+
+    def _reverse_follow(self, v: _Vehicle) -> bool:
+        """Back along v.reverse_path at walking pace, then onto the spot. True once there."""
+        point = v.remaining[0]
+        here = v.actor.get_transform()
+        while len(v.reverse_path) > 1 and math.hypot(v.reverse_path[0][0] - here.location.x,
+                                                       v.reverse_path[0][1] - here.location.y) < 3.0:
+            v.reverse_path.pop(0)
+        if len(v.reverse_path) == 1:                 # the last leg, into the spot itself
+            return self._reverse_creep(v, max_s=SHOULDER_MOVE_MAX_S + REVERSE_LANE_MAX_S)
+        v.creep_s += self.fixed_delta_s
+        if v.creep_s > REVERSE_LANE_MAX_S:
+            log.warning("%s gave up reversing to %s", v.vin, point)
+            v.actor.apply_control(carla.VehicleControl(throttle=0.0, brake=1.0))
+            v.actor.set_light_state(carla.VehicleLightState(carla.VehicleLightState.NONE))
+            return True
+        obstacle, distance = self._obstacle_ahead(v, backwards=True)
+        if obstacle is not None and distance < 6.0:
+            v.actor.apply_control(carla.VehicleControl(throttle=0.0, brake=1.0, reverse=True))
+            return False
+        forward = here.get_forward_vector()
+        ax, ay = v.reverse_path[0]
+        backwards = math.atan2(-forward.y, -forward.x)
+        error = (math.atan2(ay - here.location.y, ax - here.location.x) - backwards + math.pi) \
+            % (2 * math.pi) - math.pi
+        velocity = v.actor.get_velocity()
+        speed = math.hypot(velocity.x, velocity.y)
+        v.actor.set_light_state(carla.VehicleLightState(carla.VehicleLightState.Reverse))
+        v.actor.apply_control(carla.VehicleControl(
+            throttle=0.3 if speed < 1.0 else 0.0, steer=max(-0.6, min(0.6, -1.5 * error)),
+            brake=0.0, reverse=True))
         return False
 
     def _drives_through(self, point: str) -> bool:
