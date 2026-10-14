@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from marshal_api.api.v1.router import api_router
+from marshal_api.bridge import init_bridge, shutdown_bridge
 from marshal_api.config import Settings, get_settings
 from marshal_api.core.errors import register_exception_handlers
 from marshal_api.db.session import engine
@@ -20,8 +21,10 @@ DESCRIPTION = (
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # The scaffolding opens no connections at startup; Alembic owns the schema.
+    # The scaffolding opens no DB connections at startup; Alembic owns the schema.
+    init_bridge()
     yield
+    shutdown_bridge()
     await engine.dispose()
 
 

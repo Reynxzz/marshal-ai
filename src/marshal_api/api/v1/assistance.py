@@ -6,7 +6,6 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Query
 
-from marshal_api.api.v1 import _stubs
 from marshal_api.core.deps import RequireRole, get_assistance_service
 from marshal_api.core.idempotency import get_idempotency_key
 from marshal_api.schemas import (
@@ -25,21 +24,26 @@ _supervisor = RequireRole(["supervisor"])
 @router.get("/assistance/cases", response_model=Page[AssistanceCase])
 async def list_cases(
     status: str | None = None,
+    open: bool | None = Query(default=None),
     page: int = Query(default=1, ge=1),
     limit: int = Query(default=20, ge=1, le=200),
-    _service: AssistanceService = Depends(get_assistance_service),
-) -> Any:
-    return _stubs.page(page=page, limit=limit)
+    service: AssistanceService = Depends(get_assistance_service),
+) -> Page[AssistanceCase]:
+    return await service.list_cases(status, bool(open), page, limit)
 
 
 @router.get("/assistance/cases/{case_id}", response_model=AssistanceCase)
-async def get_case(case_id: str) -> AssistanceCase:
-    return _stubs.assistance_case(case_id)
+async def get_case(
+    case_id: str, service: AssistanceService = Depends(get_assistance_service)
+) -> AssistanceCase:
+    return await service.get_case(case_id)
 
 
 @router.get("/assistance/kpis", response_model=AssistanceKpis)
-async def assistance_kpis() -> AssistanceKpis:
-    return _stubs.assistance_kpis()
+async def assistance_kpis(
+    service: AssistanceService = Depends(get_assistance_service),
+) -> AssistanceKpis:
+    return await service.get_kpis()
 
 
 @router.post(
@@ -48,6 +52,8 @@ async def assistance_kpis() -> AssistanceKpis:
     dependencies=[Depends(_supervisor), Depends(get_idempotency_key)],
 )
 async def decide_case(
-    case_id: str, body: DecideAssistanceRequest
+    case_id: str,
+    body: DecideAssistanceRequest,
+    service: AssistanceService = Depends(get_assistance_service),
 ) -> dict[str, Any]:
-    return {}
+    return await service.decide_case(case_id, body.option, body.actor_id)

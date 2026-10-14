@@ -15,6 +15,7 @@ from marshal_api.api.v1 import (
     quality,
     yard,
 )
+from marshal_api.streaming import camera_proxy, sse
 
 api_router = APIRouter()
 api_router.include_router(health.router)
@@ -26,3 +27,5 @@ api_router.include_router(quality.router)
 api_router.include_router(lab.router)
 api_router.include_router(jobs.router)
 api_router.include_router(media.router)
+api_router.include_router(sse.router)
+api_router.include_router(camera_proxy.router)

@@ -6,7 +6,6 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Query
 
-from marshal_api.api.v1 import _stubs
 from marshal_api.core.deps import RequireRole, get_proposal_service
 from marshal_api.core.idempotency import get_idempotency_key
 from marshal_api.schemas import DecideProposalRequest, Page, Proposal
@@ -23,9 +22,9 @@ async def list_proposals(
     status: str | None = None,
     page: int = Query(default=1, ge=1),
     limit: int = Query(default=20, ge=1, le=200),
-    _service: ProposalService = Depends(get_proposal_service),
-) -> Any:
-    return _stubs.page(page=page, limit=limit)
+    service: ProposalService = Depends(get_proposal_service),
+) -> Page[Proposal]:
+    return await service.list_proposals(kind, status, page, limit)
 
 
 @router.post(
@@ -34,6 +33,8 @@ async def list_proposals(
     dependencies=[Depends(_supervisor), Depends(get_idempotency_key)],
 )
 async def decide_proposal(
-    proposal_id: str, body: DecideProposalRequest
+    proposal_id: str,
+    body: DecideProposalRequest,
+    service: ProposalService = Depends(get_proposal_service),
 ) -> dict[str, Any]:
-    return {}
+    return await service.decide_proposal(proposal_id, body.decision, body.actor_id, body.note)

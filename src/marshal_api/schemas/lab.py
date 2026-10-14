@@ -67,6 +67,18 @@ class AdversarialVerdict(str, Enum):
     FRAGILE = "FRAGILE"
 
 
+class VariantRun(BaseModel):
+    variant_id: str
+    light: str
+    weather: str | None = None
+    occluder: str | None = None
+    trigger_distance_m: float | None = None
+    ego_speed_kmh: float | None = None
+    min_gap_m: float | None = None
+    passed: bool = False
+    clip_id: str | None = None
+
+
 class AdversarialResult(BaseModel):
     runs: int
     verdict: AdversarialVerdict
@@ -75,6 +87,7 @@ class AdversarialResult(BaseModel):
     metrics: dict[str, str | float] | None = None
     report_id: str | None = None
     media_ids: list[str] = Field(default_factory=list)
+    variants: list[VariantRun] = Field(default_factory=list)
 
 
 class ScenarioDetail(Scenario):
