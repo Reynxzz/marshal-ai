@@ -170,6 +170,7 @@ class _Vehicle:
     step_left_s: float = 0.0
     stalled_s: float = 0.0                 # how long the agent has been stopped mid-mission
     creep_s: float = 0.0                   # time spent creeping onto a precise stop; see _creep
+    manoeuvre: dict | None = None          # state of a routine step being driven; see _manoeuvre
     assists_raised: int = 0
     onboard: object | None = None          # forward camera on the car; see assist_clip()
     onboard_frames: object | None = None   # _FrameBuffer of its frames
@@ -202,6 +203,17 @@ PRECISE_STOPS = {"inspection_gate"}
 # Off (drive_through_gate=False), the gate is a precise stop, as before.
 DRIVE_THROUGH = {"inspection_gate"}
 DRIVE_THROUGH_DEFAULT_KMH = 5.0
+
+# Routine steps the car physically performs, measured instead of reported (design, flow 4). Until
+# these, the car stood braked through the whole routine and the reverse and brake-test telemetry were
+# constants. The track is short - 20 m from the routine's start to the report point on Town05 - so
+# the brake test's run-up is capped, and the car is re-routed from where it ends up.
+MANOEUVRES = {"reverse", "brake_test"}
+REVERSE_TARGET_M = 3.0
+REVERSE_CLEARANCE_M = 4.0          # reverse no further while anything is closer than this behind
+BRAKE_TEST_KMH = 20.0
+BRAKE_TEST_RUN_UP_MAX_M = 12.0     # brake here even if 20 km/h was not reached; reported as such
+MANOEUVRE_MAX_S = 25.0
 STOP_TOLERANCE_M = 0.4
 CREEP_MAX_S = 30.0                 # give up creeping after this long, rather than wait forever
 # A pull_over point (plant_map.yaml) is off the driving lanes - a bay or yard slot on the shoulder -
@@ -748,10 +760,12 @@ class CarlaDrivingSystem:
 
     # ---------- flow 2: the driving system asks for help ----------
 
-    def _obstacle_ahead(self, v: _Vehicle):
-        """Nearest vehicle, walker or prop in front of the car, within obstacle_range_m."""
+    def _obstacle_ahead(self, v: _Vehicle, backwards: bool = False):
+        """Nearest vehicle, walker or prop in front of the car (or behind it), within range."""
         here = v.actor.get_transform()
         forward = here.get_forward_vector()
+        if backwards:
+            forward = carla.Vector3D(-forward.x, -forward.y, -forward.z)
         origin = here.location
         best, best_d = None, self.obstacle_range_m
         for actor in self.world.get_actors():
@@ -911,20 +925,98 @@ class CarlaDrivingSystem:
         return INDICATOR_SIDES[int(elapsed / INDICATOR_PERIOD_S) % len(INDICATOR_SIDES)]
 
     async def _routine_step(self, v: _Vehicle) -> None:
-        v.actor.apply_control(carla.VehicleControl(throttle=0.0, brake=1.0))
-        v.step_left_s -= self.fixed_delta_s
-        if v.step_left_s > 0:
-            return
-        step = v.routine_queue.pop(0)
-        # Telemetry is what the car's electronics report: healthy, even for a dark lamp.
+        step = v.routine_queue[0]
+        if step.name in MANOEUVRES:
+            telemetry = self._manoeuvre(v, step)
+            if telemetry is None:
+                return                          # still driving the step
+            v.routine_queue.pop(0)
+            # The car has moved, so its route to the next point is planned again from here: the
+            # old plan started where the step began, and its first waypoints are now behind it.
+            if v.remaining:
+                self._next_destination(v)
+        else:
+            v.actor.apply_control(carla.VehicleControl(throttle=0.0, brake=1.0))
+            v.step_left_s -= self.fixed_delta_s
+            if v.step_left_s > 0:
+                return
+            v.routine_queue.pop(0)
+            # Telemetry is what the car's electronics report: healthy, even for a dark lamp.
+            telemetry = dict(step.telemetry)
         await emit(self._handlers, TrackStep(
             vin=v.vin, mission_id=v.mission.mission_id, routine=v.mission.routine,
-            step=step.step, name=step.name, telemetry=dict(step.telemetry),
+            step=step.step, name=step.name, telemetry=telemetry,
         ))
         nxt = v.routine_queue[0] if v.routine_queue else None
         self._set_lights(v, nxt)
         if nxt is not None:
             v.step_left_s = nxt.duration_s
+
+    def _manoeuvre(self, v: _Vehicle, step: RoutineStep) -> dict | None:
+        """Drive one routine step and measure it. The telemetry when it is done, else None.
+
+        reverse: back up 3 m in reverse gear, holding the wheel straight, waiting while anything is
+        within REVERSE_CLEARANCE_M behind. Reports the distance travelled and how far it drifted
+        sideways.
+        brake_test: accelerate along the track to 20 km/h, or until the run-up is used up, then
+        brake fully and measure the distance from the moment of braking to standstill.
+        """
+        t = v.actor.get_transform()
+        here, forward = t.location, t.get_forward_vector()
+        vel = v.actor.get_velocity()
+        kmh = 3.6 * math.hypot(vel.x, vel.y)
+        m = v.manoeuvre
+        if m is None:
+            m = v.manoeuvre = {"name": step.name, "start": (here.x, here.y),
+                               "heading": (forward.x, forward.y), "phase": "go", "t": 0.0}
+        m["t"] += self.fixed_delta_s
+        sx, sy = m["start"]
+        hx, hy = m["heading"]
+        along = (here.x - sx) * hx + (here.y - sy) * hy        # signed, along the start heading
+        lateral = abs(-(here.x - sx) * hy + (here.y - sy) * hx)
+        brake = carla.VehicleControl(throttle=0.0, brake=1.0)
+        timed_out = m["t"] > MANOEUVRE_MAX_S
+
+        if step.name == "reverse":
+            if m["phase"] == "go":
+                behind, gap = self._obstacle_ahead(v, backwards=True)
+                if -along >= REVERSE_TARGET_M or timed_out:
+                    m["phase"] = "stop"
+                elif behind is not None and gap < REVERSE_CLEARANCE_M:
+                    v.actor.apply_control(carla.VehicleControl(throttle=0.0, brake=1.0, reverse=True))
+                    return None
+                else:
+                    v.actor.apply_control(carla.VehicleControl(
+                        throttle=0.35 if kmh < 4.0 else 0.0, reverse=True, steer=0.0))
+                    return None
+            v.actor.apply_control(carla.VehicleControl(throttle=0.0, brake=1.0, reverse=True))
+            if kmh > 0.2 and not timed_out:
+                return None
+            v.manoeuvre = None
+            return {"gear": "R", "distance_m": round(-along, 2), "lateral_m": round(lateral, 2),
+                    "reverse_lamp": "ON", "completed": not timed_out}
+
+        # brake_test
+        if m["phase"] == "go":
+            ahead, gap = self._obstacle_ahead(v)
+            if (kmh >= BRAKE_TEST_KMH or along >= BRAKE_TEST_RUN_UP_MAX_M or timed_out
+                    or (ahead is not None and gap < 12.0)):
+                m.update(phase="brake", brake_at=along, start_kmh=kmh,
+                         blocked=ahead is not None and gap < 12.0)
+            else:
+                error = ((math.atan2(hy, hx) - math.atan2(forward.y, forward.x) + math.pi)
+                         % (2 * math.pi) - math.pi)
+                v.actor.apply_control(carla.VehicleControl(
+                    throttle=0.8, steer=max(-0.2, min(0.2, 1.5 * error))))
+                return None
+        v.actor.apply_control(brake)
+        if kmh > 0.2 and m["t"] <= MANOEUVRE_MAX_S + 10.0:
+            return None
+        v.manoeuvre = None
+        return {"start_speed_kmh": round(m["start_kmh"], 1),
+                "stopping_distance_m": round(along - m["brake_at"], 2),
+                "run_up_m": round(m["brake_at"], 2), "lateral_m": round(lateral, 2),
+                "completed": not m["blocked"] and not timed_out}
 
     def capture(self, transform, width: int = 640, height: int = 360) -> bytes:
         """One RGB frame from a reusable camera at a world transform.

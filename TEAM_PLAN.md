@@ -74,10 +74,16 @@ simulation cannot yet show what the design describes. The target is the design's
 - [ ] **A brake-lamp fault the camera can see** (scene 2 wants a dead left brake light). This asset
   draws one continuous brake bar and no left blinker (README, "Flow 4 on the whole R-12 routine").
   Find a blueprint with separate lamps, or document why the headlight stays the demo fault.
-- [ ] **Track steps that actually happen.** The car is held still during the routine, so reverse
+- [~] **Track steps that actually happen.** (`qais`: reverse and brake test driven and measured; full-lock still telemetry-only) The car is held still during the routine, so reverse
   does not move it and the brake test (step 5) and full-lock turn (step 6) are telemetry-only. The
   design puts the brake test in CARLA scope (flow 4, "What is real"): drive it from 20 km/h and
   measure the stopping distance; roll the reverse 3 m.
+  *Qais:* done for the reverse (3.02-3.04 m, no drift, 3 runs) and the brake test (from 20.3-22.2
+  km/h, stopped in 2.11-2.34 m). Not done: full lock - a full-lock circle on Town05's road crosses
+  the opposite lanes; it needs an open area, e.g. the plant world's compound.
+  *Rey:* the reverse-lamp camera check said "no" at p=0.63 in 2 of 3 runs, at night, on a frame where
+  the lamp is lit (`track/VIN-S1/step4_reverse.jpg`): the brake bar is lit as well, which may be what
+  confuses it.
 - [ ] **Rework bays on the map.** Cars driven to the bay the router booked, then back to the gate for
   re-inspection of the failed items (design, flow 5).
   *Rey, for review:* runs on the plant world for the lamp fault (electrical bay, back round to the
