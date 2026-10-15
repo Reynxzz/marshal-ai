@@ -23,6 +23,9 @@ class Truck:
 class PlantState:
     trucks: dict[str, Truck] = field(default_factory=dict)
     closed_zones: set[str] = field(default_factory=set)
+    # zone or map point -> what is going on there that a car's route should know about, e.g. "forklift unloading
+    # pallets", "two people crossing". Reported by supervisors or plant systems; read by route choice.
+    hazards: dict[str, str] = field(default_factory=dict)
     bay_capacity: dict[str, int] = field(default_factory=lambda: {b: 1 for b in REWORK_BAYS})
     bay_occupants: dict[str, list[str]] = field(default_factory=lambda: {b: [] for b in REWORK_BAYS})
     line_rate_per_h: float = 30.0         # cars off the line

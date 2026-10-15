@@ -61,6 +61,10 @@ class Settings:
     # With parking=gemini: "paths" (Gemini chooses among planned paths, segment by segment) or
     # "moves" (Gemini chooses every 1 m manoeuvre; did not park a car on the eval). See parking.py.
     park_mode: str = field(default_factory=lambda: os.getenv("MARSHAL_PARK_MODE", "paths"))
+    # Which way a car drives to its slot (flows/route.py): "reason" asks Gemini when something is
+    # reported on one of the ways (a hazard, a stopped car, other cars) and takes the shortest
+    # otherwise; "always" asks whenever there is more than one way; "never" keeps the shortest.
+    route: str = field(default_factory=lambda: os.getenv("MARSHAL_ROUTE", "reason"))
 
 
 settings = Settings()

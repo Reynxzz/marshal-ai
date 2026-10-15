@@ -319,6 +319,11 @@ def drive_park(call: LLMCall) -> dict:
     return {"choice": choice, "probs": {o: (0.9 if o == choice else 0.1 / max(1, len(options) - 1)) for o in options}}
 
 
+def route_choose(call: LLMCall) -> dict:
+    from marshal_ai.flows.route import offline_choice
+    return offline_choice(call)
+
+
 def offline_llm() -> FakeLLM:
     return FakeLLM({
         "visual.defects": visual_defects,
@@ -329,6 +334,7 @@ def offline_llm() -> FakeLLM:
         "visual.match": visual_match,
         "track.decide": track_decide,
         "drive.park": drive_park,
+        "route.choose": route_choose,
         "assist.assess": assist_assess,
         "assist.locate": assist_locate,
         "yard.exception": yard_exception,

@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Literal
 from pydantic import BaseModel, Field
 
 from marshal_ai.driving import CommandRejected, MissionDone, MissionGo, MissionHold, MissionResume
+from marshal_ai.flows import route
 from marshal_ai.flows.base import ask, cars_in, log, update_car
 from marshal_ai.llm import to_prompt_json
 from marshal_ai.records import Car, CarReport, CarState, Verdict
@@ -69,6 +70,9 @@ class YardTraffic:
         self.slot_missions: dict[str, str] = {}   # mission id -> slot
         # moves waiting for a slot's current car to drive off it: occupant vin -> actions
         self.deferred: dict[str, list[YardAction]] = {}
+        # vin -> map points of the way it is driving now, so the next car's route choice sees it
+        self.routes_in_use: dict[str, list[str]] = {}
+        self.route_log: list[dict] = []           # every route choice, Gemini's or the rules' (flows/route.py)
 
     # ---------- routine rules (no model call) ----------
 
@@ -183,17 +187,26 @@ class YardTraffic:
             # the yard", raised once by detect_exceptions.
             log.info("yard: no free slot for %s; it waits for one", vin)
             return None
-        mission = MissionGo(mission_id=self.rt.next_id("M", 4), vin=vin, waypoints=[slot],
+        # Which way it drives there: the only way, the shortest when nothing is going on, or
+        # Gemini's choice when something is (flows/route.py).
+        waypoints, record = await route.choose(
+            self.rt, vin, car.location, slot, self.routes_in_use, YARD_SPEED_KMH,
+            getattr(self.rt.settings, "route", "reason"))
+        mission = MissionGo(mission_id=self.rt.next_id("M", 4), vin=vin, waypoints=waypoints,
                             max_speed_kmh=YARD_SPEED_KMH)
         await self.rt.missions.send(mission)
         self.slot_missions[mission.mission_id] = slot
-        update_car(self.rt, vin, yard_slot=slot, mission_id=mission.mission_id)
+        self.routes_in_use[vin] = [car.location, *waypoints]
+        self.route_log.append(record)
+        update_car(self.rt, vin, yard_slot=slot, mission_id=mission.mission_id,
+                   route=[car.location, *waypoints], route_by=record["by"])
         return slot
 
     async def on_mission_done(self, event: MissionDone) -> None:
         car = self.rt.store.get(Car, event.vin)
         if car is None:
             return
+        self.routes_in_use.pop(event.vin, None)
         if event.location.startswith("yard.Y"):
             update_car(self.rt, event.vin, state=CarState.YARD, location=event.location,
                        mission_id=None, yard_at=car.yard_at or self.rt.clock())
@@ -421,4 +434,6 @@ class YardTraffic:
             "cars_in_yard": sum(c.state == CarState.YARD for c in cars),
             "cars_shipped": sum(c.state == CarState.SHIPPED for c in cars),
             "avg_line_to_yard_s": round(sum(line_to_yard) / len(line_to_yard)) if line_to_yard else None,
+            "routes_chosen_by_gemini": sum(r["by"] == "gemini" for r in self.route_log),
+            "routes_by_rules": sum(r["by"] == "rules" for r in self.route_log),
         }
