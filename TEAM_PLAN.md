@@ -149,9 +149,16 @@ simulation cannot yet show what the design describes. The target is the design's
   braking), worker speed and trigger distance, ego speed, all compiled and runnable.
 - [ ] **8 runs in parallel** for the 60-run budget. Several CARLA servers on the one T4, or one per
   run on more GPUs; measure speed and stability. `run_batch` already runs batches in parallel.
-- [ ] **A clip per test run.** The design keeps a clip with every test run and every failure report
+- [x] **A clip per test run.** The design keeps a clip with every test run and every failure report
   (records table, "Test run"). Record each variant and film the failing one, reusing
   `run_carla_replay.sh`.
+  *Qais:* every compiled run is filmed by a chase camera on the ego car, encoded to mp4 as the run
+  goes, with no replay pass (`--clip`; `CarlaRunner(clips=True)` by default, `--no-clips` in
+  `demo_carla_lab.py`). The runner uploads it to `gs://marshal/lab/<variant>-<id>.mp4` through
+  `MARSHAL_ARTIFACTS` and records the URI on `TestRun.clip_uri`, so the failure report ends with
+  it. On CARLA: 4 of 4 lab runs filmed (dry run, judged run, two search variants), each 2.1-2.6 MB
+  for about 60 s. The failure report for SC-0159-v1 ends "Clip: gs://marshal-artifacts-.../lab/
+  SC-0159-v1-5a44e1.mp4".
 
 ---
 
@@ -325,7 +332,7 @@ at a time, so the code work is parallel and the server time is shared.
 | Qais → Rey | Full search space compiled; parallel servers; a clip per run | Search that reads results, failure report with clip |
 | Rey → Faris | Record shapes, the `proposals` collection, the assistance card fields (`AssistanceCase.objects`: draw `box_2d` on `image`, scaled from 0-1000), `TestRun.reason` (why the search tried each variant), `Scenario.failure_report` (conditions, measured, passes_when, likely_cause, suggested_fix, speed_fix, fix_check, clip_uri), the `releases` collection (`ReleaseReport`: passed, failed, newly failing/passing since `previous_release`, approved_by) | Dashboard screens |
 | Qais → Faris | Replay clips per run, a live camera | Video on the dashboard |
-| Rey → Qais | BehaviorAgent drives into static props: SC-0142 (scene 3's box) fails `no_contact` on CARLA. The stand-in needs to brake for objects in the lane, as the plant's driving system would. *Qais: done in the plant's driving system (`_object_in_path`); the lab's compiled scenarios (`lab/compiler.py`) drive their own BehaviorAgent and do not have it yet* | Scene 3 and its test passing |
+| Rey → Qais | BehaviorAgent drives into static props: SC-0142 (scene 3's box) fails `no_contact` on CARLA. The stand-in needs to brake for objects in the lane, as the plant's driving system would. *Qais: done in both. The lab's compiled scenarios brake for a prop by the same rule and constants as the plant (`prop_in_path`), and end the run after 15 s stopped for one. The case now names where the car stopped, not where it set off: it said buffer_zone_b, and the lab built its test 26 m from the box and passed it without meeting it. Scene 3 → SC-0158 on CARLA: braked for the box at 6.9 m from the worker, no contact, passed. Walkers stay with BehaviorAgent in the lab, so the search's night/forklift failures are unchanged; the plant also brakes for walkers in its path - Rey, say if the lab should too* | Scene 3 and its test passing |
 | Rey → Qais | The VM's `.env` (`~/marshal-app`) points `GOOGLE_APPLICATION_CREDENTIALS` at a laptop path; scripts that do not export it themselves (`run_carla_lab.sh`) cannot reach Gemini | Lab runs with Gemini on the VM |
 | Rey → Qais | Small changes in your files: `repair()` in `carla_backend.py`, `--rework` in `demo_carla_day4.py`, `MARSHAL_LAB_SOURCE` in `run_carla_lab.sh`, the contact event in `lab/compiler.py` | Review |
 | Rey → Qais | Every run now dresses Town05 as a plant before recording (`dress_plant.py`, called from `carla_recording.sh`; `MARSHAL_DRESS=0` skips it; tagged `marshal-dressing`, none on a plant lane). Films are labelled (`film_labels.py`) and need Pillow: `install_carla_mission_runtime.sh` now installs it - please re-run it on the host | Plant scenes and filmed runs |

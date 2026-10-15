@@ -1115,9 +1115,26 @@ class CarlaDrivingSystem:
             # The recorded URI points at the last frame, the one showing what stopped the car.
             uri = self.store_artifact(uri, clip[-1])
         await emit(self._handlers, AssistRequest(
-            case_id=case_id, vin=vin, location=v.location, reason=reason, options=options,
+            case_id=case_id, vin=vin, location=self._nearest_point(v), reason=reason, options=options,
             clip_uri=uri,
         ))
+
+    def _nearest_point(self, v: _Vehicle) -> str:
+        """The named map point nearest where the car stands: where it stopped, for the case.
+
+        Not v.location, the last point it reached. Scene 3's car starts at buffer zone B and stops
+        9 m short of a box on the test-track mark; the case said "buffer_zone_b", and the lab built
+        its test there, 26 m from the box, and passed it without the car ever meeting the box.
+        """
+        here = v.actor.get_location()
+        best, best_d = v.location, math.inf
+        for name, point in self.map.points.items():
+            if not point.carla:
+                continue
+            d = math.hypot(point.carla["x"] - here.x, point.carla["y"] - here.y)
+            if d < best_d:
+                best, best_d = name, d
+        return best
 
     def assist_media(self, case_id: str) -> list[Media]:
         """The seconds before the stop, as an ordered run of frames.

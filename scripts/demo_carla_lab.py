@@ -61,6 +61,8 @@ def parser() -> argparse.ArgumentParser:
                     help="then run the whole library against this driving system release "
                          "(demo scene 5); it is blocked if any test fails")
     ap.add_argument("--engineer", default="eng-demo")
+    ap.add_argument("--no-clips", action="store_true",
+                    help="do not film each run (a clip per test run is the default)")
     return ap
 
 
@@ -79,7 +81,11 @@ def run(args: argparse.Namespace) -> dict:
     if not rt.map.carla_map or not rt.map.carla_map.endswith(("Town05", "Town05_Opt", "OpenDriveMap")):
         raise RuntimeError(f"lab needs a Town05 plant map, got {rt.map.carla_map!r}")
 
-    runner = CarlaRunner(rt.map, host=args.host, port=args.port, timeout_s=args.run_timeout)
+    from marshal_ai.artifacts import make_artifacts
+    runner = CarlaRunner(rt.map, host=args.host, port=args.port, timeout_s=args.run_timeout,
+                         artifacts=make_artifacts(settings.artifacts, settings.gcp_project,
+                                                  settings.bucket),
+                         clips=not args.no_clips, clip_dir=out / "clips")
     app = MarshalApp(rt, runner=runner)
 
     emit({"type": "lab.start", "runner": runner.name, "llm": settings.llm,
@@ -112,7 +118,7 @@ def run(args: argparse.Namespace) -> dict:
 
     emit({"type": "lab.judged", "scenario_id": scenario_id, "run_id": test_run.run_id,
           "passed": test_run.passed, "failed_criteria": test_run.failed_criteria,
-          "metrics": outcome.metrics, "margins": verdict.margins,
+          "metrics": outcome.metrics, "margins": verdict.margins, "clip_uri": test_run.clip_uri,
           "events": outcome.events, "triggered": outcome.triggered})
     (out / f"{scenario_id}.run.json").write_text(
         json.dumps(test_run.model_dump(mode="json"), indent=2, sort_keys=True))

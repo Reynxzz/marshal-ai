@@ -94,3 +94,63 @@ def test_a_box_from_a_stuck_car_case_compiles_with_a_blueprint_in_the_lane():
     ast.parse(code)
     assert "'box': 'static.prop.box01'" in code
     assert 'else 0.0 if a["type"] == "box" else ROADSIDE' in code
+
+
+def test_the_lab_car_brakes_for_props_as_the_plants_does(code):
+    """SC-0142 failed no_contact: the lab's bare BehaviorAgent drove into the box the plant's car stops for."""
+    from marshal_ai.driving import carla_backend
+
+    assert (f"OBJECT_STOP_M, OBJECT_LATERAL_M, OBJECT_DECEL_MS2 = {carla_backend.OBJECT_STOP_M}, "
+            f"{carla_backend.OBJECT_LATERAL_M}, {carla_backend.OBJECT_DECEL_MS2}") in code, \
+        "the lab must test the same stopping rule the plant drives with"
+    loop = code[code.index("while t < args.timeout:"):code.index("if contact:")]
+    brake, step = loop.index("prop_in_path(world, ego)"), loop.index("ego.apply_control(agent.run_step())")
+    assert brake < step, "the prop check must come before the agent's own control"
+    assert "HELD_FOR_PROP_S" in loop, "a car held by a box that never moves ends the run"
+
+
+def test_every_run_can_be_filmed(code):
+    assert 'ap.add_argument("--clip"' in code
+    assert "clip.drain()" in code[code.index("while t < args.timeout:"):]
+    assert 'result["clip"] = args.clip' in code
+
+
+def test_the_runner_stores_each_runs_clip_and_records_its_uri(tmp_path, monkeypatch):
+    import json
+    import subprocess
+    from types import SimpleNamespace
+
+    from marshal_ai.lab import runner as runner_mod
+
+    calls = []
+
+    def fake_run(cmd, **kw):
+        calls.append(cmd)
+        clip = cmd[cmd.index("--clip") + 1]
+        with open(clip, "wb") as f:
+            f.write(b"mp4-bytes")
+        out = {"metrics": {"no_contact": 1.0}, "events": [], "triggered": [], "clip": clip}
+        return SimpleNamespace(returncode=0, stdout=json.dumps(out) + "\n", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    stored = []
+
+    class Store:
+        def put(self, uri, data, content_type="image/jpeg"):
+            stored.append((uri, data, content_type))
+            return uri.replace("gs://marshal/", "gs://bucket/")
+
+    r = runner_mod.CarlaRunner(load_plant_map(), artifacts=Store(), clip_dir=tmp_path)
+    outcome = r.run(ScenarioSpec.model_validate(SPEC))
+
+    [(uri, data, kind)] = stored
+    assert uri.startswith(f"gs://marshal/lab/{SPEC['id']}-") and uri.endswith(".mp4")
+    assert data == b"mp4-bytes" and kind == "video/mp4"
+    assert outcome.clip_uri == uri.replace("gs://marshal/", "gs://bucket/")
+    assert [p.read_bytes() for p in tmp_path.iterdir()] == [b"mp4-bytes"], "a local copy is kept"
+    assert runner_mod.to_test_run(ScenarioSpec.model_validate(SPEC), outcome).clip_uri == outcome.clip_uri
+
+    r = runner_mod.CarlaRunner(load_plant_map(), clips=False)
+    monkeypatch.setattr(subprocess, "run", lambda cmd, **kw: SimpleNamespace(
+        returncode=0, stdout=json.dumps({"metrics": {}}), stderr=""))
+    assert r.run(ScenarioSpec.model_validate(SPEC)).clip_uri is None

@@ -120,9 +120,7 @@ async def run(args: argparse.Namespace) -> dict:
 
     rt.store.put(Car(vin=args.vin, build_sheet=BuildSheet(model="sedan", colour="black"),
                      state=CarState.TEST_TRACK))
-    for actor in rt.driving.world.get_actors().filter("vehicle.*"):
-        if actor.attributes.get("role_name") == args.vin:
-            actor.destroy()
+    rt.driving.despawn(args.vin)             # with its cameras, if an earlier run left it
 
     props = place_obstacle(rt, args)
     result: dict = {}
@@ -210,9 +208,9 @@ async def run(args: argparse.Namespace) -> dict:
                 actor.destroy()
             except Exception:
                 pass
-        for actor in rt.driving.world.get_actors().filter("vehicle.*"):
-            if actor.attributes.get("role_name") == args.vin:
-                actor.destroy()
+        # despawn, not actor.destroy(): CARLA keeps a destroyed car's cameras streaming to a client
+        # that has gone, which floods the server with "Invalid session" and preceded its crashes.
+        rt.driving.despawn(args.vin)
 
     (out / "case.json").write_text(json.dumps(result, indent=2, sort_keys=True, default=str))
     return result
