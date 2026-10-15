@@ -32,7 +32,8 @@ def test_slot_frame_from_carla_pose():
 
 def test_parked_means_inside_the_lines_and_nearly_straight():
     assert is_parked(Pose(0.0, 0.0, 0.0))
-    assert is_parked(Pose(0.2, 0.3, math.radians(6)))
+    assert is_parked(Pose(0.2, 0.15, math.radians(4)))
+    assert not is_parked(Pose(0.0, 0.7, 0.0))                     # inside, but against the lane line
     assert not is_parked(Pose(0.0, 0.0, math.radians(10)))
     over = overhang(Pose(0.0, 1.2, 0.0))
     assert over["lane line"] > 0.3 and over["kerb"] == 0.0

@@ -66,6 +66,11 @@ MAX_MOVE_S = 6.0                    # a move that has not covered its distance b
 # A 4.9 m car in a 5.5 m slot leaves 0.3 m at each end, so being inside the lines is the precision
 # that matters: a car that is, is clear of the lane and of the cars in the slots either side.
 PARKED_YAW_DEG = 8.0
+# ...and clear of the lines by this much: inside them at all left the first car parked by Gemini on
+# CARLA against the lane's edge, 0.76 m off the slot's middle, where on film it looked as if it stood
+# in the road (the slot's only visible line is the outer one)
+PARKED_INSET_SIDE_M = 0.3
+PARKED_INSET_END_M = 0.0              # 4.9 m in 5.5 m: the ends have no slack to spare
 
 SAFETY_LOOKAHEAD_M = 0.4
 SAFETY_MARGIN_M = 0.2
@@ -226,7 +231,10 @@ def overhang(pose: Pose) -> dict[str, float]:
 
 
 def is_parked(pose: Pose) -> bool:
-    return abs(pose.yaw_deg) <= PARKED_YAW_DEG and not any(overhang(pose).values())
+    xs, ys = zip(*car_box(pose).corners())
+    hl, hw = SLOT_LENGTH_M / 2 - PARKED_INSET_END_M, SLOT_WIDTH_M / 2 - PARKED_INSET_SIDE_M
+    return (abs(pose.yaw_deg) <= PARKED_YAW_DEG and max(xs) <= hl and min(xs) >= -hl
+            and max(ys) <= hw and min(ys) >= -hw)
 
 
 def kerb(slot_width: float = SLOT_WIDTH_M) -> Box:
@@ -457,8 +465,8 @@ def prompt(view: ParkView) -> str:
         f"- heading: {heading}",
         f"- free space: {view.ahead_m:.1f} m in front, {view.behind_m:.1f} m behind",
         f"- outside the slot's lines: {_outside(p)}",
-        f"Parked means the whole car inside the slot's lines and the nose within {PARKED_YAW_DEG:.0f} "
-        "degrees of the slot's direction.",
+        f"Parked means the whole car inside the slot's lines, at least {PARKED_INSET_SIDE_M} m from each "
+        f"side line, and the nose within {PARKED_YAW_DEG:.0f} degrees of the slot's direction.",
         f"Moves so far: {view.decisions}."
         + (f" Last: {', '.join(OPTION_TEXT[m] for m in view.last_moves)}." if view.last_moves else ""),
     ]
