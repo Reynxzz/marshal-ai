@@ -622,7 +622,14 @@ class CarlaDrivingSystem:
         point = v.remaining[0]
         if (getattr(self, "parking_driver", None) is not None and not v.park_fallback
                 and (self.map.points[point].carla or {}).get("pull_over")):
-            return self._gemini_park(v, point)
+            try:
+                return self._gemini_park(v, point)
+            except Exception:
+                # Never the driving loop's end: an error here once killed the loop, and every car
+                # in the plant stood still. The stand-in parks this car instead.
+                log.exception("%s: Gemini parking failed; the stand-in parks it", v.vin)
+                v.parking, v.park_task, v.park_fallback, v.creep_s = None, None, True, 0.0
+                return False
         target = self.transform(point).location
         here = v.actor.get_transform()
         forward = here.get_forward_vector()
@@ -692,12 +699,12 @@ class CarlaDrivingSystem:
                 session.finish("error")
             else:
                 v.park_view = view
-                if decision is not None:
+                if decision is not None:      # none when the planner found no path in: it ended
                     session.apply(decision, pose, time.monotonic() - v.park_asked_at, view)
-                step = session.trace[-1]
-                self._note_park(v, session, step, view)
-                log.info("%s park %s #%d: %s (%.2f) at %+.1f m / %+.1f m / %+.0f deg", v.vin,
-                         session.slot, step["n"], step["choice"], step["p"], pose.x, pose.y, pose.yaw_deg)
+                    step = session.trace[-1]
+                    self._note_park(v, session, step, view)
+                    log.info("%s park %s #%d: %s (%.2f) at %+.1f m / %+.1f m / %+.0f deg", v.vin,
+                             session.slot, step["n"], step["choice"], step["p"], pose.x, pose.y, pose.yaw_deg)
         if not session.done and session.needs_decision:
             # Planning the paths (up to parking.PLAN_BUDGET_S) and asking Gemini both happen on a
             # thread: the world keeps ticking and the other cars keep moving while this one waits.

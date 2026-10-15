@@ -47,6 +47,7 @@ from __future__ import annotations
 import io
 import math
 from dataclasses import dataclass, field
+from functools import cached_property, lru_cache
 
 CAR_LENGTH_M = 4.9                  # vehicle.lincoln.mkz_2020, the plant's car
 CAR_WIDTH_M = 1.9
@@ -143,6 +144,13 @@ class Box:
     width: float
     label: str = ""
 
+    @cached_property
+    def shape(self) -> tuple[list[tuple[float, float]], tuple[float, float, float, float]]:
+        """Corners and axis-aligned bounds, computed once: an obstacle is tested many times."""
+        c = self.corners()
+        xs, ys = [p[0] for p in c], [p[1] for p in c]
+        return c, (min(xs), max(xs), min(ys), max(ys))
+
     def corners(self, margin: float = 0.0) -> list[tuple[float, float]]:
         c, s = math.cos(self.yaw), math.sin(self.yaw)
         hl, hw = self.length / 2 + margin, self.width / 2 + margin
@@ -171,8 +179,13 @@ def car_box(pose: Pose) -> Box:
 def touching(pose: Pose, obstacles: list[Box], margin: float = 0.0) -> Box | None:
     """The first obstacle the car at this pose, grown by margin, overlaps."""
     mine = car_box(pose).corners(margin)
+    x0, x1 = min(p[0] for p in mine), max(p[0] for p in mine)
+    y0, y1 = min(p[1] for p in mine), max(p[1] for p in mine)
     for box in obstacles:
-        if _overlap(mine, box.corners()):
+        corners, (bx0, bx1, by0, by1) = box.shape
+        if bx0 > x1 or bx1 < x0 or by0 > y1 or by1 < y0:       # bounds apart: cannot touch
+            continue
+        if _overlap(mine, corners):
             return box
     return None
 
@@ -299,10 +312,13 @@ def _trace(pose: Pose, moves) -> list[Pose]:
 
 # The strategies the planner proposes: (name, the manoeuvres it may use, safety margin it keeps).
 STRATEGIES = (
-    ("shortest", None, None),
+    ("standard", None, None),
     ("keeps 0.5 m from everything", None, 0.5),
     ("forward only", tuple(m for m, (d, _w, _l) in MOVES.items() if d > 0), None),
 )
+# Weighted A*: follows the estimate harder and finds a way in far sooner (on the CARLA host's CPU
+# plain A* took 26 s where the car can wait seconds), for paths a little longer than the shortest.
+HEURISTIC_WEIGHT = 2.0
 PLAN_BUDGET_S = 10.0                # for all strategies together; the car is stopped meanwhile
 
 
@@ -325,7 +341,8 @@ def candidate_paths(pose: Pose, obstacles: list[Box], budget_s: float | None = N
     """
     import time as _time
 
-    deadline = _time.monotonic() + (PLAN_BUDGET_S if budget_s is None else budget_s)
+    budget = PLAN_BUDGET_S if budget_s is None else budget_s
+    deadline = _time.monotonic() + budget
     found, seen = [], set()
     if current and _still_clear(pose, current, obstacles):
         dirs = [MOVES[m][0] for m in current]
@@ -334,7 +351,10 @@ def candidate_paths(pose: Pose, obstacles: list[Box], budget_s: float | None = N
         found.append((metres + 1.5 * changes, "the path chosen before", tuple(current), metres, changes))
         seen.add(tuple(current))
     for strategy, allowed, margin in STRATEGIES:
-        moves = plan_moves(pose, obstacles, max_nodes=30000, moves=allowed, margin=margin, deadline=deadline)
+        # each strategy its own share: one with no answer (forward only, with a car behind) would
+        # otherwise spend the whole budget and leave nothing for the rest
+        share = min(deadline, _time.monotonic() + budget / len(STRATEGIES))
+        moves = plan_moves(pose, obstacles, max_nodes=30000, moves=allowed, margin=margin, deadline=share)
         if not moves or tuple(moves) in seen:
             continue
         seen.add(tuple(moves))
@@ -344,7 +364,7 @@ def candidate_paths(pose: Pose, obstacles: list[Box], budget_s: float | None = N
         found.append((metres + 1.5 * changes, strategy, tuple(moves), metres, changes))
     found.sort()
     paths = []
-    for _cost, strategy, moves, metres, changes in found:
+    for _cost, strategy, moves, metres, changes in found[:3]:     # the three best, lettered A-C
         poses = _trace(pose, moves)
         closest, to = _clearance(poses[1:], obstacles)
         paths.append(Path("ABC"[len(paths)], moves, tuple(poses), metres, changes, closest, to, strategy))
@@ -709,9 +729,42 @@ class GeminiParker:
                                  system=SYSTEM_PATHS if view.mode == "paths" else SYSTEM)
 
 
+@lru_cache(maxsize=None)
+def _primitive(move: str, step: float):
+    """A move from the origin: (pose, lookahead pose) every `step` m along it, and where it ends.
+    Driving a move from any pose is then a rigid transform of these, not a fresh integration."""
+    direction, wheel, distance = MOVES[move]
+    origin, samples, travelled = Pose(0.0, 0.0, 0.0), [], 0.0
+    while distance - travelled > 1e-9:
+        here = advance(origin, direction, wheel, travelled) if travelled else origin
+        samples.append((here, advance(here, direction, wheel, SAFETY_LOOKAHEAD_M)))
+        travelled += step
+    return tuple(samples), advance(origin, direction, wheel, distance)
+
+
+def _place(p: Pose, rel: Pose) -> Pose:
+    c, s = math.cos(p.yaw), math.sin(p.yaw)
+    return Pose(p.x + c * rel.x - s * rel.y, p.y + s * rel.x + c * rel.y,
+                (p.yaw + rel.yaw + math.pi) % (2 * math.pi) - math.pi)
+
+
 def _drive_safely(p: Pose, move: str, obstacles: list[Box], margin: float | None = None,
                   step: float = 0.1) -> Pose | None:
     """Where a move ends, or None if the safety check (at this margin) would stop it on the way."""
+    samples, end = _primitive(move, step)
+    for here, ahead in samples:
+        q, a = _place(p, here), _place(p, ahead)
+        # the live check too: a car already inside a wider planning margin is let through by it,
+        # and the live check, at its own margin, would then stop the move (it did, six times running)
+        if (ParkingSession._unsafe(q, a, obstacles, margin) is not None
+                or ParkingSession._unsafe(q, a, obstacles) is not None):
+            return None
+    return _place(p, end)
+
+
+def _drive_safely_slow(p: Pose, move: str, obstacles: list[Box], margin: float | None = None,
+                       step: float = 0.1) -> Pose | None:
+    """The same, integrated step by step: the reference _drive_safely is checked against."""
     direction, wheel, distance = MOVES[move]
     q, left = p, distance
     while left > 1e-9:
@@ -769,7 +822,7 @@ def plan_moves(pose: Pose, obstacles: list[Box], max_nodes: int = 12000, moves=N
             direction, _wheel, distance = MOVES[move]
             g2 = g + distance + 0.3 + (1.0 if last_dir and direction != last_dir else 0.0)
             count += 1
-            heapq.heappush(frontier, (g2 + h(q), g2, count, q, path + [move], direction))
+            heapq.heappush(frontier, (g2 + HEURISTIC_WEIGHT * h(q), g2, count, q, path + [move], direction))
     return None
 
 
