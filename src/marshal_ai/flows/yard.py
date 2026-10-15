@@ -73,6 +73,10 @@ class YardTraffic:
         # vin -> map points of the way it is driving now, so the next car's route choice sees it
         self.routes_in_use: dict[str, list[str]] = {}
         self.route_log: list[dict] = []           # every route choice, Gemini's or the rules' (flows/route.py)
+        # cars being sent to a slot right now: the route choice awaits Gemini for about a second
+        # before the mission is recorded, and the tick, seeing a passed car with no mission, sent it
+        # again (twice for VIN-P3 on CARLA, 2026-10-15)
+        self.sending: set[str] = set()
 
     # ---------- routine rules (no model call) ----------
 
@@ -174,6 +178,15 @@ class YardTraffic:
         return car.vin
 
     async def send_to_slot(self, vin: str) -> str | None:
+        if vin in self.sending:
+            return None
+        self.sending.add(vin)
+        try:
+            return await self._send_to_slot(vin)
+        finally:
+            self.sending.discard(vin)
+
+    async def _send_to_slot(self, vin: str) -> str | None:
         car = self.rt.store.get(Car, vin)
         report = self.rt.store.get(CarReport, vin)
         if not car.do_not_ship and (report is None or report.verdict != Verdict.PASS):
@@ -407,7 +420,7 @@ class YardTraffic:
         waiting = []
         for car in self.rt.store.list(Car):
             if car.state in (CarState.YARD, CarState.SHIPPED) or car.mission_id or car.yard_slot \
-                    or car.do_not_ship:
+                    or car.do_not_ship or car.vin in self.sending:
                 continue
             report = self.rt.store.get(CarReport, car.vin)
             if report is not None and report.verdict == Verdict.PASS:

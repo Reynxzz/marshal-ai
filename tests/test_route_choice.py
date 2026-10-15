@@ -113,3 +113,19 @@ def test_offline_stand_in_reads_the_prompt():
         route.Way(["a", "d", "c"], 123, ["finishing"], "via lane_c"),
     ], 10.0)
     assert route.offline_choice(LLMCall("route.choose", text, [], ""))["choice"] == "via lane_c"
+
+
+async def test_a_car_being_routed_is_not_sent_again_by_the_tick(plant):
+    import asyncio
+    app = plant(["VIN-214"])
+    app.rt.plant.hazards["finishing_corner"] = "forklift working"
+    slow = app.rt.llm.handlers["route.choose"]
+
+    def wait_then_answer(call):
+        import time
+        time.sleep(0.2)
+        return slow(call)
+    app.rt.llm.on("route.choose", wait_then_answer)
+    ready(app)
+    await asyncio.gather(app.yard.send_to_slot("VIN-214"), app.yard.tick(), app.yard.tick())
+    assert len(calls(app)) == 1 and len(app.yard.route_log) == 1
