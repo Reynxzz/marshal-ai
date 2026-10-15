@@ -126,6 +126,8 @@ class Dresser:
         self.world, self.lib, self.spawned, self.failed = world, world.get_blueprint_library(), [], 0
 
     def put(self, bp_id: str, loc: carla.Location, yaw: float, colour: str | None = None):
+        if in_lane_c(loc):                         # lane C crosses the middle: nothing stands on it
+            return None
         bp = self.lib.find(bp_id)
         if bp.has_attribute("role_name"):
             bp.set_attribute("role_name", TAG)
@@ -143,6 +145,13 @@ class Dresser:
     def put_mesh(self, mesh: str, centre: carla.Location, yaw: float, pivot: tuple[float, float]):
         """A static mesh from CARLA's own content (static.prop.mesh), placed by its centre: a mesh's
         pivot is not at its middle, `pivot` is where the middle sits from the pivot (bounding box)."""
+        if mesh == SLAB:                           # a 48 x 20 m slab: any part of it on lane C, not laid
+            f, r = math.radians(yaw), math.radians(yaw + 90.0)
+            for a in (-SLAB_LEN / 2, 0.0, SLAB_LEN / 2):
+                for b in (-10.0, 0.0, 10.0):
+                    if in_lane_c(carla.Location(centre.x + a * math.cos(f) + b * math.cos(r),
+                                                centre.y + a * math.sin(f) + b * math.sin(r), centre.z)):
+                        return None
         bp = self.lib.find("static.prop.mesh")
         bp.set_attribute("mesh_path", f"{mesh}.{mesh.rsplit('/', 1)[-1]}")
         bp.set_attribute("role_name", TAG)
@@ -257,9 +266,25 @@ def check(m: carla.Map, samples: list[carla.Waypoint], actors) -> list[str]:
 # -4 is a walkway, -5 an apron or (road 7) the lot row, -6 the outer apron; lane 1 the inner apron.
 # Road 9 paves the middle.
 LOOP_ROADS = range(1, 9)
+# every road a car drives on, lane C and the split roads included (the check at the end)
+DRIVEN_ROADS = {*LOOP_ROADS, 11, 51, 101, 103, 20, 102, 104}
+
+
+def _xodr():
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import plant_xodr
+    return plant_xodr
+
+
+def in_lane_c(loc: carla.Location) -> bool:
+    """Whether a spot is in lane C's corridor, which the dressing keeps clear (plant_xodr.lane_c_corridor)."""
+    x0, x1, y0, y1 = _xodr().lane_c_corridor()
+    return x0 <= loc.x <= x1 and y0 <= loc.y <= y1
 
 
 def at(m: carla.Map, road: int, lane: int, s: float, right: float = 0.0, ahead: float = 0.0, up: float = 0.1):
+    # roads 1 and 5 are split where lane C leaves and joins them: places keep the loop's own s
+    road, s = _xodr().physical(road, s)
     wp = m.get_waypoint_xodr(road, lane, s)
     return (off(wp.transform, right=right, ahead=ahead, up=up), wp.transform.rotation.yaw) if wp else (None, 0.0)
 
@@ -472,7 +497,7 @@ def check_world(m: carla.Map, actors) -> list[str]:
     for a in actors:
         loc = a.get_location()
         wp = m.get_waypoint(loc, project_to_road=False, lane_type=carla.LaneType.Any)
-        if wp is not None and wp.road_id in LOOP_ROADS and wp.lane_id in (-1, -2, -3):
+        if wp is not None and wp.road_id in DRIVEN_ROADS and wp.lane_id in (-1, -2, -3):
             bad.append(f"{a.type_id} at ({loc.x:.1f}, {loc.y:.1f}) is on road {wp.road_id} lane {wp.lane_id}")
     return bad
 

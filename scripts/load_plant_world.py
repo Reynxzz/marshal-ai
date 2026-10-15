@@ -28,9 +28,9 @@ def emit(obj):
 
 def build(client, xodr: str):
     params = carla.OpendriveGenerationParameters(
-        # CARLA puts a wall along every road edge, the paving road across the middle included, so the
-        # walls are kerbs (0.5 m); the plant's perimeter fence comes from the dressing
-        vertex_distance=2.0, max_road_length=500.0, wall_height=0.5, additional_width=0.6,
+        # No walls: CARLA puts one along every road edge, the paving across the middle included, and lane
+        # C crosses that paving. The plant's perimeter fence comes from the dressing.
+        vertex_distance=2.0, max_road_length=500.0, wall_height=0.0, additional_width=0.6,
         smooth_junctions=True, enable_mesh_visibility=True, enable_pedestrian_navigation=True)
     world = client.generate_opendrive_world(xodr, params)
     world.wait_for_tick(30.0)
@@ -39,7 +39,11 @@ def build(client, xodr: str):
 
 def resolve(m: carla.Map, points: dict) -> dict:
     out = {}
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from plant_xodr import physical
     for name, (road, lane, s) in points.items():
+        road, s = physical(road, s)             # roads 1 and 5 are split where lane C meets them
         wp = m.get_waypoint_xodr(road, lane, s)
         if wp is None:
             out[name] = None
