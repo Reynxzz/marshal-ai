@@ -50,8 +50,10 @@ except ImportError:  # local development without the compiled CARLA client
 
 try:
     from agents.navigation.behavior_agent import BehaviorAgent
+    from agents.navigation.local_planner import RoadOption
 except ImportError:  # bundled under CARLA_ROOT/PythonAPI/carla, not in the PyPI client wheel
     BehaviorAgent = None
+    RoadOption = None
 
 
 # The design asks for a 3 s clip of each track step and a 10 s clip before a stop. Frames are held
@@ -171,7 +173,14 @@ class _Vehicle:
     step_left_s: float = 0.0
     stalled_s: float = 0.0                 # how long the agent has been stopped mid-mission
     creep_s: float = 0.0                   # time spent creeping onto a precise stop; see _creep
+    manoeuvre: dict | None = None          # state of a routine step being driven; see _manoeuvre
     assists_raised: int = 0
+    # what blocked the car when it asked for help: (actor id, carla.Location); see _execute_option
+    assist_obstacle: tuple | None = None
+    waiting_case: str | None = None        # "wait_for_removal" chosen: held until the lane is clear
+    detour: dict | None = None             # "pass_left_3kmh" / "reroute_lane_c" being driven
+    shoulder_move: str | None = None       # "forward" / "back" / "back_lane" / "here"; see _shoulder_move
+    reverse_path: list = field(default_factory=list)   # aim points for "back_lane"
     onboard: object | None = None          # forward camera on the car; see assist_clip()
     onboard_frames: object | None = None   # _FrameBuffer of its frames
     # view name -> (sensor, _FrameBuffer). Track evidence rides with the car; see _attach_evidence.
@@ -187,6 +196,25 @@ class _Vehicle:
 # it never invents a path. "wait" first so a rule-bound desk always has a safe choice.
 ASSIST_OPTIONS = ["wait_for_removal", "pass_left_3kmh", "reroute_lane_c"]
 
+# Objects in the lane. BehaviorAgent brakes for vehicles and people on its route but not for props,
+# so scene 3's car drove into the box (the lab's SC-0142 failed no_contact on it). The stand-in
+# brakes for a prop or a person in its path, as the plant's driving system would, and stops with
+# room to pull out round it: its centre this far from the object, plus the braking distance.
+OBJECT_STOP_M = 9.0
+OBJECT_LATERAL_M = 1.8             # in the car's path: half its width (1.1 m), half a box, margin
+OBJECT_DECEL_MS2 = 4.0             # for the braking distance at the car's speed
+
+# Driving a chosen assistance option (design, flow 2). Passing and rerouting both leave the lane
+# for the next one in the same direction - the left lane for a pass, the lane through `lane_c` for
+# a reroute - and are driven by BehaviorAgent on a plan built here. A pass is at 3 km/h and returns
+# to the lane once the object is behind; a reroute is at the mission's speed and stays in lane C
+# until just before the next stop. Either one is offered only where it can be driven.
+PASS_KMH = 3.0
+LANE_CHANGE_M = 7.0                # forward run of one lane change
+PASS_CLEAR_M = 6.0                 # the car turns back once its centre is this far past the object
+REJOIN_BEFORE_STOP_M = 5.0         # back in lane this far before the next stop
+DETOUR_MAX_S = 90.0                # a detour not finished by then is given up; the car waits
+
 # Simulated seconds between frames for every Marshal camera (CARLA's sensor_tick). Measured on the
 # T4 with three cameras per car: at the default of rendering every tick, simulated time ran at 1.26x
 # real time with one car, 0.47x with three and 0.28x with five; at 0.2 s, 1.54x with three and 0.98x
@@ -200,8 +228,43 @@ CAMERA_TICK_S = 0.2
 # only its front half, and Gemini reported a "panel gap" at 0.9 on a car it could barely see. Scene 1
 # never showed it because it spawns the car on the mark.
 PRECISE_STOPS = {"inspection_gate"}
+# Points a car drives through instead of stopping at: the design's gate photographs each car rolling
+# through at walking speed (flow 3, 5 km/h). The car holds its mission speed onto the mark, arrives
+# - and is photographed - as its centre crosses it, and is not braked: the gate's verdict and the
+# next mission come while the simulation is paused for them, so the car carries straight on to the
+# track. Only a car with nowhere to go next (a REVIEW) slows to a halt just past the gate.
+# Off (drive_through_gate=False), the gate is a precise stop, as before.
+DRIVE_THROUGH = {"inspection_gate"}
+DRIVE_THROUGH_DEFAULT_KMH = 5.0
+
+# Routine steps the car physically performs, measured instead of reported (design, flow 4). Until
+# these, the car stood braked through the whole routine and the reverse and brake-test telemetry were
+# constants. The track is short - 20 m from the routine's start to the report point on Town05 - so
+# the brake test's run-up is capped, and the car is re-routed from where it ends up.
+MANOEUVRES = {"reverse", "brake_test"}
+REVERSE_TARGET_M = 3.0
+REVERSE_CLEARANCE_M = 4.0          # reverse no further while anything is closer than this behind
+BRAKE_TEST_KMH = 20.0
+BRAKE_TEST_RUN_UP_MAX_M = 12.0     # brake here even if 20 km/h was not reached; reported as such
+MANOEUVRE_MAX_S = 25.0
+# The full-lock step, driven where there is room (_room_for_full_lock): (steer, degrees) legs, both
+# circles to the car's left (CARLA steers left for negative values).
+FULL_LOCK_LEGS = ((-1.0, 90.0), (1.0, 360.0), (-1.0, 270.0))
+FULL_LOCK_KMH = 5.0
+FULL_LOCK_MAX_S = 90.0
+FULL_LOCK_WHEEL_DEG = 540.0        # this car's steering wheel at lock, from centre (routines.py R-12)
+# the area the two circles sweep, around the start (measured on the plant world: 3.8 m back, 4.8 m
+# ahead, 5.2 m to the left), with a margin
+FULL_LOCK_BEHIND_M, FULL_LOCK_AHEAD_M, FULL_LOCK_LEFT_M = 6.0, 8.0, 7.5
 STOP_TOLERANCE_M = 0.4
 CREEP_MAX_S = 30.0                 # give up creeping after this long, rather than wait forever
+SHOULDER_MOVE_MAX_S = 60.0         # a slot-to-slot move along the shoulder, at creep speed
+SHOULDER_WIDTH_M = 1.8             # a vehicle this close to the line between two slots is in the way
+PULL_OUT_M = 5.0                   # a car leaving a slot joins the lane this far ahead of itself
+REVERSE_STEP_M = 3.0               # aim points along the lane when backing down it to a slot
+REVERSE_TURN_IN_M = 7.0            # leave the lane for the slot this far before it
+REVERSE_LANE_MAX_S = 120.0
+BEHIND_REVERSE_MAX_M = 30.0        # a slot up to this far behind a creeping car is reversed onto
 # A pull_over point (plant_map.yaml) is off the driving lanes - a bay or yard slot on the shoulder -
 # and BehaviorAgent only routes on driving lanes. So the car is routed to the lane this far before
 # the spot, then steers onto it. 12 m is enough to move one lane over at walking pace.
@@ -235,6 +298,22 @@ STEP_LIGHTS = {
 INDICATOR_SIDES = ("LeftBlinker", "RightBlinker")
 
 
+def forward_only(waypoints: list[str], progress: list[float | None]) -> list[str]:
+    """The stops that make forward progress: see CarlaDrivingSystem._forward_waypoints.
+
+    progress[i] is how far along the car's road stop i is (None: on another road, kept).
+    """
+    last = progress[-1]
+    kept, reached = [], -math.inf
+    for name, p in zip(waypoints[:-1], progress[:-1]):
+        if p is None:
+            kept.append(name)
+        elif p > reached and (last is None or p < last):
+            kept.append(name)
+            reached = p
+    return kept + [waypoints[-1]]
+
+
 def _destroy_quietly(actor) -> None:
     """Destroy an actor that may already be gone, and that this process may not have created.
 
@@ -258,7 +337,8 @@ class CarlaDrivingSystem:
                  auto_assist: bool = True, blocked_after_s: float = 5.0,
                  blocked_speed_kmh: float = 0.6, obstacle_range_m: float = 14.0,
                  assist_options: list[str] | None = None, sweep_stale_sensors: bool = True,
-                 camera_tick_s: float | None = CAMERA_TICK_S, parking_driver=None):
+                 camera_tick_s: float | None = CAMERA_TICK_S, drive_through_gate: bool = True,
+                 parking_driver=None):
         if carla is None:
             raise RuntimeError(
                 "CARLA client not available. Install the 0.9.16 wheel bundled with the server "
@@ -299,6 +379,11 @@ class CarlaDrivingSystem:
         # Simulated seconds between frames for every Marshal camera; None renders on every tick.
         # See _camera_blueprint.
         self.camera_tick_s = camera_tick_s
+        self.drive_through_gate = drive_through_gate
+        # vin -> km/h at the moment it crossed a drive-through point, i.e. when it was photographed
+        self.passes: dict[str, float] = {}
+        # case_id -> what the car did with the option chosen for it; see _execute_option
+        self.assist_outcomes: dict[str, dict] = {}
         self._simulated_s = 0.0               # see realtime_ratio()
         self._sim_started_at: float | None = None
         # Replaced by the runtime when MARSHAL_ARTIFACTS=gcs, so the gs:// URI a record
@@ -393,6 +478,8 @@ class CarlaDrivingSystem:
         left three cameras behind.
         """
         cams = [v.onboard] + [cam for cam, _buffer in v.evidence.values()]
+        if v.detour and v.detour.get("sensor") is not None:
+            cams.append(v.detour.pop("sensor"))
         for cam in cams:
             if cam is None:
                 continue
@@ -496,7 +583,10 @@ class CarlaDrivingSystem:
     async def send(self, command: Command) -> None:
         if isinstance(command, MissionGo):
             v = self.vehicles[command.vin]
-            v.mission, v.remaining = command, list(command.waypoints)
+            if v.detour:
+                self._end_detour(v, "replaced by a new mission")
+            v.waiting_case = None
+            v.mission, v.remaining = command, self._forward_waypoints(v, list(command.waypoints))
             v.routine_queue, v.routine_done = [], False
             v.agent._behavior.max_speed = command.max_speed_kmh
             self._next_destination(v)
@@ -509,23 +599,170 @@ class CarlaDrivingSystem:
         elif isinstance(command, AssistChoose):
             v = self.vehicles[command.vin]
             if v.assist_case == command.case_id:
+                self._execute_option(v, command.case_id, command.option)
                 v.assist_case = None
-                # day 3: translate the chosen option (wait / pass left / reroute) here
+
+    def _forward_waypoints(self, v: _Vehicle, waypoints: list[str]) -> list[str]:
+        """Drop the stops of a mission that would send the car backwards along its road.
+
+        The route choice (flows/route.py) sends every point of the way. On Town05 the plant map's
+        way to the yard runs report_point -> ... -> finishing -> yard.entry -> slot, but on the road
+        `finishing` is past `yard.entry` and the slots. Driven in that order the car went down to
+        finishing, could not be routed back up the road, was counted as arrived at yard.Y2 standing
+        40 m past it, and the next car stopped behind it in the lane for good. A stop is kept only
+        if it is further along the car's road than the one before and not past the last; stops on
+        other roads are kept as they are. The last stop is always kept.
+        """
+        if len(waypoints) < 2 or not hasattr(carla, "LaneType"):
+            return waypoints
+        try:
+            world_map = getattr(self, "_driving_map", None)
+            if world_map is None:
+                world_map = self._driving_map = self.world.get_map()
+            driving = carla.LaneType.Driving
+            here = world_map.get_waypoint(v.actor.get_location(), project_to_road=True, lane_type=driving)
+            progress = []
+            for name in waypoints:
+                wp = world_map.get_waypoint(self._destination_location(name), project_to_road=True,
+                                            lane_type=driving)
+                on_road = here is not None and wp is not None and wp.road_id == here.road_id \
+                    and wp.lane_id * here.lane_id > 0
+                progress.append((wp.s - here.s) * (1 if here.lane_id < 0 else -1) if on_road else None)
+        except Exception as exc:                  # never let this stop a mission
+            log.warning("could not order %s's waypoints: %s", v.vin, exc)
+            return waypoints
+        kept = forward_only(waypoints, progress)
+        if kept != waypoints:
+            log.info("%s: %s dropped from %s; they are behind the car's way along the road",
+                     v.vin, [w for w in waypoints if w not in kept], waypoints)
+        return kept
 
     def _precise(self, point: str) -> bool:
         spec = self.map.points[point].carla or {}
         return point in PRECISE_STOPS or bool(spec.get("pull_over"))
 
     def _next_destination(self, v: _Vehicle) -> None:
-        point = v.remaining[0]
+        v.shoulder_move = self._shoulder_move(v, v.remaining[0])
+        if v.shoulder_move is not None:
+            v.creep_s = 0.0
+            return
+        v.agent.set_destination(self._destination_location(v.remaining[0]),
+                                start_location=self._pull_out_start(v))
+
+    def _pull_out_start(self, v: _Vehicle):
+        """Where a car parked off the lanes starts its route: the lane beside it, a little ahead.
+
+        Without it BehaviorAgent plans from its local planner's last target, which for a parked car
+        is wherever its previous route was heading. VIN-P2, re-slotted from Y2 to Y7, planned from
+        there, turned round at the yard entry and stopped facing the plant's dressing. None for a
+        car on a driving lane, which keeps planning from just ahead of itself, as before.
+        """
+        if not hasattr(carla, "LaneType"):
+            return None
+        here = v.actor.get_transform()
+        world_map = getattr(self, "_driving_map", None)
+        if world_map is None:
+            world_map = self._driving_map = self.world.get_map()
+        on = world_map.get_waypoint(here.location, project_to_road=False, lane_type=carla.LaneType.Any)
+        if on is not None and on.lane_type == carla.LaneType.Driving:
+            return None
+        lane = world_map.get_waypoint(here.location, project_to_road=True, lane_type=carla.LaneType.Driving)
+        if lane is None:
+            return None
+        ahead = lane.next(PULL_OUT_M)
+        return (ahead[0] if ahead else lane).transform.location
+
+    def _shoulder_move(self, v: _Vehicle, point: str) -> str | None:
+        """How a car parked in a slot or bay reaches another one along the same shoulder, or None.
+
+        Yard re-slotting moves a car from one slot to the next one along. Routed by BehaviorAgent,
+        the run-up point PULL_OVER_RUN_M before the new slot was beside or behind the car, and the
+        route planner sent it round the block: on the plant run's late truck, VIN-P1 turned round
+        between Y7 and Y8 and stalled across the shoulder. So:
+        "here" - it is already on the spot (a plan can name the slot a car is in);
+        "forward" - the spot is ahead and the shoulder up to it is free: creep along it;
+        "back" - the spot is behind and the shoulder free: reverse along it. Routed by the lane, a
+        car sent to a slot behind it turned round across the road and stopped 7 m off the slot,
+        facing the wrong way (VIN-P3, Y6 to Y5);
+        "back_lane" - behind, with a parked car in between: reverse along the lane beside the
+        shoulder, then back into the spot. There is no route back up road 34: the planner returns
+        a single point, which read as arrived, and VIN-P1 was booked into Y3 standing 46 m away;
+        None - route by the lane as usual (ahead, with a parked car in between).
+        """
+        target_spec = self.map.points[point].carla or {}
+        start = self.map.points.get(v.location)
+        if not target_spec.get("pull_over") or start is None or not (start.carla or {}).get("pull_over"):
+            return None
+        here = v.actor.get_transform()
+        if here.location.distance(self.transform(v.location).location) > SETTLE_MAX_M:
+            return None                          # not standing on its spot
+        target = self.transform(point).location
+        if here.location.distance(target) <= SETTLE_MAX_M:
+            return "here"
+        forward = here.get_forward_vector()
+        ahead = (target.x - here.location.x) * forward.x + (target.y - here.location.y) * forward.y
+        if not self._shoulder_clear(v, target):
+            if ahead <= 0 and self._reverse_path(v, target):
+                log.info("%s: a car is parked on the shoulder before %s; reversing along the lane",
+                         v.vin, point)
+                return "back_lane"
+            log.info("%s: a car is parked on the shoulder before %s; routing by the lane", v.vin, point)
+            return None
+        return "forward" if ahead > 0 else "back"
+
+    def _reverse_path(self, v: _Vehicle, target) -> bool:
+        """Aim points for backing down the lane beside the shoulder to `target`; kept in v.reverse_path."""
+        if not hasattr(carla, "LaneType"):
+            return False
+        world_map = getattr(self, "_driving_map", None)
+        if world_map is None:
+            world_map = self._driving_map = self.world.get_map()
+        driving = carla.LaneType.Driving
+        lane = world_map.get_waypoint(v.actor.get_location(), project_to_road=True, lane_type=driving)
+        beside = world_map.get_waypoint(target, project_to_road=True, lane_type=driving)
+        if lane is None or beside is None:
+            return False
+        points, wp = [], lane
+        for _ in range(60):                         # at most 180 m
+            back = wp.previous(REVERSE_STEP_M)
+            if not back:
+                return False
+            wp = back[0]
+            if wp.transform.location.distance(beside.transform.location) <= REVERSE_TURN_IN_M:
+                break
+            points.append((wp.transform.location.x, wp.transform.location.y))
+        else:
+            return False
+        points.append((target.x, target.y))
+        v.reverse_path = points
+        return True
+
+    def _shoulder_clear(self, v: _Vehicle, target) -> bool:
+        """No other vehicle between the car and `target`, within a car's width of the line."""
+        here = v.actor.get_location()
+        dx, dy = target.x - here.x, target.y - here.y
+        length = math.hypot(dx, dy)
+        ux, uy = dx / length, dy / length
+        for actor in self.world.get_actors().filter("vehicle.*"):
+            if actor.id == v.actor.id:
+                continue
+            loc = actor.get_location()
+            along = (loc.x - here.x) * ux + (loc.y - here.y) * uy
+            lateral = abs((loc.x - here.x) * -uy + (loc.y - here.y) * ux)
+            if 0.0 < along < length + 2.5 and lateral < SHOULDER_WIDTH_M:
+                return False
+        return True
+
+    def _destination_location(self, point: str):
+        """Where BehaviorAgent is routed for a point: the point, or for a pull_over spot off the
+        driving lanes, the lane beside it a run-up before it."""
         target = self.transform(point).location
         if (self.map.points[point].carla or {}).get("pull_over"):
-            # Off the driving lanes: route to the lane beside the spot, a run-up before it.
             wp = self.world.get_map().get_waypoint(target, project_to_road=True,
                                                    lane_type=carla.LaneType.Driving)
             back = wp.previous(PULL_OVER_RUN_M) if wp is not None else []
             target = (back[0] if back else wp).transform.location if wp is not None else target
-        v.agent.set_destination(target)
+        return target
 
     async def start(self) -> None:
         settings = self.world.get_settings()
@@ -565,9 +802,20 @@ class CarlaDrivingSystem:
 
     async def _run(self) -> None:
         self._sim_started_at = time.monotonic()
+        failing: set[tuple[str, str]] = set()
         while True:
             for v in list(self.vehicles.values()):
-                await self._step(v)
+                try:
+                    await self._step(v)
+                except Exception as exc:
+                    # One car's step must not stop the world. An exception here used to end this
+                    # task silently - asyncio only reports it when the task is collected - and the
+                    # simulation froze with every car in it, while the scene kept polling.
+                    key = (v.vin, type(exc).__name__)
+                    if key not in failing:
+                        failing.add(key)
+                        log.exception("driving step failed for %s; braking it", v.vin)
+                    v.actor.apply_control(carla.VehicleControl(throttle=0.0, brake=1.0))
             await asyncio.to_thread(self._tick_world)
             self._simulated_s += self.fixed_delta_s
             self._since_status += self.fixed_delta_s
@@ -587,12 +835,35 @@ class CarlaDrivingSystem:
         if v.routine_queue:
             await self._routine_step(v)
             return
-        if v.agent.done():
-            if self._precise(v.remaining[0]) and not self._creep(v):
+        if v.waiting_case and not self._lane_cleared(v):
+            v.actor.apply_control(carla.VehicleControl(throttle=0.0, brake=1.0))
+            return
+        if v.detour:
+            self._follow_detour(v)
+        arrived = False
+        if v.shoulder_move:
+            # along the shoulder to the next slot; time allowed scales with the distance
+            if v.shoulder_move == "forward" and not self._creep(v, max_s=SHOULDER_MOVE_MAX_S):
+                return
+            if v.shoulder_move == "back" and not self._reverse_creep(v):
+                return
+            if v.shoulder_move == "back_lane" and not self._reverse_follow(v):
+                return
+            if v.shoulder_move == "here":
+                self._square_up(v, v.remaining[0])
+            v.shoulder_move, arrived = None, True
+        if arrived or v.agent.done():
+            through = not arrived and self._drives_through(v.remaining[0])
+            if through:
+                if not self._pass_through(v):
+                    return                      # rolling onto the mark at gate speed
+            elif not arrived and self._precise(v.remaining[0]) and not self._creep(v):
                 return                          # still edging onto the mark
             v.creep_s = 0.0
             v.park_fallback = False
             v.location = v.remaining.pop(0)
+            if v.detour:
+                self._end_detour(v, f"arrived at {v.location}")
             if v.location == "test_track" and v.mission.routine and not v.routine_done:
                 v.routine_done = True
                 v.routine_queue = routine_steps(v.mission.routine, v.mission.routine_steps)
@@ -603,20 +874,28 @@ class CarlaDrivingSystem:
                 self._next_destination(v)
             else:
                 mission, v.mission = v.mission, None
-                v.actor.apply_control(carla.VehicleControl(throttle=0.0, brake=1.0))
+                if not through:
+                    v.actor.apply_control(carla.VehicleControl(throttle=0.0, brake=1.0))
+                # A drive-through car keeps rolling: if the handlers give it its next mission, as
+                # a gate PASS does, it never stops; if not, the next step brakes it.
                 await emit(self._handlers, MissionDone(
                     mission_id=mission.mission_id, vin=v.vin, location=v.location,
                 ))
                 return
+        if self._object_in_path(v) is not None:
+            # A prop or a person in the path: stop short of it, and ask for help if it stays.
+            v.actor.apply_control(carla.VehicleControl(throttle=0.0, brake=1.0))
+            await self._check_blocked(v)
+            return
         if await self._check_blocked(v):
             return
         v.actor.apply_control(v.agent.run_step())
 
-    def _creep(self, v: _Vehicle) -> bool:
+    def _creep(self, v: _Vehicle, max_s: float = CREEP_MAX_S) -> bool:
         """Edge the car onto its stop mark at walking pace. True once it is there.
 
         Measured along the car's heading, so a car that has rolled past the mark counts as there.
-        It brakes for anything in front, and gives up after CREEP_MAX_S rather than hold up the
+        It brakes for anything in front, and gives up after max_s (CREEP_MAX_S) rather than hold up the
         plant if something it cannot see is in the way.
         """
         point = v.remaining[0]
@@ -636,11 +915,19 @@ class CarlaDrivingSystem:
         dx, dy = target.x - here.location.x, target.y - here.location.y
         along = dx * forward.x + dy * forward.y
         pulling_over = bool((self.map.points[point].carla or {}).get("pull_over"))
+        if (pulling_over and along <= STOP_TOLERANCE_M and math.hypot(dx, dy) > SETTLE_MAX_M
+                and v.shoulder_move is None and -along <= BEHIND_REVERSE_MAX_M):
+            # The spot is behind the car, not under it. "Rolled past the mark counts as there" is
+            # right for the gate and wrong for a slot: a car still pulling into Y6 when its re-slot
+            # to Y5 came was booked into Y5 at once, standing 13.7 m away. It reverses onto it.
+            log.info("%s: %s is %.1f m behind it; reversing onto it", v.vin, point, -along)
+            v.shoulder_move, v.creep_s = "back", 0.0
+            return False
         v.creep_s += self.fixed_delta_s
         close = math.hypot(dx, dy) <= 1.0
-        if along <= STOP_TOLERANCE_M or close or v.creep_s > CREEP_MAX_S:
+        if along <= STOP_TOLERANCE_M or close or v.creep_s > max_s:
             v.actor.apply_control(carla.VehicleControl(throttle=0.0, brake=1.0))
-            if v.creep_s > CREEP_MAX_S:
+            if v.creep_s > max_s:
                 log.warning("%s stopped %.1f m short of %s", v.vin, along, v.remaining[0])
             elif pulling_over:
                 self._square_up(v, point)
@@ -668,6 +955,119 @@ class CarlaDrivingSystem:
             throttle=0.3 if speed < 1.0 else 0.0,          # about 3.6 km/h
             steer=max(-limit, min(limit, 1.5 * error)),
             brake=0.0))
+        return False
+
+    def _reverse_creep(self, v: _Vehicle, max_s: float = SHOULDER_MOVE_MAX_S) -> bool:
+        """Back the car along the shoulder onto a spot behind it, at walking pace. True once there.
+
+        The mirror of _creep: it steers the car's tail for a point past the spot, so the car arrives
+        straight, with the reverse lamp lit. Reversing, the wheel turns the car the other way
+        (measured: steer +0.3 for 3 m backwards turned it -21 degrees), hence the minus sign.
+        """
+        point = v.remaining[0]
+        spot = self.transform(point)
+        target = spot.location
+        here = v.actor.get_transform()
+        forward = here.get_forward_vector()
+        dx, dy = target.x - here.location.x, target.y - here.location.y
+        behind = -(dx * forward.x + dy * forward.y)
+        v.creep_s += self.fixed_delta_s
+        if behind <= STOP_TOLERANCE_M or math.hypot(dx, dy) <= 1.0 or v.creep_s > max_s:
+            v.actor.apply_control(carla.VehicleControl(throttle=0.0, brake=1.0))
+            v.actor.set_light_state(carla.VehicleLightState(carla.VehicleLightState.NONE))
+            if v.creep_s > max_s:
+                log.warning("%s stopped %.1f m short of %s, reversing", v.vin, behind, point)
+            self._square_up(v, point)
+            return True
+        obstacle, distance = self._obstacle_ahead(v, backwards=True)
+        if obstacle is not None and distance < behind + 3.0:
+            v.actor.apply_control(carla.VehicleControl(throttle=0.0, brake=1.0, reverse=True))
+            return False
+        along = spot.get_forward_vector()
+        aim_x, aim_y = dx - along.x * PULL_OVER_AIM_M, dy - along.y * PULL_OVER_AIM_M
+        backwards = math.atan2(-forward.y, -forward.x)
+        error = (math.atan2(aim_y, aim_x) - backwards + math.pi) % (2 * math.pi) - math.pi
+        velocity = v.actor.get_velocity()
+        speed = math.hypot(velocity.x, velocity.y)
+        v.actor.set_light_state(carla.VehicleLightState(carla.VehicleLightState.Reverse))
+        v.actor.apply_control(carla.VehicleControl(
+            throttle=0.3 if speed < 1.0 else 0.0, steer=max(-0.6, min(0.6, -1.5 * error)),
+            brake=0.0, reverse=True))
+        return False
+
+    def _reverse_follow(self, v: _Vehicle) -> bool:
+        """Back along v.reverse_path at walking pace, then onto the spot. True once there."""
+        point = v.remaining[0]
+        here = v.actor.get_transform()
+        while len(v.reverse_path) > 1 and math.hypot(v.reverse_path[0][0] - here.location.x,
+                                                       v.reverse_path[0][1] - here.location.y) < 3.0:
+            v.reverse_path.pop(0)
+        if len(v.reverse_path) == 1:                 # the last leg, into the spot itself
+            return self._reverse_creep(v, max_s=SHOULDER_MOVE_MAX_S + REVERSE_LANE_MAX_S)
+        v.creep_s += self.fixed_delta_s
+        if v.creep_s > REVERSE_LANE_MAX_S:
+            log.warning("%s gave up reversing to %s", v.vin, point)
+            v.actor.apply_control(carla.VehicleControl(throttle=0.0, brake=1.0))
+            v.actor.set_light_state(carla.VehicleLightState(carla.VehicleLightState.NONE))
+            return True
+        obstacle, distance = self._obstacle_ahead(v, backwards=True)
+        if obstacle is not None and distance < 6.0:
+            v.actor.apply_control(carla.VehicleControl(throttle=0.0, brake=1.0, reverse=True))
+            return False
+        forward = here.get_forward_vector()
+        ax, ay = v.reverse_path[0]
+        backwards = math.atan2(-forward.y, -forward.x)
+        error = (math.atan2(ay - here.location.y, ax - here.location.x) - backwards + math.pi) \
+            % (2 * math.pi) - math.pi
+        velocity = v.actor.get_velocity()
+        speed = math.hypot(velocity.x, velocity.y)
+        v.actor.set_light_state(carla.VehicleLightState(carla.VehicleLightState.Reverse))
+        v.actor.apply_control(carla.VehicleControl(
+            throttle=0.3 if speed < 1.0 else 0.0, steer=max(-0.6, min(0.6, -1.5 * error)),
+            brake=0.0, reverse=True))
+        return False
+
+    def _drives_through(self, point: str) -> bool:
+        return getattr(self, "drive_through_gate", False) and point in DRIVE_THROUGH
+
+    def _pass_through(self, v: _Vehicle) -> bool:
+        """Roll onto a drive-through mark at the mission's speed. True as the car's centre crosses it.
+
+        BehaviorAgent reports done 3-4 m out, so these last metres are driven here: hold the lane by
+        aiming past the mark along the point's heading, hold the mission speed, brake only for
+        something in front. The speed at the crossing is kept in self.passes, since it is the claim.
+        """
+        point = v.remaining[0]
+        mark = self.transform(point)
+        here = v.actor.get_transform()
+        forward = here.get_forward_vector()
+        dx, dy = mark.location.x - here.location.x, mark.location.y - here.location.y
+        along = dx * forward.x + dy * forward.y
+        velocity = v.actor.get_velocity()
+        kmh = 3.6 * math.hypot(velocity.x, velocity.y)
+        if along <= 0.0:
+            self.passes[v.vin] = round(kmh, 1)
+            log.info("%s drove through %s at %.1f km/h", v.vin, point, kmh)
+            return True
+        v.creep_s += self.fixed_delta_s
+        if v.creep_s > CREEP_MAX_S:
+            log.warning("%s did not reach %s in %.0f s; counted as through", v.vin, point, CREEP_MAX_S)
+            self.passes[v.vin] = round(kmh, 1)
+            return True
+        obstacle, distance = self._obstacle_ahead(v)
+        if obstacle is not None and distance < along + 4.0:
+            v.actor.apply_control(carla.VehicleControl(throttle=0.0, brake=1.0))
+            return False
+        lane = mark.get_forward_vector()
+        aim_x, aim_y = dx + lane.x * 6.0, dy + lane.y * 6.0
+        error = ((math.atan2(aim_y, aim_x) - math.atan2(forward.y, forward.x) + math.pi)
+                 % (2 * math.pi) - math.pi)
+        target = (v.mission.max_speed_kmh if v.mission and v.mission.max_speed_kmh
+                  else DRIVE_THROUGH_DEFAULT_KMH)
+        throttle = 0.4 if kmh < target - 0.5 else 0.0
+        brake = 0.3 if kmh > target + 1.5 else 0.0
+        v.actor.apply_control(carla.VehicleControl(
+            throttle=throttle, brake=brake, steer=max(-0.3, min(0.3, 1.5 * error))))
         return False
 
     # ---------- Gemini parks the car (parking.py) ----------
@@ -836,10 +1236,12 @@ class CarlaDrivingSystem:
 
     # ---------- flow 2: the driving system asks for help ----------
 
-    def _obstacle_ahead(self, v: _Vehicle):
-        """Nearest vehicle, walker or prop in front of the car, within obstacle_range_m."""
+    def _obstacle_ahead(self, v: _Vehicle, backwards: bool = False):
+        """Nearest vehicle, walker or prop in front of the car (or behind it), within range."""
         here = v.actor.get_transform()
         forward = here.get_forward_vector()
+        if backwards:
+            forward = carla.Vector3D(-forward.x, -forward.y, -forward.z)
         origin = here.location
         best, best_d = None, self.obstacle_range_m
         for actor in self.world.get_actors():
@@ -924,6 +1326,10 @@ class CarlaDrivingSystem:
         v = self.vehicles[vin]
         v.assist_case = case_id
         v.assists_raised += 1
+        here = getattr(v.actor, "get_location", None)
+        if here is not None:
+            here = here()
+            log.info("%s asks for help (%s) at (%.1f, %.1f): %s", vin, case_id, here.x, here.y, reason)
         v.actor.apply_control(carla.VehicleControl(throttle=0.0, brake=1.0))
         clip = self.assist_clip(v)
         uri = clip_uri or f"gs://marshal/assist/{case_id}.jpg"
@@ -932,9 +1338,26 @@ class CarlaDrivingSystem:
             # The recorded URI points at the last frame, the one showing what stopped the car.
             uri = self.store_artifact(uri, clip[-1])
         await emit(self._handlers, AssistRequest(
-            case_id=case_id, vin=vin, location=v.location, reason=reason, options=options,
+            case_id=case_id, vin=vin, location=self._nearest_point(v), reason=reason, options=options,
             clip_uri=uri,
         ))
+
+    def _nearest_point(self, v: _Vehicle) -> str:
+        """The named map point nearest where the car stands: where it stopped, for the case.
+
+        Not v.location, the last point it reached. Scene 3's car starts at buffer zone B and stops
+        9 m short of a box on the test-track mark; the case said "buffer_zone_b", and the lab built
+        its test there, 26 m from the box, and passed it without the car ever meeting the box.
+        """
+        here = v.actor.get_location()
+        best, best_d = v.location, math.inf
+        for name, point in self.map.points.items():
+            if not point.carla:
+                continue
+            d = math.hypot(point.carla["x"] - here.x, point.carla["y"] - here.y)
+            if d < best_d:
+                best, best_d = name, d
+        return best
 
     def assist_media(self, case_id: str) -> list[Media]:
         """The seconds before the stop, as an ordered run of frames.
@@ -952,7 +1375,7 @@ class CarlaDrivingSystem:
 
     async def _check_blocked(self, v: _Vehicle) -> bool:
         """Raise assist.request once the agent has stalled mid-mission behind something."""
-        if not self.auto_assist or v.assist_case or v.routine_queue:
+        if not self.auto_assist or v.assist_case or v.routine_queue or v.waiting_case:
             return False
         velocity = v.actor.get_velocity()
         speed_kmh = 3.6 * (velocity.x ** 2 + velocity.y ** 2 + velocity.z ** 2) ** 0.5
@@ -977,13 +1400,251 @@ class CarlaDrivingSystem:
         what = {"walker": "a person", "vehicle": "a vehicle", "static": "an object"}.get(
             kind, "an object")
         case_id = f"AC-{v.vin}-{v.assists_raised + 1}"
+        v.assist_obstacle = (obstacle.id, obstacle.get_location())
         await self.raise_assist(
             v.vin, case_id,
             f"unknown object in lane: {what} ({obstacle.type_id}) {distance:.1f} m ahead",
-            self.assist_options,
+            self._executable_options(v, v.assist_obstacle[1]),
         )
         v.stalled_s = 0.0
         return True
+
+    # ---------- flow 2: the car does what was chosen ----------
+
+    def _actors(self) -> list:
+        """The world's actors, fetched once per simulated tick: _object_in_path runs every tick."""
+        cached = getattr(self, "_actors_cache", None)
+        if cached is None or cached[0] != self._simulated_s:
+            cached = self._actors_cache = (self._simulated_s, list(self.world.get_actors()))
+        return cached[1]
+
+    def _object_in_path(self, v: _Vehicle):
+        """A prop or a person in the car's path within its stopping distance: (actor, metres ahead).
+
+        Vehicles are left to BehaviorAgent, which already queues behind them. The object a detour
+        is driving round is not in the way of that detour.
+        """
+        velocity = v.actor.get_velocity()
+        speed = math.hypot(velocity.x, velocity.y)
+        stop_m = OBJECT_STOP_M + speed * speed / (2 * OBJECT_DECEL_MS2)
+        here = v.actor.get_transform()
+        forward = here.get_forward_vector()
+        ignore = v.detour.get("obstacle_id") if v.detour else None
+        best = None
+        for actor in self._actors():
+            if actor.id in (v.actor.id, ignore) or not actor.type_id.startswith(("walker.", "static.prop")):
+                continue
+            offset = actor.get_location() - here.location
+            ahead = offset.x * forward.x + offset.y * forward.y
+            if ahead <= 0 or ahead > stop_m:
+                continue
+            if abs(offset.x * -forward.y + offset.y * forward.x) > OBJECT_LATERAL_M:
+                continue
+            if best is None or ahead < best[1]:
+                best = (actor, ahead)
+        return best
+
+    def _executable_options(self, v: _Vehicle, obstacle_location) -> list[str]:
+        """The options this car can be given where it stands. Waiting always; a pass or a reroute
+        only where there is a lane to drive it in and room past the object before the next stop.
+        The desk only chooses among what it is offered, so nothing it chooses is undrivable."""
+        out = []
+        for option in self.assist_options:
+            if option in ("pass_left_3kmh", "reroute_lane_c"):
+                plan, why = self._detour_plan(v, obstacle_location, option)
+                if plan is None:
+                    log.info("%s not offered to %s: %s", option, v.vin, why)
+                    continue
+            out.append(option)
+        return out
+
+    def _detour_plan(self, v: _Vehicle, obstacle_location, option: str):
+        """BehaviorAgent's plan round an object, as (plan, details), or (None, why it cannot be).
+
+        Into the next lane in the same direction, along it past the object, back into the car's own
+        lane, then the agent's own route to the next stop. Assumes the stretch is straight, as the
+        plant's lanes past the test track are; anything else is not offered.
+        """
+        if RoadOption is None or obstacle_location is None or not v.remaining:
+            return None, "nothing to plan round"
+        world_map = getattr(self, "_driving_map", None)
+        if world_map is None:
+            world_map = self._driving_map = self.world.get_map()
+        driving = carla.LaneType.Driving
+        here = v.actor.get_transform()
+        own = world_map.get_waypoint(here.location, project_to_road=True, lane_type=driving)
+        if own is None:
+            return None, "the car is not on a driving lane"
+
+        def same_way(wp) -> bool:
+            return (wp is not None and wp.lane_type == driving and wp.road_id == own.road_id
+                    and wp.lane_id * own.lane_id > 0)
+
+        left, right = own.get_left_lane(), own.get_right_lane()
+        if option == "pass_left_3kmh":
+            if not same_way(left):
+                return None, "no lane to the left in the same direction"
+            side, change, back, kmh = left, RoadOption.CHANGELANELEFT, RoadOption.CHANGELANERIGHT, PASS_KMH
+        else:
+            spec = self.map.points.get("lane_c")
+            if spec is None or not spec.carla:
+                return None, "lane C is not on this map"
+            lane_c = world_map.get_waypoint(self.transform("lane_c").location, project_to_road=True,
+                                            lane_type=driving)
+            kmh = v.mission.max_speed_kmh if v.mission else PASS_KMH
+            if same_way(left) and lane_c is not None and (lane_c.road_id, lane_c.lane_id) == (left.road_id, left.lane_id):
+                side, change, back = left, RoadOption.CHANGELANELEFT, RoadOption.CHANGELANERIGHT
+            elif same_way(right) and lane_c is not None and (lane_c.road_id, lane_c.lane_id) == (right.road_id, right.lane_id):
+                side, change, back = right, RoadOption.CHANGELANERIGHT, RoadOption.CHANGELANELEFT
+            else:
+                return None, "lane C is not beside the car's lane"
+
+        forward = here.get_forward_vector()
+
+        def along(loc) -> float:
+            return (loc.x - here.location.x) * forward.x + (loc.y - here.location.y) * forward.y
+
+        obstacle_at = along(obstacle_location)
+        destination = self._destination_location(v.remaining[0])
+        dest_wp = world_map.get_waypoint(destination, project_to_road=True, lane_type=driving)
+        on_this_lane = dest_wp is not None and (dest_wp.road_id, dest_wp.lane_id) == (own.road_id, own.lane_id)
+        dest_at = along(destination) if on_this_lane else math.inf
+        turn_back = obstacle_at + PASS_CLEAR_M
+        if turn_back + LANE_CHANGE_M + REJOIN_BEFORE_STOP_M > dest_at:
+            return None, (f"{v.remaining[0]} is {dest_at - obstacle_at:.0f} m past the object, "
+                          "too close to get back into the lane")
+        if option == "reroute_lane_c" and math.isfinite(dest_at):
+            # stay in lane C to just before the stop, and be back in lane before BehaviorAgent
+            # counts itself arrived (3-4 m out)
+            turn_back = max(turn_back, dest_at - LANE_CHANGE_M - REJOIN_BEFORE_STOP_M)
+        rejoin_at = turn_back + LANE_CHANGE_M
+
+        plan = [(own, RoadOption.LANEFOLLOW)]
+        s = LANE_CHANGE_M
+        while s <= turn_back:
+            ahead = side.next(s)
+            if not ahead:
+                return None, "the lane ends before the object is passed"
+            plan.append((ahead[0], change if s == LANE_CHANGE_M else RoadOption.LANEFOLLOW))
+            s += 1.0
+        rejoin = own.next(rejoin_at)
+        if not rejoin:
+            return None, "the car's lane ends past the object"
+        plan.append((rejoin[0], back))
+        plan += v.agent.trace_route(rejoin[0], dest_wp)
+        return plan, {
+            "lane": side.lane_id, "own_lane": own.lane_id, "kmh": kmh,
+            "obstacle_at_m": round(obstacle_at, 2), "turn_back_m": round(turn_back, 2),
+            "rejoin_m": round(rejoin_at, 2),
+            "origin": (here.location.x, here.location.y), "forward": (forward.x, forward.y),
+        }
+
+    def _execute_option(self, v: _Vehicle, case_id: str, option: str) -> None:
+        """Turn the chosen option into driving. Results land in assist_outcomes[case_id].
+
+        Waiting is also what happens when the chosen option cannot be driven after all: a car
+        that cannot do what it was told stays where it is.
+        """
+        obstacle_id, obstacle_location = v.assist_obstacle or (None, None)
+        if obstacle_location is None:              # raised by hand (raise_assist), not by a stall
+            found, _distance = self._obstacle_ahead(v)
+            if found is not None:
+                obstacle_id, obstacle_location = found.id, found.get_location()
+        outcome = self.assist_outcomes[case_id] = {
+            "vin": v.vin, "option": option, "chosen_at_s": round(self._simulated_s, 2)}
+        if option in ("pass_left_3kmh", "reroute_lane_c"):
+            plan, details = self._detour_plan(v, obstacle_location, option)
+            if plan is not None:
+                v.agent._behavior.max_speed = details["kmh"]
+                v.agent.set_global_plan(plan, stop_waypoint_creation=True, clean_queue=True)
+                contacts: list[str] = []
+                v.detour = dict(details, case_id=case_id, option=option, obstacle_id=obstacle_id,
+                                obstacle=(obstacle_location.x, obstacle_location.y),
+                                started_s=self._simulated_s, min_centre_m=math.inf, max_kmh=0.0,
+                                max_kmh_alongside=0.0, contacts=contacts,
+                                sensor=self._attach_collision(v, contacts))
+                outcome.update(executed="driving", lane=details["lane"], from_lane=details["own_lane"],
+                               kmh=details["kmh"], obstacle_at_m=details["obstacle_at_m"])
+                log.info("%s %s: into lane %s at %.0f km/h, object %.1f m ahead", v.vin, option,
+                         details["lane"], details["kmh"], details["obstacle_at_m"])
+                return
+            outcome["not_possible"] = details
+            log.warning("%s cannot %s (%s); it waits instead", v.vin, option, details)
+        elif not option.startswith("wait"):
+            outcome["not_possible"] = "unknown option"
+            log.warning("%s was given unknown option %r; it waits instead", v.vin, option)
+        v.waiting_case = case_id
+        outcome["executed"] = "waiting"
+
+    def _lane_cleared(self, v: _Vehicle) -> bool:
+        """For a car told to wait: True, once, when nothing but plant traffic is in front of it."""
+        obstacle, _distance = self._obstacle_ahead(v)
+        if obstacle is not None and not self._is_plant_car(obstacle):
+            return False
+        outcome = self.assist_outcomes.setdefault(v.waiting_case, {"vin": v.vin})
+        waited = self._simulated_s - outcome.get("chosen_at_s", self._simulated_s)
+        outcome.update(executed="waited", resumed_after_s=round(waited, 1))
+        log.info("%s: lane clear after %.1f s, resuming", v.vin, waited)
+        v.waiting_case, v.stalled_s = None, 0.0
+        return True
+
+    def _follow_detour(self, v: _Vehicle) -> None:
+        """Measure a detour as it is driven, and end it once the car is back in its lane."""
+        d = v.detour
+        here = v.actor.get_location()
+        (ox, oy), (fx, fy), (bx, by) = d["origin"], d["forward"], d["obstacle"]
+        along = (here.x - ox) * fx + (here.y - oy) * fy
+        velocity = v.actor.get_velocity()
+        kmh = 3.6 * math.hypot(velocity.x, velocity.y)
+        d["max_kmh"] = max(d["max_kmh"], kmh)
+        d["min_centre_m"] = min(d["min_centre_m"], math.hypot(here.x - bx, here.y - by))
+        if abs(along - d["obstacle_at_m"]) <= 3.0:          # alongside the object
+            d["max_kmh_alongside"] = max(d["max_kmh_alongside"], kmh)
+            lateral = abs((here.x - bx) * -fy + (here.y - by) * fx)
+            d["alongside_lateral_m"] = min(d.get("alongside_lateral_m", math.inf), lateral)
+        if along >= d["rejoin_m"] - 1.0:
+            self._end_detour(v, "back in lane")
+        elif self._simulated_s - d["started_s"] > DETOUR_MAX_S:
+            self._end_detour(v, f"not back in lane after {DETOUR_MAX_S:.0f} s")
+
+    def _end_detour(self, v: _Vehicle, how: str) -> None:
+        d, v.detour = v.detour, None
+        sensor = d.get("sensor")
+        if sensor is not None:
+            try:
+                sensor.stop()
+                sensor.destroy()
+            except Exception as exc:
+                log.warning("could not release the collision sensor on %s: %s", v.vin, exc)
+        if v.mission is not None:
+            v.agent._behavior.max_speed = v.mission.max_speed_kmh
+        outcome = self.assist_outcomes.setdefault(d["case_id"], {"vin": v.vin})
+        outcome.update(
+            executed=d["option"], result=how,
+            duration_s=round(self._simulated_s - d["started_s"], 1),
+            min_centre_distance_m=round(d["min_centre_m"], 2),
+            alongside_lateral_m=(round(d["alongside_lateral_m"], 2)
+                                 if "alongside_lateral_m" in d else None),
+            max_kmh=round(d["max_kmh"], 1), max_kmh_alongside=round(d["max_kmh_alongside"], 1),
+            contacts=sorted(set(d["contacts"])),
+        )
+        log.info("%s %s: %s in %.1f s, %.2f m to the side of the object, %.1f km/h alongside, "
+                 "contacts %s", v.vin, d["option"], how, outcome["duration_s"],
+                 outcome["alongside_lateral_m"] or -1, outcome["max_kmh_alongside"],
+                 outcome["contacts"] or "none")
+
+    def _attach_collision(self, v: _Vehicle, into: list):
+        """A collision sensor for the length of a detour, so 'no contact' is measured, not assumed."""
+        try:
+            bp = self.world.get_blueprint_library().find("sensor.other.collision")
+            if bp.has_attribute("role_name"):
+                bp.set_attribute("role_name", SENSOR_ROLE)
+            sensor = self.world.spawn_actor(bp, carla.Transform(), attach_to=v.actor)
+            sensor.listen(lambda event: into.append(event.other_actor.type_id))
+            return sensor
+        except Exception as exc:
+            log.warning("no collision sensor on %s: %s: %s", v.vin, type(exc).__name__, exc)
+            return None
 
     def _set_lights(self, v: _Vehicle, step: RoutineStep | None) -> None:
         state = carla.VehicleLightState.NONE
@@ -999,20 +1660,192 @@ class CarlaDrivingSystem:
         return INDICATOR_SIDES[int(elapsed / INDICATOR_PERIOD_S) % len(INDICATOR_SIDES)]
 
     async def _routine_step(self, v: _Vehicle) -> None:
-        v.actor.apply_control(carla.VehicleControl(throttle=0.0, brake=1.0))
-        v.step_left_s -= self.fixed_delta_s
-        if v.step_left_s > 0:
-            return
-        step = v.routine_queue.pop(0)
-        # Telemetry is what the car's electronics report: healthy, even for a dark lamp.
+        step = v.routine_queue[0]
+        if step.name in MANOEUVRES or (step.name == "full_lock" and self._room_for_full_lock(v)):
+            telemetry = (self._full_lock(v) if step.name == "full_lock"
+                         else self._manoeuvre(v, step))
+            if telemetry is None:
+                return                          # still driving the step
+            v.routine_queue.pop(0)
+            # The car has moved, so its route to the next point is planned again from here: the
+            # old plan started where the step began, and its first waypoints are now behind it.
+            if v.remaining:
+                self._next_destination(v)
+        else:
+            v.actor.apply_control(carla.VehicleControl(throttle=0.0, brake=1.0))
+            v.step_left_s -= self.fixed_delta_s
+            if v.step_left_s > 0:
+                return
+            v.routine_queue.pop(0)
+            # Telemetry is what the car's electronics report: healthy, even for a dark lamp.
+            telemetry = dict(step.telemetry)
         await emit(self._handlers, TrackStep(
             vin=v.vin, mission_id=v.mission.mission_id, routine=v.mission.routine,
-            step=step.step, name=step.name, telemetry=dict(step.telemetry),
+            step=step.step, name=step.name, telemetry=telemetry,
         ))
         nxt = v.routine_queue[0] if v.routine_queue else None
         self._set_lights(v, nxt)
         if nxt is not None:
             v.step_left_s = nxt.duration_s
+
+    def _room_for_full_lock(self, v: _Vehicle) -> bool:
+        """Whether the car can turn full circles here: the area to its left is paved and empty.
+
+        On the plant world the test track has 20 m of paving inside the loop beside it, and the
+        turn needs about 5.5 m. On Town05 the same circle crosses the other carriageway, so there
+        the step stays as the car reports it (telemetry only), as before.
+        """
+        if not getattr(self, "full_lock_driven", True):
+            return False
+        cached = getattr(self, "_full_lock_room", None)
+        if cached is None:
+            name = self.world.get_map().name
+            cached = self._full_lock_room = name.endswith("OpenDriveMap")
+        if not cached or v.manoeuvre is not None:
+            return cached
+        here = v.actor.get_transform()
+        forward, right = here.get_forward_vector(), here.get_right_vector()
+        for actor in self.world.get_actors():
+            if actor.id == v.actor.id or not actor.type_id.startswith(("vehicle.", "walker.", "static.prop")):
+                continue
+            o = actor.get_location() - here.location
+            ahead, side = o.x * forward.x + o.y * forward.y, o.x * right.x + o.y * right.y
+            if -FULL_LOCK_BEHIND_M <= ahead <= FULL_LOCK_AHEAD_M and -FULL_LOCK_LEFT_M <= side <= 1.5:
+                log.info("%s: %s in the turning area; full lock stays telemetry-only", v.vin, actor.type_id)
+                return False
+        return True
+
+    def _full_lock(self, v: _Vehicle) -> dict | None:
+        """Full lock left, then right, driven: the telemetry when done, else None.
+
+        Both circles lie to the car's left, where the room is: left lock for a quarter turn, right
+        lock for a whole circle, then left lock for the remaining three quarters, which brings the
+        car back to where it started, facing the way it was. That is a full circle at each lock.
+
+        Measured: the inner front wheel's angle at each lock, the turning radius from the distance
+        driven and the angle turned, and where the car ended. The steering-wheel angle the routine
+        checks is the fraction of lock reached times this car's lock-to-centre steering-wheel angle
+        (FULL_LOCK_WHEEL_DEG): the simulation has wheels, not a steering wheel.
+        """
+        t = v.actor.get_transform()
+        here = t.location
+        vel = v.actor.get_velocity()
+        kmh = 3.6 * math.hypot(vel.x, vel.y)
+        m = v.manoeuvre
+        if m is None:
+            m = v.manoeuvre = {"name": "full_lock", "start": (here.x, here.y), "yaw0": t.rotation.yaw,
+                               "last_yaw": t.rotation.yaw, "last": (here.x, here.y), "leg": 0,
+                               "turned": 0.0, "t": 0.0, "dist": {-1: 0.0, 1: 0.0},
+                               "deg": {-1: 0.0, 1: 0.0}, "wheel": {-1: 0.0, 1: 0.0}}
+        m["t"] += self.fixed_delta_s
+        timed_out = m["t"] > FULL_LOCK_MAX_S
+        if m["leg"] < len(FULL_LOCK_LEGS) and not timed_out:
+            steer, degrees = FULL_LOCK_LEGS[m["leg"]]
+            ahead, gap = self._obstacle_ahead(v)
+            if ahead is not None and gap < 4.0:
+                v.actor.apply_control(carla.VehicleControl(throttle=0.0, brake=1.0, steer=steer))
+                return None
+            v.actor.apply_control(carla.VehicleControl(
+                throttle=0.35 if kmh < FULL_LOCK_KMH else 0.0, steer=steer))
+            d = (t.rotation.yaw - m["last_yaw"] + 180.0) % 360.0 - 180.0
+            m["last_yaw"] = t.rotation.yaw
+            m["turned"] += abs(d)
+            m["deg"][int(steer)] += abs(d)
+            m["dist"][int(steer)] += math.hypot(here.x - m["last"][0], here.y - m["last"][1])
+            m["last"] = (here.x, here.y)
+            # the inner wheel is at the lock's angle: front left turning left, front right turning right
+            wheel = carla.VehicleWheelLocation.FL_Wheel if steer < 0 else carla.VehicleWheelLocation.FR_Wheel
+            m["wheel"][int(steer)] = max(m["wheel"][int(steer)], abs(v.actor.get_wheel_steer_angle(wheel)))
+            if m["turned"] >= degrees:
+                m["leg"], m["turned"] = m["leg"] + 1, 0.0
+            return None
+        v.actor.apply_control(carla.VehicleControl(throttle=0.0, brake=1.0))
+        if kmh > 0.2 and m["t"] <= FULL_LOCK_MAX_S + 10.0:
+            return None
+        v.manoeuvre = None
+        lock = max((w.max_steer_angle for w in v.actor.get_physics_control().wheels[:2]), default=0.0) or 1.0
+
+        def radius(side: int) -> float:
+            rad = math.radians(m["deg"][side])
+            return round(m["dist"][side] / rad, 2) if rad else 0.0
+
+        sx, sy = m["start"]
+        return {
+            "steering_angle_left_deg": round(FULL_LOCK_WHEEL_DEG * m["wheel"][-1] / lock, 1),
+            "steering_angle_right_deg": round(FULL_LOCK_WHEEL_DEG * m["wheel"][1] / lock, 1),
+            "wheel_angle_left_deg": round(m["wheel"][-1], 1), "wheel_angle_right_deg": round(m["wheel"][1], 1),
+            "turned_left_deg": round(m["deg"][-1]), "turned_right_deg": round(m["deg"][1]),
+            "radius_left_m": radius(-1), "radius_right_m": radius(1),
+            "end_offset_m": round(math.hypot(here.x - sx, here.y - sy), 2),
+            "end_heading_deg": round((t.rotation.yaw - m["yaw0"] + 180.0) % 360.0 - 180.0, 1),
+            "completed": not timed_out,
+        }
+
+    def _manoeuvre(self, v: _Vehicle, step: RoutineStep) -> dict | None:
+        """Drive one routine step and measure it. The telemetry when it is done, else None.
+
+        reverse: back up 3 m in reverse gear, holding the wheel straight, waiting while anything is
+        within REVERSE_CLEARANCE_M behind. Reports the distance travelled and how far it drifted
+        sideways.
+        brake_test: accelerate along the track to 20 km/h, or until the run-up is used up, then
+        brake fully and measure the distance from the moment of braking to standstill.
+        """
+        t = v.actor.get_transform()
+        here, forward = t.location, t.get_forward_vector()
+        vel = v.actor.get_velocity()
+        kmh = 3.6 * math.hypot(vel.x, vel.y)
+        m = v.manoeuvre
+        if m is None:
+            m = v.manoeuvre = {"name": step.name, "start": (here.x, here.y),
+                               "heading": (forward.x, forward.y), "phase": "go", "t": 0.0}
+        m["t"] += self.fixed_delta_s
+        sx, sy = m["start"]
+        hx, hy = m["heading"]
+        along = (here.x - sx) * hx + (here.y - sy) * hy        # signed, along the start heading
+        lateral = abs(-(here.x - sx) * hy + (here.y - sy) * hx)
+        brake = carla.VehicleControl(throttle=0.0, brake=1.0)
+        timed_out = m["t"] > MANOEUVRE_MAX_S
+
+        if step.name == "reverse":
+            if m["phase"] == "go":
+                behind, gap = self._obstacle_ahead(v, backwards=True)
+                if -along >= REVERSE_TARGET_M or timed_out:
+                    m["phase"] = "stop"
+                elif behind is not None and gap < REVERSE_CLEARANCE_M:
+                    v.actor.apply_control(carla.VehicleControl(throttle=0.0, brake=1.0, reverse=True))
+                    return None
+                else:
+                    v.actor.apply_control(carla.VehicleControl(
+                        throttle=0.35 if kmh < 4.0 else 0.0, reverse=True, steer=0.0))
+                    return None
+            v.actor.apply_control(carla.VehicleControl(throttle=0.0, brake=1.0, reverse=True))
+            if kmh > 0.2 and not timed_out:
+                return None
+            v.manoeuvre = None
+            return {"gear": "R", "distance_m": round(-along, 2), "lateral_m": round(lateral, 2),
+                    "reverse_lamp": "ON", "completed": not timed_out}
+
+        # brake_test
+        if m["phase"] == "go":
+            ahead, gap = self._obstacle_ahead(v)
+            if (kmh >= BRAKE_TEST_KMH or along >= BRAKE_TEST_RUN_UP_MAX_M or timed_out
+                    or (ahead is not None and gap < 12.0)):
+                m.update(phase="brake", brake_at=along, start_kmh=kmh,
+                         blocked=ahead is not None and gap < 12.0)
+            else:
+                error = ((math.atan2(hy, hx) - math.atan2(forward.y, forward.x) + math.pi)
+                         % (2 * math.pi) - math.pi)
+                v.actor.apply_control(carla.VehicleControl(
+                    throttle=0.8, steer=max(-0.2, min(0.2, 1.5 * error))))
+                return None
+        v.actor.apply_control(brake)
+        if kmh > 0.2 and m["t"] <= MANOEUVRE_MAX_S + 10.0:
+            return None
+        v.manoeuvre = None
+        return {"start_speed_kmh": round(m["start_kmh"], 1),
+                "stopping_distance_m": round(along - m["brake_at"], 2),
+                "run_up_m": round(m["brake_at"], 2), "lateral_m": round(lateral, 2),
+                "completed": not m["blocked"] and not timed_out}
 
     def capture(self, transform, width: int = 640, height: int = 360) -> bytes:
         """One RGB frame from a reusable camera at a world transform.

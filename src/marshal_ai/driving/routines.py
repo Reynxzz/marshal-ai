@@ -50,11 +50,14 @@ R12 = [
                 ("brake_left", "brake_right", "brake_third"),
                 {"brake_signal": True, "brake_lamps": "ON"}),
     RoutineStep(4, "reverse", "Reverse 3 m",
-                # The car does not actually roll back: it is held stationary for the length of a
-                # step, so asking the camera to see 3 m of movement failed a healthy car. What
-                # CARLA does demonstrate is the reverse lamp, and that is what is asked for.
+                # On CARLA the car really backs up 3 m and the distance and drift are measured
+                # (carla_backend._manoeuvre). The camera rides on the car, so it cannot see the
+                # movement; it is asked about the reverse lamp, which it can.
                 "The reverse lamp is lit, white, at the back of the car", ("reverse",),
                 {"gear": "R", "distance_m": 3.0, "reverse_lamp": "ON"}, 10.0),
+    # On CARLA the car accelerates to 20 km/h and brakes, and the stopping distance is measured.
+    # The camera still cannot judge it - the track has no marked zone to stop in - so it rests on
+    # measured telemetry rather than reported.
     RoutineStep(5, "brake_test", "Brake test from 20 km/h",
                 "Car stops in a straight line within the marked 5 m zone", (),
                 {"start_speed_kmh": 20.0, "stopping_distance_m": 3.4}, 12.0,
@@ -72,8 +75,11 @@ TELEMETRY_CHECKS = {
     "headlights": lambda t: t.get("headlights") == "ON",
     "indicators": lambda t: t.get("indicator_left") == "BLINK" and t.get("indicator_right") == "BLINK",
     "brake_lights": lambda t: t.get("brake_signal") is True and t.get("brake_lamps") == "ON",
-    "reverse": lambda t: t.get("gear") == "R" and abs(t.get("distance_m", 0) - 3.0) <= 0.5,
-    "brake_test": lambda t: t.get("stopping_distance_m", 99) <= 5.0,
+    "reverse": lambda t: (t.get("gear") == "R" and abs(t.get("distance_m", 0) - 3.0) <= 0.5
+                          and t.get("lateral_m", 0) <= 0.5),           # "moves back straight"
+    # From at least 18 km/h, so a test that never got up to speed cannot pass by stopping short.
+    "brake_test": lambda t: (t.get("stopping_distance_m", 99) <= 5.0
+                             and t.get("start_speed_kmh", 0) >= 18.0),
     "full_lock": lambda t: min(t.get("steering_angle_left_deg", 0), t.get("steering_angle_right_deg", 0)) >= 500,
 }
 

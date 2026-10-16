@@ -46,9 +46,7 @@ async def run(args: argparse.Namespace) -> dict:
     if not current_map.endswith(("Town05", "Town05_Opt", "OpenDriveMap")):
         raise RuntimeError(f"server must be on Town05, currently {current_map}")
 
-    for actor in driving.world.get_actors().filter("vehicle.*"):
-        if actor.attributes.get("role_name") == args.vin:
-            actor.destroy()
+    driving.despawn(args.vin)                # with its cameras, if an earlier run left it
 
     bus = InMemoryBus()
     missions = MissionClient(driving, plant_map, bus)
@@ -87,8 +85,10 @@ async def run(args: argparse.Namespace) -> dict:
         await asyncio.wait_for(done.wait(), timeout=args.timeout)
     finally:
         await driving.stop()
-        for vehicle in list(driving.vehicles.values()):
-            vehicle.actor.destroy()
+        # despawn, not actor.destroy(): CARLA keeps a destroyed car's cameras streaming to a client
+        # that has gone, which floods the server with "Invalid session" and preceded its crashes.
+        for vin in list(driving.vehicles):
+            driving.despawn(vin)
 
     if result is None:
         raise RuntimeError("mission ended without mission.done")

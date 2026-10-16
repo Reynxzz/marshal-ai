@@ -101,6 +101,9 @@ class ChecklistItem(BaseModel):
     # leaving a bare true/false behind. A verdict nobody can read the reasoning for is a verdict
     # nobody can check, and it is the reasoning that makes a second source worth having.
     observation: str | None = None
+    # What the car reported for the step. On CARLA the reverse and brake test are driven and
+    # measured, so this is where "stopped in 2.1 m from 20 km/h" lives; a pass/fail alone hides it.
+    telemetry: dict | None = None
     clip_uri: str | None = None
     # False when the simulation does not perform this step, so no camera could confirm it and the
     # step rests on telemetry alone. Kept on the record because a report that says PASS should be

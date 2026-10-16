@@ -161,6 +161,8 @@ class FunctionalChecker:
         if run is None:
             return None
         items = await asyncio.gather(*(self._judge(run, s) for s in run.steps))
+        items = [i.model_copy(update={"telemetry": dict(r.telemetry)})
+                 if (r := run.reported.get(i.step)) is not None else i for i in items]
         self._last_clips[run.vin] = dict(run.clips)
         return await self._record(run.vin, list(items))
 

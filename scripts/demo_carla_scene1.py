@@ -312,7 +312,7 @@ async def phase_track(rt, app, args) -> dict:
               "checklist": [{"name": i.name, "telemetry_ok": i.telemetry_ok,
                              "camera_ok": i.camera_ok, "passed": i.passed,
                              "camera_confidence": round(i.camera_confidence or 0, 2),
-                             "clip_uri": i.clip_uri}
+                             "telemetry": i.telemetry, "clip_uri": i.clip_uri}
                             for i in result.checklist]})
         # Keep the frames the verdict was based on. A camera check that disagrees with telemetry
         # is only worth acting on if the frame can be looked at.

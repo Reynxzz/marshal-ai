@@ -179,6 +179,27 @@ async def test_a_re_slot_into_a_taken_slot_waits_for_that_car_to_move_out(plant)
     assert car(app, "VIN-231").location == near[0]
 
 
+async def test_a_swap_inside_a_bigger_re_slot_goes_through_a_free_slot(plant):
+    """P1 to P2's slot and P2 to P1's, with P3 moving too: each waited for the other for good."""
+    from marshal_ai.flows.yard import YardAction, YardPlan
+    app = plant(["VIN-214", "VIN-231", "VIN-240"])
+    near = app.yard.slots_by_distance()
+    await park(app, "VIN-214", near[0])
+    await park(app, "VIN-231", near[1])
+    await park(app, "VIN-240", near[2])
+    plan = YardPlan(summary="swap", reasoning="next truck first", actions=[
+        YardAction(vin="VIN-214", action="go", waypoints=[near[1]], reason="late truck"),
+        YardAction(vin="VIN-231", action="go", waypoints=[near[0]], reason="next truck"),
+        YardAction(vin="VIN-240", action="go", waypoints=[near[3]], reason="late truck")])
+    await app.yard.execute(plan)
+    first_stop = car(app, "VIN-214").yard_slot
+    assert first_stop not in (near[0], near[1], near[2], near[3]), "it waits in a free slot"
+    await app.run_for(300)
+    assert car(app, "VIN-214").location == near[1]
+    assert car(app, "VIN-231").location == near[0]
+    assert car(app, "VIN-240").location == near[3]
+
+
 async def test_a_plan_sending_uninspected_cars_to_shipping_slots_is_rejected(plant):
     from marshal_ai.flows.yard import YardAction, YardPlan
     app = plant(["VIN-214"])

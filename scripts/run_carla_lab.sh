@@ -67,6 +67,8 @@ if [[ -n "$RELEASE" ]]; then
   args+=(--release "$RELEASE")
 fi
 
+# MARSHAL_LAB_PORTS=2000,2010: run in parallel, one run per server (scripts/carla_pool.sh up 1)
+[[ -n "${MARSHAL_LAB_PORTS:-}" ]] && args+=(--ports "$MARSHAL_LAB_PORTS")
 python3 scripts/demo_carla_lab.py "${args[@]}"
 
 test -s "$OUTPUT/manifest.json"

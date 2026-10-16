@@ -138,9 +138,7 @@ def _new_driving(args: argparse.Namespace) -> CarlaDrivingSystem:
     )
     if not driving.world.get_map().name.endswith(("Town05", "Town05_Opt", "OpenDriveMap")):
         raise RuntimeError(f"Day 2 demo requires Town05, got {driving.world.get_map().name}")
-    for actor in driving.world.get_actors().filter("vehicle.*"):
-        if actor.attributes.get("role_name") == args.vin:
-            actor.destroy()
+    driving.despawn(args.vin)                # with its cameras, if an earlier run left it
     return driving
 
 
@@ -153,8 +151,10 @@ def _gate_transform(driving: CarlaDrivingSystem, view: str):
 
 
 def _destroy_vehicles(driving: CarlaDrivingSystem) -> None:
-    for vehicle in list(driving.vehicles.values()):
-        vehicle.actor.destroy()
+    # despawn, not actor.destroy(): CARLA keeps a destroyed car's cameras streaming to a client
+    # that has gone, which floods the server with "Invalid session" and preceded its crashes.
+    for vin in list(driving.vehicles):
+        driving.despawn(vin)
 
 
 def _write_combined_manifest(output: Path) -> None:
