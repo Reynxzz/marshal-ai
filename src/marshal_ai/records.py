@@ -51,6 +51,8 @@ class Car(BaseModel):
     location: str = "line_end"                         # plant map point
     mission_id: str | None = None
     yard_slot: str | None = None
+    route: list[str] = Field(default_factory=list)     # map points of the current drive, when chosen
+    route_by: str | None = None                        # "gemini" or "rules" (the shortest way)
     do_not_ship: bool = False
     flags: list[str] = Field(default_factory=list)     # e.g. "untested", "rework_waiting"
     released_at: datetime | None = None

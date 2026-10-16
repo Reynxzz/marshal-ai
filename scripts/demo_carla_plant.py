@@ -86,6 +86,10 @@ def parser() -> argparse.ArgumentParser:
                     help="once every car is parked, delay this truck by MIN minutes: the yard rules "
                          "do not cover it, so Gemini re-plans the slots, a supervisor approves, and "
                          "the cars drive to their new slots (flow 1's exception)")
+    ap.add_argument("--hazard", action="append", default=[], metavar="PLACE:WHAT",
+                    help="report a hazard at a zone or map point, e.g. 'finishing_corner:forklift "
+                         "unloading pallets': cars bound for the yard then ask Gemini which way to take "
+                         "(flows/route.py). Repeatable.")
     ap.add_argument("--no-supervisor", action="store_true",
                     help="leave reviews and rework proposals pending; cars wait where they are")
     return ap
@@ -132,7 +136,8 @@ def clear_records(rt, vins: list[str], prefix: str | None = None) -> None:
 class Watch:
     """Reports each car's progress, and measures what "several cars at once" amounts to."""
 
-    def __init__(self, rt, vins: list[str]):
+    def __init__(self, rt, vins: list[str], app=None):
+        self.app = app                     # for the yard's route log (narrate)
         self.rt, self.vins = rt, vins
         self.last: dict[str, tuple] = {}
         self.released_at: dict[str, float] = {}
@@ -208,6 +213,12 @@ class Watch:
                 note(world, f"{vin} passed; slot {slot}. Its truck {truck} loads "
                             f"{'next, so a slot nearest the loading bay' if first else 'later, so a slot farther from the bay'}",
                      "rules")
+        if slot and slot != was_slot and car.route_by == "gemini" and self.app is not None:
+            record = next((r for r in reversed(self.app.yard.route_log) if r["vin"] == vin), None)
+            if record is not None:
+                why = "; ".join(h for w in record["ways"] for h in w["hazards"] + w["stopped"]) or "traffic"
+                note(world, f"{vin} to {slot} {record['choice']} ({record['probs'][record['choice']]:.2f}): {why}",
+                     "gemini")
         if state is CarState.REWORK and was_state is not CarState.REWORK:
             note(world, f"{vin} booked into rework", "gemini")
 
@@ -271,6 +282,8 @@ async def supervise(app, rt) -> None:
 async def run(args) -> dict:
     rt = build_runtime(Settings(driving="carla", llm="gemini"), host=args.host, port=args.port)
     app = MarshalApp(rt)
+    # MARSHAL_PARKING=gemini: Gemini parks each car in its slot; its choices go in the film's feed
+    rt.driving.park_note = lambda text: note(rt.driving.world, text, "gemini")
     if type(rt.llm).__name__ != "GeminiLLM":
         raise RuntimeError(f"expected GeminiLLM, got {type(rt.llm).__name__}")
 
@@ -287,6 +300,11 @@ async def run(args) -> dict:
     for i, vin in enumerate(vins):
         rt.store.put(Car(vin=vin, state=CarState.LINE_END, location="line_end",
                          build_sheet=BuildSheet(**BUILD, truck_id=trucks[i % len(trucks)])))
+
+    for spec in args.hazard:
+        place, what = spec.split(":", 1)
+        rt.plant.hazards[place.strip()] = what.strip()
+        note(rt.driving.world, f"Reported at {place.strip()}: {what.strip()}", "plant")
 
     # The routine each car runs, when the router does not say otherwise.
     steps = parse_steps(args.steps)
@@ -316,7 +334,7 @@ async def run(args) -> dict:
           "wrong_colour": wrong,
           "cameras": len(rt.driving._cameras) + 3 * len(vins)})
 
-    watch = Watch(rt, vins)
+    watch = Watch(rt, vins, app)
     late = None
     if args.late_truck:
         truck_id, minutes = args.late_truck.split(":")

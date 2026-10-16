@@ -6,6 +6,9 @@
 #   MARSHAL_PLANT_CARS=4 MARSHAL_PLANT_STEPS=1,3 bash scripts/run_carla_plant.sh
 #   MARSHAL_PLANT_CARS=6 MARSHAL_PLANT_TRUCKS=T-1:20,T-2:45 MARSHAL_PLANT_LATE_TRUCK=T-1:40 \
 #     bash scripts/run_carla_plant.sh                   # flow 1 in full, with the late truck
+#   MARSHAL_PARKING=gemini bash scripts/run_carla_plant.sh   # Gemini parks each car (driving/parking.py)
+#   MARSHAL_PLANT_HAZARD="finishing_corner:forklift unloading pallets" bash scripts/run_carla_plant.sh
+#                                                       # Gemini routes cars along lane C instead
 set -Eeuo pipefail
 
 readonly APP_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -67,4 +70,6 @@ extra=()
 [[ -n "${MARSHAL_PLANT_TRUCKS:-}" ]] && extra+=(--trucks "$MARSHAL_PLANT_TRUCKS")
 [[ -n "${MARSHAL_PLANT_LATE_TRUCK:-}" ]] && extra+=(--late-truck "$MARSHAL_PLANT_LATE_TRUCK")
 [[ -n "${MARSHAL_PLANT_TIMEOUT:-}" ]] && extra+=(--timeout "$MARSHAL_PLANT_TIMEOUT")
+# MARSHAL_PLANT_HAZARD="finishing_corner:forklift unloading pallets": Gemini routes cars around it
+[[ -n "${MARSHAL_PLANT_HAZARD:-}" ]] && extra+=(--hazard "$MARSHAL_PLANT_HAZARD")
 python3 scripts/demo_carla_plant.py --cars "$CARS" --steps "$STEPS" --wrong-colour "$WRONG" "${extra[@]}"
