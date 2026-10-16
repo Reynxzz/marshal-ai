@@ -247,6 +247,15 @@ REVERSE_CLEARANCE_M = 4.0          # reverse no further while anything is closer
 BRAKE_TEST_KMH = 20.0
 BRAKE_TEST_RUN_UP_MAX_M = 12.0     # brake here even if 20 km/h was not reached; reported as such
 MANOEUVRE_MAX_S = 25.0
+# The full-lock step, driven where there is room (_room_for_full_lock): (steer, degrees) legs, both
+# circles to the car's left (CARLA steers left for negative values).
+FULL_LOCK_LEGS = ((-1.0, 90.0), (1.0, 360.0), (-1.0, 270.0))
+FULL_LOCK_KMH = 5.0
+FULL_LOCK_MAX_S = 90.0
+FULL_LOCK_WHEEL_DEG = 540.0        # this car's steering wheel at lock, from centre (routines.py R-12)
+# the area the two circles sweep, around the start (measured on the plant world: 3.8 m back, 4.8 m
+# ahead, 5.2 m to the left), with a margin
+FULL_LOCK_BEHIND_M, FULL_LOCK_AHEAD_M, FULL_LOCK_LEFT_M = 6.0, 8.0, 7.5
 STOP_TOLERANCE_M = 0.4
 CREEP_MAX_S = 30.0                 # give up creeping after this long, rather than wait forever
 SHOULDER_MOVE_MAX_S = 60.0         # a slot-to-slot move along the shoulder, at creep speed
@@ -1652,8 +1661,9 @@ class CarlaDrivingSystem:
 
     async def _routine_step(self, v: _Vehicle) -> None:
         step = v.routine_queue[0]
-        if step.name in MANOEUVRES:
-            telemetry = self._manoeuvre(v, step)
+        if step.name in MANOEUVRES or (step.name == "full_lock" and self._room_for_full_lock(v)):
+            telemetry = (self._full_lock(v) if step.name == "full_lock"
+                         else self._manoeuvre(v, step))
             if telemetry is None:
                 return                          # still driving the step
             v.routine_queue.pop(0)
@@ -1677,6 +1687,99 @@ class CarlaDrivingSystem:
         self._set_lights(v, nxt)
         if nxt is not None:
             v.step_left_s = nxt.duration_s
+
+    def _room_for_full_lock(self, v: _Vehicle) -> bool:
+        """Whether the car can turn full circles here: the area to its left is paved and empty.
+
+        On the plant world the test track has 20 m of paving inside the loop beside it, and the
+        turn needs about 5.5 m. On Town05 the same circle crosses the other carriageway, so there
+        the step stays as the car reports it (telemetry only), as before.
+        """
+        if not getattr(self, "full_lock_driven", True):
+            return False
+        cached = getattr(self, "_full_lock_room", None)
+        if cached is None:
+            name = self.world.get_map().name
+            cached = self._full_lock_room = name.endswith("OpenDriveMap")
+        if not cached or v.manoeuvre is not None:
+            return cached
+        here = v.actor.get_transform()
+        forward, right = here.get_forward_vector(), here.get_right_vector()
+        for actor in self.world.get_actors():
+            if actor.id == v.actor.id or not actor.type_id.startswith(("vehicle.", "walker.", "static.prop")):
+                continue
+            o = actor.get_location() - here.location
+            ahead, side = o.x * forward.x + o.y * forward.y, o.x * right.x + o.y * right.y
+            if -FULL_LOCK_BEHIND_M <= ahead <= FULL_LOCK_AHEAD_M and -FULL_LOCK_LEFT_M <= side <= 1.5:
+                log.info("%s: %s in the turning area; full lock stays telemetry-only", v.vin, actor.type_id)
+                return False
+        return True
+
+    def _full_lock(self, v: _Vehicle) -> dict | None:
+        """Full lock left, then right, driven: the telemetry when done, else None.
+
+        Both circles lie to the car's left, where the room is: left lock for a quarter turn, right
+        lock for a whole circle, then left lock for the remaining three quarters, which brings the
+        car back to where it started, facing the way it was. That is a full circle at each lock.
+
+        Measured: the inner front wheel's angle at each lock, the turning radius from the distance
+        driven and the angle turned, and where the car ended. The steering-wheel angle the routine
+        checks is the fraction of lock reached times this car's lock-to-centre steering-wheel angle
+        (FULL_LOCK_WHEEL_DEG): the simulation has wheels, not a steering wheel.
+        """
+        t = v.actor.get_transform()
+        here = t.location
+        vel = v.actor.get_velocity()
+        kmh = 3.6 * math.hypot(vel.x, vel.y)
+        m = v.manoeuvre
+        if m is None:
+            m = v.manoeuvre = {"name": "full_lock", "start": (here.x, here.y), "yaw0": t.rotation.yaw,
+                               "last_yaw": t.rotation.yaw, "last": (here.x, here.y), "leg": 0,
+                               "turned": 0.0, "t": 0.0, "dist": {-1: 0.0, 1: 0.0},
+                               "deg": {-1: 0.0, 1: 0.0}, "wheel": {-1: 0.0, 1: 0.0}}
+        m["t"] += self.fixed_delta_s
+        timed_out = m["t"] > FULL_LOCK_MAX_S
+        if m["leg"] < len(FULL_LOCK_LEGS) and not timed_out:
+            steer, degrees = FULL_LOCK_LEGS[m["leg"]]
+            ahead, gap = self._obstacle_ahead(v)
+            if ahead is not None and gap < 4.0:
+                v.actor.apply_control(carla.VehicleControl(throttle=0.0, brake=1.0, steer=steer))
+                return None
+            v.actor.apply_control(carla.VehicleControl(
+                throttle=0.35 if kmh < FULL_LOCK_KMH else 0.0, steer=steer))
+            d = (t.rotation.yaw - m["last_yaw"] + 180.0) % 360.0 - 180.0
+            m["last_yaw"] = t.rotation.yaw
+            m["turned"] += abs(d)
+            m["deg"][int(steer)] += abs(d)
+            m["dist"][int(steer)] += math.hypot(here.x - m["last"][0], here.y - m["last"][1])
+            m["last"] = (here.x, here.y)
+            # the inner wheel is at the lock's angle: front left turning left, front right turning right
+            wheel = carla.VehicleWheelLocation.FL_Wheel if steer < 0 else carla.VehicleWheelLocation.FR_Wheel
+            m["wheel"][int(steer)] = max(m["wheel"][int(steer)], abs(v.actor.get_wheel_steer_angle(wheel)))
+            if m["turned"] >= degrees:
+                m["leg"], m["turned"] = m["leg"] + 1, 0.0
+            return None
+        v.actor.apply_control(carla.VehicleControl(throttle=0.0, brake=1.0))
+        if kmh > 0.2 and m["t"] <= FULL_LOCK_MAX_S + 10.0:
+            return None
+        v.manoeuvre = None
+        lock = max((w.max_steer_angle for w in v.actor.get_physics_control().wheels[:2]), default=0.0) or 1.0
+
+        def radius(side: int) -> float:
+            rad = math.radians(m["deg"][side])
+            return round(m["dist"][side] / rad, 2) if rad else 0.0
+
+        sx, sy = m["start"]
+        return {
+            "steering_angle_left_deg": round(FULL_LOCK_WHEEL_DEG * m["wheel"][-1] / lock, 1),
+            "steering_angle_right_deg": round(FULL_LOCK_WHEEL_DEG * m["wheel"][1] / lock, 1),
+            "wheel_angle_left_deg": round(m["wheel"][-1], 1), "wheel_angle_right_deg": round(m["wheel"][1], 1),
+            "turned_left_deg": round(m["deg"][-1]), "turned_right_deg": round(m["deg"][1]),
+            "radius_left_m": radius(-1), "radius_right_m": radius(1),
+            "end_offset_m": round(math.hypot(here.x - sx, here.y - sy), 2),
+            "end_heading_deg": round((t.rotation.yaw - m["yaw0"] + 180.0) % 360.0 - 180.0, 1),
+            "completed": not timed_out,
+        }
 
     def _manoeuvre(self, v: _Vehicle, step: RoutineStep) -> dict | None:
         """Drive one routine step and measure it. The telemetry when it is done, else None.

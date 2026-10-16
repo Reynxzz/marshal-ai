@@ -106,13 +106,20 @@ simulation cannot yet show what the design describes. The target is the design's
   runs the faulty car FAILed (camera "off" at 0.98-1.00, telemetry "on") and was booked into the
   electrical bay, and the healthy car PASSed at 0.96-0.98. So scene 2 can use the brake light
   instead of the headlight, as "dead brake lights" rather than "dead left brake light".
-- [~] **Track steps that actually happen.** (`qais`: reverse and brake test driven and measured; full-lock still telemetry-only) The car is held still during the routine, so reverse
+- [x] **Track steps that actually happen.** (`qais`: reverse, brake test and, on the plant world, full lock driven and measured) The car is held still during the routine, so reverse
   does not move it and the brake test (step 5) and full-lock turn (step 6) are telemetry-only. The
   design puts the brake test in CARLA scope (flow 4, "What is real"): drive it from 20 km/h and
   measure the stopping distance; roll the reverse 3 m.
   *Qais:* done for the reverse (3.02-3.04 m, no drift, 3 runs) and the brake test (from 20.3-22.2
-  km/h, stopped in 2.11-2.34 m). Not done: full lock - a full-lock circle on Town05's road crosses
-  the opposite lanes; it needs an open area, e.g. the plant world's compound.
+  km/h, stopped in 2.11-2.34 m). Full lock, driven on the plant world (`_full_lock`): left lock a
+  quarter turn, right lock a whole circle, left lock the last three quarters. That is a full circle
+  at each lock, both on the 20 m of paving inside the loop beside the track, and the car ends back
+  where it started (1.0 m, 2-5 degrees).
+  - Measured, 3 of 3 runs PASS: inner wheel at lock 69.7 deg left and 69.0 deg right (max 70),
+    turning radius 2.44-2.45 m each way, steering wheel 537.7 / 532.6 deg. The steering-wheel figure
+    is the fraction of lock reached times the car's 540 deg; the simulation has no steering wheel.
+  - Driven only where the area to the left is paved and empty. On Town05 the circle crosses the
+    other carriageway, so there it stays telemetry-only, as before (checked: PASS on 540/540).
   *Rey:* the reverse-lamp camera check said "no" at p=0.63 in 2 of 3 runs, at night, on a frame where
   the lamp is lit (`track/VIN-S1/step4_reverse.jpg`): the brake bar is lit as well, which may be what
   confuses it.
@@ -120,6 +127,9 @@ simulation cannot yet show what the design describes. The target is the design's
   re-inspection of the failed items (design, flow 5).
   *Rey, for review:* runs on the plant world for the lamp fault (electrical bay, back round to the
   gate, step 1 re-run, PASS; film pw-day4). Cars now square up on a slot or bay once they reach it.
+  *Qais, reviewed:* re-run on the plant world after the merge (`MARSHAL_CARLA_MAP=MarshalPlant
+  MARSHAL_DAY4_REWORK=1 run_carla_day4.sh`): booked into the electrical bay, driven there, repaired,
+  back to the gate, step 1 re-run, report PASS. On Town05 too (regression). Fine to tick when you are.
 - [x] **The chosen assistance option executed.** After `assist.choose`, the car does what was chosen
   (wait, pass in the left lane at 3 km/h, reroute), driven by BehaviorAgent (design, flow 2).
   *Qais:* `_execute_option` in `driving/carla_backend.py`. Wait holds the car until nothing but
