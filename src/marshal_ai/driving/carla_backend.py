@@ -255,6 +255,7 @@ PULL_OUT_M = 5.0                   # a car leaving a slot joins the lane this fa
 REVERSE_STEP_M = 3.0               # aim points along the lane when backing down it to a slot
 REVERSE_TURN_IN_M = 7.0            # leave the lane for the slot this far before it
 REVERSE_LANE_MAX_S = 120.0
+BEHIND_REVERSE_MAX_M = 30.0        # a slot up to this far behind a creeping car is reversed onto
 # A pull_over point (plant_map.yaml) is off the driving lanes - a bay or yard slot on the shoulder -
 # and BehaviorAgent only routes on driving lanes. So the car is routed to the lane this far before
 # the spot, then steers onto it. 12 m is enough to move one lane over at walking pace.
@@ -286,6 +287,22 @@ STEP_LIGHTS = {
 # confirm here is that the correct side is lit and that it changes sides. The flash rate itself is
 # not simulated, and stays out of scope as horn and wipers do.
 INDICATOR_SIDES = ("LeftBlinker", "RightBlinker")
+
+
+def forward_only(waypoints: list[str], progress: list[float | None]) -> list[str]:
+    """The stops that make forward progress: see CarlaDrivingSystem._forward_waypoints.
+
+    progress[i] is how far along the car's road stop i is (None: on another road, kept).
+    """
+    last = progress[-1]
+    kept, reached = [], -math.inf
+    for name, p in zip(waypoints[:-1], progress[:-1]):
+        if p is None:
+            kept.append(name)
+        elif p > reached and (last is None or p < last):
+            kept.append(name)
+            reached = p
+    return kept + [waypoints[-1]]
 
 
 def _destroy_quietly(actor) -> None:
@@ -560,7 +577,7 @@ class CarlaDrivingSystem:
             if v.detour:
                 self._end_detour(v, "replaced by a new mission")
             v.waiting_case = None
-            v.mission, v.remaining = command, list(command.waypoints)
+            v.mission, v.remaining = command, self._forward_waypoints(v, list(command.waypoints))
             v.routine_queue, v.routine_done = [], False
             v.agent._behavior.max_speed = command.max_speed_kmh
             self._next_destination(v)
@@ -575,6 +592,41 @@ class CarlaDrivingSystem:
             if v.assist_case == command.case_id:
                 self._execute_option(v, command.case_id, command.option)
                 v.assist_case = None
+
+    def _forward_waypoints(self, v: _Vehicle, waypoints: list[str]) -> list[str]:
+        """Drop the stops of a mission that would send the car backwards along its road.
+
+        The route choice (flows/route.py) sends every point of the way. On Town05 the plant map's
+        way to the yard runs report_point -> ... -> finishing -> yard.entry -> slot, but on the road
+        `finishing` is past `yard.entry` and the slots. Driven in that order the car went down to
+        finishing, could not be routed back up the road, was counted as arrived at yard.Y2 standing
+        40 m past it, and the next car stopped behind it in the lane for good. A stop is kept only
+        if it is further along the car's road than the one before and not past the last; stops on
+        other roads are kept as they are. The last stop is always kept.
+        """
+        if len(waypoints) < 2 or not hasattr(carla, "LaneType"):
+            return waypoints
+        try:
+            world_map = getattr(self, "_driving_map", None)
+            if world_map is None:
+                world_map = self._driving_map = self.world.get_map()
+            driving = carla.LaneType.Driving
+            here = world_map.get_waypoint(v.actor.get_location(), project_to_road=True, lane_type=driving)
+            progress = []
+            for name in waypoints:
+                wp = world_map.get_waypoint(self._destination_location(name), project_to_road=True,
+                                            lane_type=driving)
+                on_road = here is not None and wp is not None and wp.road_id == here.road_id \
+                    and wp.lane_id * here.lane_id > 0
+                progress.append((wp.s - here.s) * (1 if here.lane_id < 0 else -1) if on_road else None)
+        except Exception as exc:                  # never let this stop a mission
+            log.warning("could not order %s's waypoints: %s", v.vin, exc)
+            return waypoints
+        kept = forward_only(waypoints, progress)
+        if kept != waypoints:
+            log.info("%s: %s dropped from %s; they are behind the car's way along the road",
+                     v.vin, [w for w in waypoints if w not in kept], waypoints)
+        return kept
 
     def _precise(self, point: str) -> bool:
         spec = self.map.points[point].carla or {}
@@ -854,6 +906,14 @@ class CarlaDrivingSystem:
         dx, dy = target.x - here.location.x, target.y - here.location.y
         along = dx * forward.x + dy * forward.y
         pulling_over = bool((self.map.points[point].carla or {}).get("pull_over"))
+        if (pulling_over and along <= STOP_TOLERANCE_M and math.hypot(dx, dy) > SETTLE_MAX_M
+                and v.shoulder_move is None and -along <= BEHIND_REVERSE_MAX_M):
+            # The spot is behind the car, not under it. "Rolled past the mark counts as there" is
+            # right for the gate and wrong for a slot: a car still pulling into Y6 when its re-slot
+            # to Y5 came was booked into Y5 at once, standing 13.7 m away. It reverses onto it.
+            log.info("%s: %s is %.1f m behind it; reversing onto it", v.vin, point, -along)
+            v.shoulder_move, v.creep_s = "back", 0.0
+            return False
         v.creep_s += self.fixed_delta_s
         close = math.hypot(dx, dy) <= 1.0
         if along <= STOP_TOLERANCE_M or close or v.creep_s > max_s:
@@ -1257,6 +1317,10 @@ class CarlaDrivingSystem:
         v = self.vehicles[vin]
         v.assist_case = case_id
         v.assists_raised += 1
+        here = getattr(v.actor, "get_location", None)
+        if here is not None:
+            here = here()
+            log.info("%s asks for help (%s) at (%.1f, %.1f): %s", vin, case_id, here.x, here.y, reason)
         v.actor.apply_control(carla.VehicleControl(throttle=0.0, brake=1.0))
         clip = self.assist_clip(v)
         uri = clip_uri or f"gs://marshal/assist/{case_id}.jpg"

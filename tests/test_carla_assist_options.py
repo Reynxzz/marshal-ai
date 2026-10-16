@@ -242,3 +242,28 @@ def test_only_slot_to_slot_moves_use_the_shoulder():
     assert ds._shoulder_move(v, "LANE") is None
     v.location = "LANE"
     assert ds._shoulder_move(v, "S2") is None
+
+
+def test_a_slot_behind_a_creeping_car_is_reversed_onto_not_counted_as_reached(monkeypatch):
+    """A car still pulling into Y6 when its re-slot to Y5 came was booked into Y5 13.7 m away."""
+    ds, v = _slot_backend(car_x=14.0)              # S1 at x=0 is 14 m behind the car
+    ds.fixed_delta_s = 0.05
+    ds.parking_driver = None
+    v.remaining = ["S1"]
+    v.location = "LANE"
+
+    assert ds._creep(v) is False, "not there yet"
+    assert v.shoulder_move == "back"
+
+
+def test_stops_that_send_the_car_back_along_its_road_are_dropped():
+    """Town05: finishing is past yard.entry and the slots; going there first stranded the car."""
+    from marshal_ai.driving.carla_backend import forward_only
+
+    way = ["finishing_corner.p1", "finishing_corner.p2", "finishing_corner.p3", "finishing",
+           "yard.entry", "yard.Y2"]
+    along = [40.0, 61.0, 82.0, 103.0, 62.0, 75.0]
+    assert forward_only(way, along) == ["finishing_corner.p1", "finishing_corner.p2", "yard.entry", "yard.Y2"]
+    # stops on another road are kept; the last stop always is
+    assert forward_only(["a", "b", "c"], [None, 5.0, -2.0]) == ["a", "c"]
+    assert forward_only(["a", "b"], [10.0, 20.0]) == ["a", "b"]

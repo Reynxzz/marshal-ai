@@ -380,9 +380,23 @@ class YardTraffic:
             occupant = held_by.get(slot)
             if occupant and occupant != a.vin and occupant in moving:
                 blocked[a.vin] = occupant
-        if blocked and len(blocked) == len(moving):
-            blocked.pop(next(a.vin for a in plan.actions if a.vin in blocked))
+        self._cycle_breakers = {}
+        for a in plan.actions:                    # in plan order, so the first of a cycle breaks it
+            seen, vin = [], a.vin
+            while vin in blocked and vin not in seen:
+                seen.append(vin)
+                vin = blocked[vin]
+            if vin in seen:                       # a cycle: A to B's slot, B to A's, ...
+                first = next(x.vin for x in plan.actions if x.vin in seen[seen.index(vin):])
+                self._cycle_breakers[first] = blocked.pop(first)
         return blocked
+
+    def free_slot(self, plan: YardPlan) -> str | None:
+        """A yard slot no car holds and this plan sends no car to: a cycle's car waits there."""
+        held = {c.yard_slot for c in self.rt.store.list(Car) if c.yard_slot}
+        wanted = {target_slot(a) for a in plan.actions if a.action == "go"}
+        free = [p for p in self.rt.map.points if p.startswith("yard.Y") and p not in held | wanted]
+        return free[0] if free else None
 
     async def execute(self, plan: YardPlan) -> list[str]:
         done = []
@@ -391,7 +405,20 @@ class YardTraffic:
         blocked = self.blocked_by(plan)
         for a in plan.actions:
             try:
-                if a.action == "go" and a.vin in blocked:
+                if a.action == "go" and a.vin in getattr(self, "_cycle_breakers", {}):
+                    # Every car of a cycle waits for another, so one has to go first, and its slot
+                    # is still taken. Sent straight there it stopped behind that car, and both
+                    # waited until the run timed out. It parks in a free slot; once the car in its
+                    # slot has moved on, it goes there.
+                    occupant, free = self._cycle_breakers[a.vin], self.free_slot(plan)
+                    if free is None:
+                        await self.go(a)
+                    else:
+                        await self.go(a.model_copy(update={"waypoints": [free]}))
+                        self.deferred.setdefault(occupant, []).append(a)
+                        log.info("yard: %s parks in %s until %s leaves %s", a.vin, free, occupant,
+                                 target_slot(a))
+                elif a.action == "go" and a.vin in blocked:
                     self.deferred.setdefault(blocked[a.vin], []).append(a)
                     log.info("yard: %s waits for %s to leave %s", a.vin, blocked[a.vin], target_slot(a))
                 elif a.action == "go":
