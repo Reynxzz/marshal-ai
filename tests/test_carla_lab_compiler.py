@@ -154,3 +154,82 @@ def test_the_runner_stores_each_runs_clip_and_records_its_uri(tmp_path, monkeypa
     monkeypatch.setattr(subprocess, "run", lambda cmd, **kw: SimpleNamespace(
         returncode=0, stdout=json.dumps({"metrics": {}}), stderr=""))
     assert r.run(ScenarioSpec.model_validate(SPEC)).clip_uri is None
+
+
+def test_parallel_runs_each_get_their_own_server(monkeypatch):
+    """Two compiled runs on one server corrupt each other: each run must hold its server alone."""
+    import json
+    import subprocess
+    import threading
+    import time
+    from types import SimpleNamespace
+
+    from marshal_ai.lab import runner as runner_mod
+
+    busy: set[int] = set()
+    used: list[int] = []
+    clash: list[int] = []
+    lock = threading.Lock()
+
+    def fake_run(cmd, **kw):
+        port = int(cmd[cmd.index("--port") + 1])
+        with lock:
+            if port in busy:
+                clash.append(port)
+            busy.add(port)
+            used.append(port)
+        time.sleep(0.05)
+        with lock:
+            busy.discard(port)
+        return SimpleNamespace(returncode=0, stdout=json.dumps({"metrics": {"no_contact": 1.0}}), stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    r = runner_mod.CarlaRunner(load_plant_map(), clips=False, ports=[2010, 2020, 2030])
+    assert r.parallel == 3
+    specs = [ScenarioSpec.model_validate({**SPEC, "id": f"SC-01{i:02d}"}) for i in range(9)]
+
+    outcomes = runner_mod.run_batch(r, specs, parallel=6)      # more workers than servers
+
+    assert clash == [], "a server ran two scenarios at once"
+    assert set(used) == {2010, 2020, 2030} and len(used) == 9
+    assert all(o.error is None for o in outcomes)
+
+
+def test_lab_ports_come_from_the_environment(monkeypatch):
+    from types import SimpleNamespace
+
+    from marshal_ai.lab.runner import make_runner
+
+    monkeypatch.setenv("MARSHAL_LAB_PORTS", "2010, 2020")
+    settings = SimpleNamespace(lab="carla", driving="carla", carla_host="localhost", carla_port=2000,
+                               artifacts="none", gcp_project=None, bucket=None)
+    assert make_runner(settings, load_plant_map()).ports == [2010, 2020]
+    monkeypatch.delenv("MARSHAL_LAB_PORTS")
+    assert make_runner(settings, load_plant_map()).ports == [2000]
+
+
+def test_a_run_that_never_reached_its_server_is_retried_not_judged(monkeypatch):
+    """A busy server is not a failure of the driving system."""
+    import json
+    import subprocess
+    from types import SimpleNamespace
+
+    from marshal_ai.lab import runner as runner_mod
+
+    monkeypatch.setattr(runner_mod, "CONNECT_RETRY_WAIT_S", 0.0)
+    timeout = ('Traceback (most recent call last):\n  File "x.py", line 149, in main\n'
+               '    world = client.get_world()\nRuntimeError: time-out of 20000ms while waiting for the simulator')
+    answers = iter([SimpleNamespace(returncode=1, stdout="", stderr=timeout),
+                    SimpleNamespace(returncode=0, stdout=json.dumps({"metrics": {"no_contact": 1.0}}), stderr="")])
+    monkeypatch.setattr(subprocess, "run", lambda cmd, **kw: next(answers))
+    r = runner_mod.CarlaRunner(load_plant_map(), clips=False, ports=[2010, 2020])
+
+    outcome = r.run(ScenarioSpec.model_validate(SPEC))
+
+    assert outcome.error is None and outcome.metrics == {"no_contact": 1.0}
+
+    # a run that failed after it reached the server is a result, and is not repeated
+    crash = SimpleNamespace(returncode=1, stdout="", stderr="RuntimeError: Spawn failed")
+    calls = []
+    monkeypatch.setattr(subprocess, "run", lambda cmd, **kw: calls.append(cmd) or crash)
+    assert "Spawn failed" in r.run(ScenarioSpec.model_validate(SPEC)).error and len(calls) == 1

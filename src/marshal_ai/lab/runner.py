@@ -10,9 +10,12 @@ which one ran. `with_driver()` gives the same runner for another driving system 
 from __future__ import annotations
 
 import json
+import os
+import queue
 import subprocess
 import sys
 import tempfile
+import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -27,6 +30,15 @@ from marshal_ai.plant import PlantMap
 from marshal_ai.records import TestRun
 
 PARALLEL = 8
+# A run that could not even reach its server never tested anything, so it is tried again rather than
+# judged. With three servers on a 4-vCPU host, 2 of 6 runs timed out in client.get_world() on one of
+# them; judged, a search would have counted a busy server as a failure of the driving system.
+CONNECT_RETRIES, CONNECT_RETRY_WAIT_S = 2, 10.0
+
+
+def _never_connected(outcome: "RunOutcome") -> bool:
+    err = outcome.error or ""
+    return "waiting for the simulator" in err and "client.get_world()" in err
 
 
 @dataclass
@@ -71,14 +83,24 @@ class CarlaRunner:
     Every run is filmed by a chase camera (the design keeps a clip with every test run). The mp4 is
     stored through `artifacts` under gs://marshal/lab/<variant>-<id>.mp4 and its URI recorded on
     the TestRun; `clip_dir` also keeps a local copy. `clips=False` skips the camera.
+
+    `ports` runs on several CARLA servers (scripts/carla_pool.sh): each run borrows a free server
+    and gives it back, so run_batch(..., parallel=len(ports)) keeps every server busy and no two
+    runs ever share one. A compiled run puts its world in synchronous mode and ticks it, and two
+    on one server corrupt each other, so without `ports` there is one server and parallel must be 1.
     """
 
     def __init__(self, plant_map: PlantMap, host: str = "localhost", port: int = 2000,
                  timeout_s: float = 300.0, artifacts=None, clips: bool = True,
-                 clip_dir: str | Path | None = None):
+                 clip_dir: str | Path | None = None, ports: list[int] | None = None):
         self.map = plant_map
-        self.host, self.port, self.timeout_s = host, port, timeout_s
-        self.name = f"carla:{host}:{port}"
+        self.host, self.timeout_s = host, timeout_s
+        self.ports = list(ports) if ports else [port]
+        self.port = self.ports[0]
+        self._free: queue.Queue[int] = queue.Queue()
+        for p in self.ports:
+            self._free.put(p)
+        self.name = f"carla:{host}:{','.join(map(str, self.ports))}"
         self.artifacts = artifacts
         self.clips = clips
         self.clip_dir = Path(clip_dir) if clip_dir else None
@@ -89,19 +111,37 @@ class CarlaRunner:
     def compile(self, spec: ScenarioSpec) -> str:
         return compile_spec(spec, self.map)
 
+    @property
+    def parallel(self) -> int:
+        """How many runs may go at once: one per server."""
+        return len(self.ports)
+
     def run(self, spec: ScenarioSpec) -> RunOutcome:
+        outcome = None
+        for attempt in range(CONNECT_RETRIES + 1):
+            port = self._free.get()              # wait for a server nobody is running on
+            try:
+                outcome = self._run_on(spec, port)
+            finally:
+                self._free.put(port)
+            if not _never_connected(outcome):
+                return outcome
+            time.sleep(CONNECT_RETRY_WAIT_S)
+        return outcome
+
+    def _run_on(self, spec: ScenarioSpec, port: int) -> RunOutcome:
         code = compile_spec(spec, self.map)
         name = f"{spec.id}-{uuid.uuid4().hex[:6]}"
         with tempfile.TemporaryDirectory() as tmp:
             script = Path(tmp) / f"{spec.id}.py"
             script.write_text(code)
             clip = Path(tmp) / f"{name}.mp4"
-            cmd = [sys.executable, str(script), "--host", self.host, "--port", str(self.port)]
+            cmd = [sys.executable, str(script), "--host", self.host, "--port", str(port)]
             if self.clips:
                 cmd += ["--clip", str(clip)]
             proc = subprocess.run(cmd, capture_output=True, text=True, timeout=self.timeout_s)
             if proc.returncode != 0:
-                return RunOutcome(metrics={}, error=proc.stderr[-2000:])
+                return RunOutcome(metrics={}, error=f"on port {port}: {proc.stderr[-2000:]}")
             out = json.loads(proc.stdout.strip().splitlines()[-1])
             clip_uri = self._keep_clip(clip, name) if out.get("clip") else None
         return RunOutcome(out["metrics"], out.get("events", []), out.get("triggered", []),
@@ -140,9 +180,11 @@ def make_runner(settings, plant_map: PlantMap, driver: DriverProfile = DriverPro
     lab = settings.lab or ("carla" if settings.driving == "carla" else "sim")
     if lab == "carla":
         from marshal_ai.artifacts import make_artifacts
+        # MARSHAL_LAB_PORTS=2010,2020,...: run on these servers (scripts/carla_pool.sh) in parallel
+        ports = [int(p) for p in os.getenv("MARSHAL_LAB_PORTS", "").split(",") if p.strip()]
         return CarlaRunner(plant_map, settings.carla_host, settings.carla_port,
                            artifacts=make_artifacts(settings.artifacts, settings.gcp_project,
-                                                    settings.bucket))
+                                                    settings.bucket), ports=ports or None)
     if lab == "sim":
         return SimRunner(plant_map, driver)
     raise ValueError(f"unknown lab backend {lab!r}; use sim or carla")

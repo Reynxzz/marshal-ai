@@ -147,8 +147,29 @@ simulation cannot yet show what the design describes. The target is the design's
 - [ ] **The full search space** (design, flow 7 table): light noon/dusk/night, weather
   clear/rain/fog, occluders none/forklift/parked car/pallet stack, a second actor (car ahead
   braking), worker speed and trigger distance, ego speed, all compiled and runnable.
-- [ ] **8 runs in parallel** for the 60-run budget. Several CARLA servers on the one T4, or one per
+- [~] **8 runs in parallel** for the 60-run budget. Several CARLA servers on the one T4, or one per
   run on more GPUs; measure speed and stability. `run_batch` already runs batches in parallel.
+  *Qais:* runs now spread across several CARLA servers, never two on one.
+  - `scripts/carla_pool.sh up N` starts extra servers on ports 2010, 2020, ... as systemd units,
+    without touching the shared one.
+  - `CarlaRunner(ports=...)`, `--ports` / `MARSHAL_LAB_PORTS`: each run borrows a free server.
+  - A run that never reached its server is retried, not judged.
+
+  Measured on the g4dn.xlarge (`scripts/bench_lab_parallel.py`, 6 filmed runs of SC-0150/SC-0160):
+
+  | Servers | Wall time | Runs/min | Speed-up | Errors | GPU memory |
+  | --- | --- | --- | --- | --- | --- |
+  | 1 | 263 s | 1.37 | 1.0 | 0 | 7.3 GB |
+  | 2 | 174 s | 2.06 | 1.5 | 0 | 7.3 GB |
+  | 3 | 183 s | 1.96 | 1.4 | 0 (2 retried) | 10.0 GB |
+
+  So two servers is the most this host gives. The limit is the 4 vCPUs (load average 11-12 with
+  three) and the 16 GB RAM, not the T4. The first try started three servers at once and the host
+  ran out of memory and had to be rebooted, so servers now start one at a time, only with 5 GB
+  free, each capped at 6 GB, and are killed first. The lab flow on two servers
+  (`MARSHAL_LAB_PORTS=2000,2010 MARSHAL_LAB_ADVERSARIAL=8 run_carla_lab.sh`) ran its search in
+  batches of 2, found SC-0160-v7, and filmed all 10 runs. 8 at once needs about 4 times this host:
+  4 servers per g4dn.4xlarge (16 vCPU, 64 GB) or a g4dn.12xlarge with 4 GPUs. Not tried.
 - [x] **A clip per test run.** The design keeps a clip with every test run and every failure report
   (records table, "Test run"). Record each variant and film the failing one, reusing
   `run_carla_replay.sh`.

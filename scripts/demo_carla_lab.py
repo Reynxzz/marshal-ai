@@ -52,7 +52,10 @@ def parser() -> argparse.ArgumentParser:
                     help="seconds allowed for one CARLA scenario run")
     ap.add_argument("--adversarial", type=int, default=0, metavar="BUDGET",
                     help="also run flow 7 with this run budget (0 = skip)")
-    ap.add_argument("--batch", type=int, default=1,
+    ap.add_argument("--ports", default=None,
+                    help="CARLA servers to run on in parallel, e.g. 2010,2020,2030 "
+                         "(scripts/carla_pool.sh); --batch then defaults to one run per server")
+    ap.add_argument("--batch", type=int, default=None,
                     help="scenarios run concurrently. Keep at 1 for a single CARLA "
                          "server: every compiled run puts the world in synchronous "
                          "mode and ticks it, so concurrent runs corrupt each other. "
@@ -85,10 +88,13 @@ def run(args: argparse.Namespace) -> dict:
     runner = CarlaRunner(rt.map, host=args.host, port=args.port, timeout_s=args.run_timeout,
                          artifacts=make_artifacts(settings.artifacts, settings.gcp_project,
                                                   settings.bucket),
-                         clips=not args.no_clips, clip_dir=out / "clips")
+                         clips=not args.no_clips, clip_dir=out / "clips",
+                         ports=[int(p) for p in args.ports.split(",")] if args.ports else None)
+    if args.batch is None:
+        args.batch = runner.parallel
     app = MarshalApp(rt, runner=runner)
 
-    emit({"type": "lab.start", "runner": runner.name, "llm": settings.llm,
+    emit({"type": "lab.start", "runner": runner.name, "llm": settings.llm, "batch": args.batch,
           "request": args.request})
 
     # ---- flow 6: generate, validate, compile, dry run in CARLA -------------
