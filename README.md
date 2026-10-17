@@ -51,6 +51,23 @@ uv venv --python 3.10 && uv pip install -e ".[dev]"
 To chat with the agents over the running fake plant, copy `.env.example` to `apps/marshal_ops/.env`,
 set Gemini credentials, then `.venv/bin/adk web apps`.
 
+### Control Tower API in live mode (read-only)
+
+The FastAPI service behind `marshal-fe` answers from the seeded SQLite demo by default. With
+`MARSHAL_STORE=gcp` it reads the CARLA run's own records instead: cars, assistance cases,
+proposals, inspections, reports and the test lab come from Firestore, media from the `gs://`
+URIs the records carry, and `/events` streams the live flow events (set `MARSHAL_BUS=gcp` and
+create the subscriptions with `scripts/create_pubsub_topics.py`). Mutating endpoints return 501
+in this mode: the API cannot command the running plant yet.
+
+```
+uv pip install -e ".[gcp,dev]"
+MARSHAL_STORE=gcp MARSHAL_BUS=gcp .venv/bin/uvicorn marshal_api.main:app --port 8000
+```
+
+Run the API as one process (no `--workers`): the event stream and job bookkeeping are
+process-local state.
+
 ## Remote CARLA 0.9.16
 
 The CARLA-dependent process needs the compiled CARLA client and bundled

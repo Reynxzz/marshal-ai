@@ -147,6 +147,7 @@ class FlowEvent(BaseModel):
     title: str
     detail: str
     level: Severity
+    data: dict[str, Any] | None = None      # structured decision payload (choice, probs)
 
 
 class ErrorResponse(BaseModel):

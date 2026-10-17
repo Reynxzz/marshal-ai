@@ -64,6 +64,10 @@ def test_wait_after_returns_empty_on_timeout_so_keepalives_can_be_sent():
     (Topic.TEST_RESULTS, {"variant": "SC-0142-v3", "passed": False,
                           "failed_criteria": ["no_contact"]}, "bad", "FAILED"),
     (Topic.TEST_RESULTS, {"variant": "SC-0142", "passed": True}, "good", "passed"),
+    (Topic.VEHICLE_STATUS, {"type": "route.choice", "vin": "V1", "choice": "via lane_c",
+                            "by": "gemini", "probs": {"via lane_c": 1.0}}, "info", "via lane_c"),
+    (Topic.VEHICLE_STATUS, {"type": "parking.step", "vin": "V1", "slot": "Y4", "choice": "path_A",
+                            "probs": {"path_A": 0.99}}, "good", "path_A"),
 ])
 def test_describe_labels_outcomes(topic, data, level, in_title):
     title, _detail, got_level = describe(topic, data)
@@ -131,6 +135,27 @@ def test_repeated_vehicle_status_is_suppressed_but_changes_get_through():
 
     assert any("inspection_gate" in t for t in titles)
     assert any("arrived" in t for t in titles), "mission.done must never be suppressed"
+
+
+def test_repeated_decisions_are_never_suppressed():
+    """A decision is worth a line every time, even when the same car decides twice in a row."""
+    class FakeBus:
+        def __init__(self):
+            self.handlers: dict[Topic, list] = {}
+
+        def subscribe(self, topic, handler):
+            self.handlers.setdefault(topic, []).append(handler)
+
+    app = type("App", (), {"rt": type("RT", (), {"bus": FakeBus()})()})()
+    events = EventLog()
+    attach(app, events)
+    [handler] = app.rt.bus.handlers[Topic.VEHICLE_STATUS]
+
+    decision = {"type": "route.choice", "vin": "V1", "choice": "via lane_c", "probs": {}}
+    handler(dict(decision))
+    handler(dict(decision))
+
+    assert len(events.since(0)) == 2
 
 
 def test_snapshot_tolerates_a_store_that_cannot_list(monkeypatch):

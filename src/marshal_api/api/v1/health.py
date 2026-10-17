@@ -10,9 +10,12 @@ from pydantic import BaseModel
 from sqlalchemy import text
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from marshal_ai.records import Car
+from marshal_ai.store import Store
+
 from marshal_api.bridge import get_event_bus
 from marshal_api.config import Settings, get_settings
-from marshal_api.core.deps import get_current_actor, get_session
+from marshal_api.core.deps import get_current_actor, get_session, get_store
 from marshal_api.schemas import Actor, Health, Readiness, Role
 from marshal_api.schemas.common import (
     Dependency,
@@ -33,6 +36,14 @@ class DevActorRequest(BaseModel):
 async def _database_ok(session: AsyncSession) -> bool:
     try:
         await session.execute(text("SELECT 1"))
+        return True
+    except Exception:
+        return False
+
+
+async def _store_ok(store: Store) -> bool:
+    try:
+        await asyncio.to_thread(store.list, Car)
         return True
     except Exception:
         return False
@@ -61,22 +72,40 @@ async def healthz() -> Health:
 @router.get("/readyz", response_model=Readiness)
 async def readyz(
     session: AsyncSession = Depends(get_session),
+    store: Store = Depends(get_store),
     settings: Settings = Depends(get_settings),
 ) -> Readiness:
-    database = DependencyStatus.OK if await _database_ok(session) else DependencyStatus.FAILED
-    bus = DependencyStatus.OK if get_event_bus() is not None else DependencyStatus.FAILED
-    carla = (
-        DependencyStatus.OK
-        if await _tcp_ok(settings.carla_host, settings.carla_port)
-        else DependencyStatus.FAILED
+    if settings.store == "gcp":
+        records = (
+            DependencyStatus.OK if await _store_ok(store) else DependencyStatus.FAILED
+        )
+        primary = records
+        dependencies = [Dependency(name="firestore", status=records)]
+    else:
+        database = (
+            DependencyStatus.OK if await _database_ok(session) else DependencyStatus.FAILED
+        )
+        primary = database
+        dependencies = [Dependency(name="database", status=database)]
+    dependencies.append(
+        Dependency(
+            name="event-bus",
+            status=DependencyStatus.OK if get_event_bus() is not None else DependencyStatus.FAILED,
+        )
+    )
+    dependencies.append(
+        Dependency(
+            name="carla",
+            status=(
+                DependencyStatus.OK
+                if await _tcp_ok(settings.carla_host, settings.carla_port)
+                else DependencyStatus.FAILED
+            ),
+        )
     )
     return Readiness(
-        status=ReadinessStatus.READY if database == DependencyStatus.OK else ReadinessStatus.NOT_READY,
-        dependencies=[
-            Dependency(name="database", status=database),
-            Dependency(name="event-bus", status=bus),
-            Dependency(name="carla", status=carla),
-        ],
+        status=ReadinessStatus.READY if primary == DependencyStatus.OK else ReadinessStatus.NOT_READY,
+        dependencies=dependencies,
     )
 
 

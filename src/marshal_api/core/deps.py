@@ -1,4 +1,8 @@
-"""Dependency-injection providers shared by the API routers."""
+"""Dependency-injection providers shared by the API routers.
+
+``MARSHAL_STORE=gcp`` selects the read-only live services (Firestore); the default
+``memory`` keeps the seeded-database demo services unchanged.
+"""
 
 from __future__ import annotations
 
@@ -10,11 +14,26 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from marshal_ai.driving import MissionClient
 from marshal_ai.events import EventBus
 from marshal_ai.plant.state import PlantState
-from marshal_api.bridge import get_event_bus, get_mission_client, get_plant_state
+from marshal_ai.store import Store
+from marshal_api.bridge import (
+    get_event_bus,
+    get_mission_client,
+    get_plant_state,
+    get_store,
+)
 from marshal_api.config import Settings, get_settings
 from marshal_api.core.auth import RequireRole
 from marshal_api.core.idempotency import get_idempotency_key
 from marshal_api.db.session import async_session_maker
+from marshal_api.live import (
+    LiveAssistanceService,
+    LiveAssistIngestService,
+    LiveLabService,
+    LiveMediaService,
+    LiveProposalService,
+    LiveQualityService,
+    LiveYardService,
+)
 from marshal_api.schemas.common import Actor, Role
 from marshal_api.services import (
     AssistIngestService,
@@ -45,6 +64,7 @@ __all__ = [
     "get_quality_service",
     "get_session",
     "get_settings",
+    "get_store",
     "get_yard_service",
 ]
 
@@ -81,54 +101,78 @@ def get_current_actor(
 
 
 def get_yard_service(
+    settings: Settings = Depends(get_settings),
+    store: Store = Depends(get_store),
     session: AsyncSession = Depends(get_session),
-    mission_client: MissionClient = Depends(get_mission_client),
+    mission_client: MissionClient | None = Depends(get_mission_client),
     event_bus: EventBus = Depends(get_event_bus),
     plant_state: PlantState = Depends(get_plant_state),
     tenant_id: str = Depends(get_current_tenant),
-) -> YardService:
+):
+    if settings.store == "gcp":
+        return LiveYardService(store)
     return YardService(session, mission_client, event_bus, plant_state, tenant_id)
 
 
 def get_assistance_service(
+    settings: Settings = Depends(get_settings),
+    store: Store = Depends(get_store),
     session: AsyncSession = Depends(get_session),
-    mission_client: MissionClient = Depends(get_mission_client),
+    mission_client: MissionClient | None = Depends(get_mission_client),
     event_bus: EventBus = Depends(get_event_bus),
     tenant_id: str = Depends(get_current_tenant),
-) -> AssistanceService:
+):
+    if settings.store == "gcp":
+        return LiveAssistanceService(store)
     return AssistanceService(session, mission_client, event_bus, tenant_id)
 
 
 def get_proposal_service(
+    settings: Settings = Depends(get_settings),
+    store: Store = Depends(get_store),
     session: AsyncSession = Depends(get_session),
     event_bus: EventBus = Depends(get_event_bus),
     tenant_id: str = Depends(get_current_tenant),
-) -> ProposalService:
+):
+    if settings.store == "gcp":
+        return LiveProposalService(store)
     return ProposalService(session, event_bus, tenant_id)
 
 
 def get_quality_service(
+    settings: Settings = Depends(get_settings),
+    store: Store = Depends(get_store),
     session: AsyncSession = Depends(get_session),
-    mission_client: MissionClient = Depends(get_mission_client),
+    mission_client: MissionClient | None = Depends(get_mission_client),
     event_bus: EventBus = Depends(get_event_bus),
     plant_state: PlantState = Depends(get_plant_state),
     tenant_id: str = Depends(get_current_tenant),
-) -> QualityService:
+):
+    if settings.store == "gcp":
+        return LiveQualityService(store)
     return QualityService(session, mission_client, event_bus, plant_state, tenant_id)
 
 
 def get_lab_service(
+    settings: Settings = Depends(get_settings),
+    store: Store = Depends(get_store),
     session: AsyncSession = Depends(get_session),
     job_runner: JobRunner = Depends(get_job_runner),
     tenant_id: str = Depends(get_current_tenant),
-) -> LabService:
+):
+    if settings.store == "gcp":
+        return LiveLabService(store)
     return LabService(session, job_runner, tenant_id)
 
 
 def get_media_service(
+    settings: Settings = Depends(get_settings),
+    store: Store = Depends(get_store),
     session: AsyncSession = Depends(get_session),
     tenant_id: str = Depends(get_current_tenant),
-) -> MediaService:
+):
+    if settings.store == "gcp":
+        return LiveMediaService(settings)
     return MediaService(session, tenant_id)
 
 
@@ -140,9 +184,13 @@ def get_llm():
 
 
 def get_assist_ingest_service(
+    settings: Settings = Depends(get_settings),
+    store: Store = Depends(get_store),
     session: AsyncSession = Depends(get_session),
     llm=Depends(get_llm),
     event_bus: EventBus = Depends(get_event_bus),
     tenant_id: str = Depends(get_current_tenant),
-) -> AssistIngestService:
+):
+    if settings.store == "gcp":
+        return LiveAssistIngestService(store)
     return AssistIngestService(session, llm, event_bus, tenant_id)

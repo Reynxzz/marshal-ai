@@ -88,6 +88,7 @@ class AdversarialResult(BaseModel):
     report_id: str | None = None
     media_ids: list[str] = Field(default_factory=list)
     variants: list[VariantRun] = Field(default_factory=list)
+    failure_report: dict[str, Any] | None = None
 
 
 class ScenarioDetail(Scenario):

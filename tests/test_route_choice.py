@@ -2,6 +2,7 @@
 
 from dataclasses import replace
 
+from marshal_ai.events import Topic
 from marshal_ai.flows import route
 from marshal_ai.llm import LLMError
 from marshal_ai.records import AssistanceCase, Car, CarReport, Verdict
@@ -104,6 +105,18 @@ async def test_the_car_drives_the_chosen_way_to_its_slot(plant):
     await app.run_for(200)
     c = app.rt.store.get(Car, "VIN-214")
     assert c.location == c.yard_slot and "VIN-214" not in app.yard.routes_in_use
+
+
+async def test_the_decision_is_published_for_the_dashboards(plant):
+    app = plant(["VIN-214"])
+    app.rt.plant.hazards["finishing_corner"] = "forklift working"
+    await app.yard.send_to_slot(ready(app))
+    published = [e for e in app.rt.bus.history[Topic.VEHICLE_STATUS]
+                 if e.get("type") == "route.choice"]
+    assert len(published) == 1
+    event = published[0]
+    assert event["vin"] == "VIN-214" and event["choice"] == "via lane_c" and event["by"] == "gemini"
+    assert event["probs"]["via lane_c"] > 0.5 and event["flow"] == 1
 
 
 def test_offline_stand_in_reads_the_prompt():

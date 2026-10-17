@@ -17,9 +17,12 @@ from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
+from marshal_ai.dashboard import describe
+from marshal_ai.dashboard import FLOWS as LIVE_FLOWS
 from marshal_ai.events import Topic
 
 from marshal_api.bridge import get_event_bus
+from marshal_api.config import Settings, get_settings
 from marshal_api.core.deps import get_current_tenant
 from marshal_api.db.session import async_session_maker
 from marshal_api.models import EventLog
@@ -64,7 +67,30 @@ def _to_flow(row: EventLog) -> FlowEvent:
     )
 
 
-def _live(msg: dict, seq: int) -> FlowEvent:
+def _decision_data(msg: dict) -> dict | None:
+    """The structured half of a decision event, so a client does not parse the detail text."""
+    if msg.get("type") not in ("route.choice", "parking.step"):
+        return None
+    return {k: msg[k] for k in ("vin", "choice", "slot", "probs", "by", "seconds", "decision")
+            if msg.get(k) is not None}
+
+
+def _live(msg: dict, seq: int, topic: Topic | None = None) -> FlowEvent:
+    if topic is not None:
+        # A live bus message is a domain payload (MissionDone, TrackStep, ...); marshal_ai's
+        # dashboard already turns it into the flow's line. No keys are added to the payload.
+        flow, _name = LIVE_FLOWS.get(topic, (1, ""))
+        title, detail, level = describe(topic, msg)
+        return FlowEvent(
+            seq=seq,
+            at=_at(msg.get("at")),
+            flow=flow,
+            source=str(msg.get("source") or topic.value),
+            title=title or str(msg.get("type", "")),
+            detail=detail,
+            level=_level(level),
+            data=_decision_data(msg),
+        )
     return FlowEvent(
         seq=seq,
         at=_at(msg.get("at")),
@@ -73,6 +99,7 @@ def _live(msg: dict, seq: int) -> FlowEvent:
         title=str(msg.get("title", msg.get("type", ""))),
         detail=str(msg.get("detail", "")),
         level=_level(msg.get("level")),
+        data=_decision_data(msg),
     )
 
 
@@ -90,35 +117,41 @@ async def _backfill(
     return [_to_flow(row) for row in rows]
 
 
-async def _events(request: Request, since: int, tenant_id: str) -> AsyncGenerator[dict, None]:
-    async with async_session_maker() as session:
-        history = await _backfill(session, tenant_id, since)
-
+async def _events(
+    request: Request, since: int, tenant_id: str, live: bool = False
+) -> AsyncGenerator[dict, None]:
     last_seq = since
-    for event in history:
-        last_seq = max(last_seq, event.seq)
-        yield {"id": str(event.seq), "data": event.model_dump_json()}
+    if not live:
+        async with async_session_maker() as session:
+            history = await _backfill(session, tenant_id, since)
+        for event in history:
+            last_seq = max(last_seq, event.seq)
+            yield {"id": str(event.seq), "data": event.model_dump_json()}
 
-    queue: asyncio.Queue[dict] = asyncio.Queue()
+    queue: asyncio.Queue[tuple[Topic | None, dict]] = asyncio.Queue()
     loop = asyncio.get_running_loop()
 
-    def on_bus(msg: dict) -> None:
-        loop.call_soon_threadsafe(queue.put_nowait, msg)
-
     bus = get_event_bus()
+    # shortcut: live mode has no backfill; Pub/Sub starts at the next event after subscribe
     for topic in Topic:
+        def on_bus(msg: dict, topic: Topic = topic) -> None:
+            loop.call_soon_threadsafe(queue.put_nowait, (topic, msg))
+
         bus.subscribe(topic, on_bus)
 
     while True:
         if await request.is_disconnected():
             break
         try:
-            msg = await asyncio.wait_for(queue.get(), timeout=LIVE_TIMEOUT_S)
+            topic, msg = await asyncio.wait_for(queue.get(), timeout=LIVE_TIMEOUT_S)
         except asyncio.TimeoutError:
             yield {"event": "ping", "data": ""}
             continue
         last_seq += 1
-        yield {"id": str(last_seq), "data": _live(msg, last_seq).model_dump_json()}
+        yield {
+            "id": str(last_seq),
+            "data": _live(msg, last_seq, topic if live else None).model_dump_json(),
+        }
 
 
 @router.get("/events")
@@ -127,8 +160,10 @@ async def stream_events(
     since: int = Query(default=0, ge=0),
     last_event_id: str | None = Header(default=None, alias="Last-Event-ID"),
     tenant_id: str = Depends(get_current_tenant),
+    settings: Settings = Depends(get_settings),
 ):
     # Browsers resend as Last-Event-ID on reconnect; the query param wins if both are present.
     if since == 0 and last_event_id and last_event_id.isdigit():
         since = int(last_event_id)
-    return EventSourceResponse(_events(request, since, tenant_id), ping=15)
+    live = settings.store == "gcp"
+    return EventSourceResponse(_events(request, since, tenant_id, live), ping=15)

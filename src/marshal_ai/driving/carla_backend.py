@@ -37,6 +37,7 @@ from marshal_ai.driving.messages import (
 )
 from marshal_ai.driving import parking
 from marshal_ai.driving.routines import RoutineStep, routine_steps
+from marshal_ai.events import Topic
 from marshal_ai.fakeworld import GATE_VIEWS
 from marshal_ai.llm import Media
 from marshal_ai.plant import PlantMap
@@ -1103,6 +1104,7 @@ class CarlaDrivingSystem:
                     session.apply(decision, pose, time.monotonic() - v.park_asked_at, view)
                     step = session.trace[-1]
                     self._note_park(v, session, step, view)
+                    self._note_decision(v, session, step, view, decision)
                     log.info("%s park %s #%d: %s (%.2f) at %+.1f m / %+.1f m / %+.0f deg", v.vin,
                              session.slot, step["n"], step["choice"], step["p"], pose.x, pose.y, pose.yaw_deg)
         if not session.done and session.needs_decision:
@@ -1156,6 +1158,31 @@ class CarlaDrivingSystem:
             hook(f"{v.vin} parking {session.slot}: {what} ({step['p']:.2f})")
         except Exception as exc:                  # the film must never stop the car
             log.warning("could not note a parking decision: %s", exc)
+
+    def _note_decision(self, v: _Vehicle, session, step: dict, view, decision) -> None:
+        """Put the step on the bus so the dashboards and the API's SSE stream can show it.
+
+        Called on the event loop (from _step via _gemini_park), so the publish can be a task.
+        """
+        bus = getattr(self, "bus", None)
+        if bus is None:
+            return
+        probs = {k: round(float(p), 3) for k, p in (getattr(decision, "probs", None) or {}).items()}
+        choice = step["choice"]
+        payload = {
+            "type": "parking.step", "flow": 1, "source": "parking",
+            "title": f"{v.vin} parking {session.slot}: {choice} ({step['p']:.2f})",
+            "detail": ", ".join(f"{k} {p:.2f}" for k, p in probs.items()),
+            "level": "good" if choice.startswith("path_") or choice == "parked" else "warn",
+            "vin": v.vin, "slot": session.slot, "choice": choice, "probs": probs,
+            "decision": step["n"],
+            "paths": [{"option": p.option, "strategy": p.strategy, "metres": round(p.metres, 1)}
+                      for p in getattr(view, "paths", [])],
+        }
+        try:
+            asyncio.get_running_loop().create_task(bus.publish(Topic.VEHICLE_STATUS, payload))
+        except RuntimeError:          # called off the loop (replay, tests): the stream is not needed
+            pass
 
     def _park_ask(self, session, pose, obstacles):
         """What Gemini is shown, and its decision; no decision when there is nothing to choose."""

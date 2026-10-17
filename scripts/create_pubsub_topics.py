@@ -12,14 +12,15 @@ from google.cloud import pubsub_v1
 
 from marshal_ai.events import Topic
 
+# "api" is the Control Tower SSE stream (marshal_api.bridge uses subscriber_name="api").
 SUBSCRIBERS = {
-    Topic.VEHICLE_STATUS: ["yard-traffic", "dashboard"],
-    Topic.ASSIST_REQUESTS: ["remote-assistance"],
-    Topic.GATE_IMAGES: ["visual-inspector"],
-    Topic.TRACK_STEPS: ["functional-checker"],
-    Topic.INSPECTION_RESULTS: ["report-router"],
-    Topic.TEST_REQUESTS: ["scenario-generator"],
-    Topic.TEST_RESULTS: ["adversarial-tester", "dashboard"],
+    Topic.VEHICLE_STATUS: ["yard-traffic", "dashboard", "api"],
+    Topic.ASSIST_REQUESTS: ["remote-assistance", "api"],
+    Topic.GATE_IMAGES: ["visual-inspector", "api"],
+    Topic.TRACK_STEPS: ["functional-checker", "api"],
+    Topic.INSPECTION_RESULTS: ["report-router", "api"],
+    Topic.TEST_REQUESTS: ["scenario-generator", "api"],
+    Topic.TEST_RESULTS: ["adversarial-tester", "dashboard", "api"],
 }
 
 

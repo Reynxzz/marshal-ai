@@ -33,6 +33,7 @@ import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from marshal_ai.events import Topic
 from marshal_ai.flows.base import ask_or
 from marshal_ai.llm import decision_schema
 from marshal_ai.records import AssistanceCase, Car, CarState
@@ -134,6 +135,29 @@ def prompt(vin: str, start: str, goal: str, options: list[Way], speed_kmh: float
     return "\n".join(lines)
 
 
+async def announce(rt: "Runtime", record: dict) -> None:
+    """Publish the decision so the dashboards and the API's SSE stream can show it.
+
+    A dict on the VEHICLE_STATUS topic: the generic keys (flow/source/title/detail/level) render it
+    in the API's memory mode as-is, and the rest keeps the probabilities structured.
+    """
+    choice = record.get("choice")
+    if choice is None:
+        return
+    probs = record.get("probs") or {}
+    detail = record.get("why", "")
+    if probs:
+        detail = (detail + " · " if detail else "") + ", ".join(f"{k} {p:.2f}" for k, p in probs.items())
+    if record.get("seconds") is not None:
+        detail += f" · {record['seconds']} s"
+    await rt.bus.publish(Topic.VEHICLE_STATUS, {
+        "type": "route.choice", "flow": 1, "source": "route",
+        "title": f"{record['vin']} → {choice}", "detail": detail, "level": "info",
+        "vin": record["vin"], "choice": choice, "by": record.get("by"),
+        "probs": probs, "seconds": record.get("seconds"),
+    })
+
+
 async def choose(rt: "Runtime", vin: str, start: str, goal: str, in_use: dict[str, list[str]],
                  speed_kmh: float, ask_when: str = "reason") -> tuple[list[str], dict]:
     """The waypoints to send, and a record of how they were chosen."""
@@ -149,6 +173,7 @@ async def choose(rt: "Runtime", vin: str, start: str, goal: str, in_use: dict[st
         why = ("the only open way" if len(options) == 1
                else "nothing reported on any way, so the shortest")
         record.update(choice=shortest.label, by="rules", why=why)
+        await announce(rt, record)
         return shortest.points[1:], record
     labels = tuple(w.label for w in options)
     schema = decision_schema(*labels)
@@ -163,6 +188,7 @@ async def choose(rt: "Runtime", vin: str, start: str, goal: str, in_use: dict[st
                   seconds=round(time.monotonic() - started, 2))
     log.info("route %s %s -> %s: %s (%.2f) by %s", vin, start, goal, chosen.label,
              decision.confidence, record["by"])
+    await announce(rt, record)
     return chosen.points[1:], record
 
 

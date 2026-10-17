@@ -10,7 +10,9 @@ from marshal_api.schemas.assistance import (
     AssistanceCase,
     AssistanceKpis,
     AssistanceOption,
+    AssistanceSource,
     DecideAssistanceRequest,
+    DetectedObject,
 )
 from marshal_api.schemas.common import (
     Actor,
@@ -101,7 +103,9 @@ __all__ = [
     "AssistanceCase",
     "AssistanceKpis",
     "AssistanceOption",
+    "AssistanceSource",
     "DecideAssistanceRequest",
+    "DetectedObject",
     # quality
     "BuildSheetMismatch",
     "FunctionalInspection",

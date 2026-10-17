@@ -115,6 +115,22 @@ def describe(topic: Topic, data: dict) -> tuple[str, str, str]:
     """(title, detail, level) for one bus message."""
     kind = data.get("type", "")
 
+    if kind == "route.choice":
+        probs = data.get("probs") or {}
+        detail = ", ".join(f"{k} {p:.2f}" for k, p in probs.items())
+        return (f"{data.get('vin', '?')} → {data.get('choice', '?')}",
+                f"by {data.get('by', '?')}" + (f" · {detail}" if detail else "")
+                + (f" · {data.get('seconds')} s" if data.get("seconds") is not None else ""),
+                "info")
+
+    if kind == "parking.step":
+        choice = str(data.get("choice", "?"))
+        probs = data.get("probs") or {}
+        detail = ", ".join(f"{k} {p:.2f}" for k, p in probs.items())
+        return (f"{data.get('vin', '?')} parking {data.get('slot', '?')}: {choice}",
+                detail or f"decision {data.get('decision', '?')}",
+                "good" if choice.startswith("path_") or choice == "parked" else "warn")
+
     if topic is Topic.VEHICLE_STATUS:
         vin = data.get("vin", "?")
         if kind == "mission.done":
@@ -162,6 +178,8 @@ def describe(topic: Topic, data: dict) -> tuple[str, str, str]:
 
 def _status_key(data: dict) -> str | None:
     """Vehicle status arrives every tick; only a real change is worth a line."""
+    if data.get("type") in ("route.choice", "parking.step"):
+        return None                     # a decision is always worth a line, even twice
     if data.get("type") == "mission.done":
         return None
     return (f"{data.get('vin')}|{data.get('location')}|"

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
-from pydantic import Field
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -42,8 +42,14 @@ class Settings(BaseSettings):
     # Gemini/Vertex model used by the clip-ingest service (MARSHAL_MODEL).
     model: str = "gemini-2.5-flash"
 
-    # Phase 6/7 seams, wired but unused by the scaffolding.
-    event_bus: str = "memory"
+    # "memory" keeps the seeded SQLite demo; "gcp" reads the live CARLA records from Firestore.
+    store: str = "memory"
+    bus: str = "memory"
+    gcp_project: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("GOOGLE_CLOUD_PROJECT", "MARSHAL_GCP_PROJECT"),
+    )
+
     carla_host: str = "localhost"
     carla_port: int = 2000
     camera_stream_url: str = "http://localhost:8080/camera.mjpg"

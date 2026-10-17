@@ -6,13 +6,18 @@ from fastapi import APIRouter, Depends
 from sqlmodel import func, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from marshal_ai.store import Store
+
+from marshal_api.config import Settings, get_settings
 from marshal_api.core.deps import (
     get_assistance_service,
     get_current_tenant,
     get_proposal_service,
     get_session,
+    get_store,
     get_yard_service,
 )
+from marshal_api.live import LiveOverviewService
 from marshal_api.models import InspectionResult, Release, Scenario
 from marshal_api.models.base import utc_now
 from marshal_api.models.lab import ScenarioStatus
@@ -31,7 +36,9 @@ async def _lab_counts(session: AsyncSession, tenant_id: str) -> tuple[int, int]:
         await session.execute(
             select(func.count())
             .select_from(Scenario)
-            .where(Scenario.tenant_id == tenant_id, Scenario.status == ScenarioStatus.VALID)
+            .where(
+                Scenario.tenant_id == tenant_id, Scenario.status == ScenarioStatus.VALID
+            )
         )
     ).scalar_one()
     blocked = (
@@ -61,12 +68,16 @@ async def _inspection_yield(session: AsyncSession, tenant_id: str) -> tuple[int,
 
 @router.get("/overview", response_model=Overview)
 async def overview(
+    settings: Settings = Depends(get_settings),
+    store: Store = Depends(get_store),
     yard: YardService = Depends(get_yard_service),
     assistance: AssistanceService = Depends(get_assistance_service),
     proposals: ProposalService = Depends(get_proposal_service),
     session: AsyncSession = Depends(get_session),
     tenant_id: str = Depends(get_current_tenant),
 ) -> Overview:
+    if settings.store == "gcp":
+        return await LiveOverviewService(store).overview()
     snapshot = await yard.get_yard_snapshot()
     open_cases = await assistance.list_cases(open_only=True, limit=ATTENTION_LIMIT)
     pending = await proposals.list_proposals(status="pending", limit=ATTENTION_LIMIT)
@@ -77,7 +88,9 @@ async def overview(
         key = car.state.value if hasattr(car.state, "value") else str(car.state)
         by_state[key] = by_state.get(key, 0) + 1
 
-    exceptions = [car for car in snapshot.cars if car.state.value in ("exception", "held")]
+    exceptions = [
+        car for car in snapshot.cars if car.state.value in ("exception", "held")
+    ]
     return Overview(
         plant=snapshot.plant,
         updated_at=utc_now(),
@@ -90,21 +103,28 @@ async def overview(
         assistance_open=open_cases.pagination.total,
         proposals_pending=pending.pagination.total,
         lab=OverviewLab(
-            scenarios_pending_review=scenarios_pending, releases_blocked=releases_blocked
+            scenarios_pending_review=scenarios_pending,
+            releases_blocked=releases_blocked,
         ),
-        attention=OverviewAttention(assistance=open_cases.items, proposals=pending.items),
+        attention=OverviewAttention(
+            assistance=open_cases.items, proposals=pending.items
+        ),
         yard_exceptions=exceptions,
     )
 
 
 @router.get("/kpis", response_model=KpiResponse)
 async def kpis(
+    settings: Settings = Depends(get_settings),
+    store: Store = Depends(get_store),
     yard: YardService = Depends(get_yard_service),
     assistance: AssistanceService = Depends(get_assistance_service),
     proposals: ProposalService = Depends(get_proposal_service),
     session: AsyncSession = Depends(get_session),
     tenant_id: str = Depends(get_current_tenant),
 ) -> KpiResponse:
+    if settings.store == "gcp":
+        return await LiveOverviewService(store).kpis()
     snapshot = await yard.get_yard_snapshot()
     open_cases = await assistance.list_cases(open_only=True, limit=1)
     pending = await proposals.list_proposals(status="pending", limit=1)
@@ -120,7 +140,13 @@ async def kpis(
     exception = by_state.get("exception", 0) + by_state.get("held", 0)
     return KpiResponse(
         items=[
-            Kpi(key="active", label="Mobil Aktif", value=active, unit="unit", tone=KpiTone.INFO),
+            Kpi(
+                key="active",
+                label="Active Car",
+                value=active,
+                unit="unit",
+                tone=KpiTone.INFO,
+            ),
             Kpi(
                 key="assistance_open",
                 label="Assistance Open",
@@ -140,7 +166,9 @@ async def kpis(
                 label="Exception / Held",
                 value=exception,
                 unit="unit",
-                tone=KpiTone.DANGER if by_state.get("exception", 0) else KpiTone.DEFAULT,
+                tone=KpiTone.DANGER
+                if by_state.get("exception", 0)
+                else KpiTone.DEFAULT,
             ),
             Kpi(
                 key="first_pass",

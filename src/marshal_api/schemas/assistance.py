@@ -34,6 +34,18 @@ class AssistanceRecommendation(BaseModel):
     note: str | None = None
 
 
+class DetectedObject(BaseModel):
+    label: str
+    box: list[float] = Field(default_factory=list)
+    confidence: float | None = None
+
+
+class AssistanceSource(str, Enum):
+    CAR_EVIDENCE = "car_evidence"
+    LIVE = "live"
+    SEED = "seed"
+
+
 class AssistanceCase(BaseModel):
     case_id: str
     vin: str
@@ -47,6 +59,9 @@ class AssistanceCase(BaseModel):
     recommendation: AssistanceRecommendation | None = None
     options: list[AssistanceOption] = Field(default_factory=list)
     media_ids: list[str] = Field(default_factory=list)
+    detected_objects: list[DetectedObject] = Field(default_factory=list)
+    source: AssistanceSource | None = None
+    clip_uri: str | None = None
     resolved_by: str | None = None
     resolved_at: datetime | None = None
     chosen_option: str | None = None
