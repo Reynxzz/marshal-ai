@@ -44,7 +44,7 @@ async def _lab_counts(session: AsyncSession, tenant_id: str) -> tuple[int, int]:
     return pending, blocked
 
 
-async def _inspection_yield(session: AsyncSession, tenant_id: str) -> int:
+async def _inspection_yield(session: AsyncSession, tenant_id: str) -> tuple[int, int]:
     rows = (
         await session.execute(
             select(InspectionResult.verdict, func.count())
@@ -55,8 +55,8 @@ async def _inspection_yield(session: AsyncSession, tenant_id: str) -> int:
     counts = {verdict: count for verdict, count in rows}
     total = sum(counts.values())
     if not total:
-        return 0
-    return round(counts.get(Verdict.PASS, 0) / total * 100)
+        return 0, 0
+    return round(counts.get(Verdict.PASS, 0) / total * 100), total
 
 
 @router.get("/overview", response_model=Overview)
@@ -109,7 +109,7 @@ async def kpis(
     open_cases = await assistance.list_cases(open_only=True, limit=1)
     pending = await proposals.list_proposals(status="pending", limit=1)
     _, releases_blocked = await _lab_counts(session, tenant_id)
-    first_pass = await _inspection_yield(session, tenant_id)
+    first_pass, total_inspections = await _inspection_yield(session, tenant_id)
 
     by_state: dict[str, int] = {}
     for car in snapshot.cars:
@@ -148,7 +148,9 @@ async def kpis(
                 value=first_pass,
                 unit="%",
                 tone=(
-                    KpiTone.SUCCESS
+                    KpiTone.DEFAULT
+                    if total_inspections == 0
+                    else KpiTone.SUCCESS
                     if first_pass >= 80
                     else KpiTone.WARNING
                     if first_pass >= 60
