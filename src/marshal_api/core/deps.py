@@ -44,11 +44,13 @@ from marshal_api.services import (
     QualityService,
     YardService,
 )
+from marshal_api.services.batch_service import BatchService, get_batch_process_runner
 from marshal_api.workers.job_runner import JobRunner, get_job_runner
 
 __all__ = [
     "RequireRole",
     "get_assist_ingest_service",
+    "get_batch_service",
     "get_assistance_service",
     "get_current_actor",
     "get_current_tenant",
@@ -181,6 +183,25 @@ def get_llm():
     from marshal_ai.llm import GeminiLLM
 
     return GeminiLLM(get_settings().model)
+
+
+def get_batch_service(
+    settings: Settings = Depends(get_settings),
+    tenant_id: str = Depends(get_current_tenant),
+) -> BatchService:
+    from marshal_ai.config import Settings as AgentSettings
+    from marshal_ai.llm import GeminiLLM
+    from marshal_api.services.batch_store import get_batch_store
+
+    agent_settings = AgentSettings()
+    if agent_settings.llm == "offline":
+        from marshal_ai.offline import offline_llm
+
+        llm = offline_llm()
+    else:
+        llm = GeminiLLM(settings.model)
+    return BatchService(get_batch_store(settings), get_batch_process_runner(), tenant_id,
+                        llm=llm, settings=settings, llm_mode=agent_settings.llm)
 
 
 def get_assist_ingest_service(

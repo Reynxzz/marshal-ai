@@ -54,6 +54,7 @@ class MarshalApp:
         self.test_requests: list[dict] = []
         self.auto_generate = False
         self._loop: asyncio.Task | None = None
+        self._handlers: list[tuple[Topic, object]] = []
         self._subscribe()
 
     def runner_for(self, release: str) -> Runner:
@@ -62,12 +63,22 @@ class MarshalApp:
 
     def _subscribe(self) -> None:
         bus = self.rt.bus
-        bus.subscribe(Topic.VEHICLE_STATUS, self._on_vehicle_event)
-        bus.subscribe(Topic.ASSIST_REQUESTS, self._on_assist)
-        bus.subscribe(Topic.GATE_IMAGES, self._on_gate_images)
-        bus.subscribe(Topic.TRACK_STEPS, self._on_track_step)
-        bus.subscribe(Topic.INSPECTION_RESULTS, self._on_result)
-        bus.subscribe(Topic.TEST_REQUESTS, self._on_test_request)
+        self._handlers = [
+            (Topic.VEHICLE_STATUS, self._on_vehicle_event),
+            (Topic.ASSIST_REQUESTS, self._on_assist),
+            (Topic.GATE_IMAGES, self._on_gate_images),
+            (Topic.TRACK_STEPS, self._on_track_step),
+            (Topic.INSPECTION_RESULTS, self._on_result),
+            (Topic.TEST_REQUESTS, self._on_test_request),
+        ]
+        for topic, handler in self._handlers:
+            bus.subscribe(topic, handler)
+
+    def close(self) -> None:
+        """Stop reacting to the bus; a restart builds a fresh app on the same bus."""
+        for topic, handler in self._handlers:
+            self.rt.bus.unsubscribe(topic, handler)
+        self._handlers = []
 
     async def _on_vehicle_event(self, data: dict) -> None:
         if data.get("type") != "mission.done":

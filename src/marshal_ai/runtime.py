@@ -111,9 +111,10 @@ _runtime: Runtime | None = None
 
 
 def build_runtime(s: Settings = default_settings, llm: LLM | None = None,
-                  world: FakeWorld | None = None, **driving_kwargs) -> Runtime:
+                  world: FakeWorld | None = None, bus: EventBus | None = None,
+                  **driving_kwargs) -> Runtime:
     plant_map = load_plant_map()
-    bus = make_bus(s.bus, s.gcp_project)
+    bus = bus if bus is not None else make_bus(s.bus, s.gcp_project)
     store = make_store(s.store, s.gcp_project)
     history = make_history(s.history, s.gcp_project)
     if not isinstance(history, NoHistory):

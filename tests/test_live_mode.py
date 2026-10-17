@@ -468,3 +468,33 @@ def test_flow_event_from_live_topic() -> None:
     assert event.seq == 7
     assert event.flow == 1
     assert "VIN-1" in event.title or "inspection_gate" in event.title
+
+
+def test_a_status_payload_is_described_not_shown_raw() -> None:
+    from marshal_ai.driving import Status
+
+    msg = Status(vin="VIN-1", location="finishing", x=0.0, y=0.0, speed_kmh=9.0,
+                 mission_id="M-1", progress=0.4)
+    event = _live(msg.model_dump(mode="json"), 8, Topic.VEHICLE_STATUS)
+    assert event.title.startswith("VIN-1 at finishing") and "km/h" in event.detail
+    assert event.source == "vehicle-status"
+
+
+def test_a_generic_feed_dict_keeps_its_own_line() -> None:
+    payload = {"type": "assist.request", "flow": 2, "source": "assistance",
+               "title": "Assist case AC-1: box in lane", "detail": "recommended wait_for_removal",
+               "level": "warn", "case_id": "AC-1"}
+    event = _live(payload, 9, Topic.ASSIST_REQUESTS)
+    assert event.flow == 2 and event.source == "assistance"
+    assert event.title == "Assist case AC-1: box in lane" and event.level == "warn"
+
+
+def test_a_decision_payload_keeps_its_line_and_structured_data() -> None:
+    payload = {"type": "route.choice", "flow": 1, "source": "route",
+               "title": "VIN-1 → via lane_c", "detail": "Gemini's choice · 1.2 s", "level": "info",
+               "vin": "VIN-1", "choice": "via lane_c", "by": "gemini",
+               "probs": {"via lane_c": 1.0}, "seconds": 1.2}
+    event = _live(payload, 11, Topic.VEHICLE_STATUS)
+    assert event.title == "VIN-1 → via lane_c" and event.source == "route"
+    assert event.data is not None
+    assert event.data["choice"] == "via lane_c" and event.data["probs"]["via lane_c"] == 1.0

@@ -25,6 +25,7 @@ Handler = Callable[[dict], "Awaitable[None] | None"]
 class EventBus(Protocol):
     async def publish(self, topic: Topic, message: BaseModel | dict) -> None: ...
     def subscribe(self, topic: Topic, handler: Handler) -> None: ...
+    def unsubscribe(self, topic: Topic, handler: Handler) -> None: ...
 
 
 def _to_dict(message: BaseModel | dict) -> dict:
@@ -50,6 +51,12 @@ class InMemoryBus:
     def subscribe(self, topic: Topic, handler: Handler) -> None:
         self._handlers[topic].append(handler)
 
+    def unsubscribe(self, topic: Topic, handler: Handler) -> None:
+        try:
+            self._handlers[topic].remove(handler)
+        except ValueError:
+            pass
+
 
 class PubSubBus:
     """Google Cloud Pub/Sub. Subscriptions are named `<topic>--<subscriber>`."""
@@ -61,7 +68,7 @@ class PubSubBus:
         self.subscriber_name = subscriber_name
         self._publisher = pubsub_v1.PublisherClient()
         self._subscriber = pubsub_v1.SubscriberClient()
-        self._futures: list = []
+        self._futures: dict[tuple[Topic, Handler], object] = {}
 
     def _topic_path(self, topic: Topic) -> str:
         return self._publisher.topic_path(self.project, topic.value)
@@ -84,7 +91,12 @@ class PubSubBus:
                 asyncio.run_coroutine_threadsafe(result, loop).result()
             msg.ack()
 
-        self._futures.append(self._subscriber.subscribe(sub_path, callback=callback))
+        self._futures[(topic, handler)] = self._subscriber.subscribe(sub_path, callback=callback)
+
+    def unsubscribe(self, topic: Topic, handler: Handler) -> None:
+        future = self._futures.pop((topic, handler), None)
+        if future is not None:
+            future.cancel()
 
 
 def make_bus(kind: str, project: str | None = None, subscriber_name: str = "marshal") -> EventBus:

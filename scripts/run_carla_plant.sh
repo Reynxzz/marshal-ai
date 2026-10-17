@@ -72,4 +72,9 @@ extra=()
 [[ -n "${MARSHAL_PLANT_TIMEOUT:-}" ]] && extra+=(--timeout "$MARSHAL_PLANT_TIMEOUT")
 # MARSHAL_PLANT_HAZARD="finishing_corner:forklift unloading pallets": Gemini routes cars around it
 [[ -n "${MARSHAL_PLANT_HAZARD:-}" ]] && extra+=(--hazard "$MARSHAL_PLANT_HAZARD")
+[[ -n "${MARSHAL_PLANT_MANIFEST:-}" ]] && extra+=(--manifest "$MARSHAL_PLANT_MANIFEST")
+[[ -n "${MARSHAL_BATCH_ID:-}" ]] && extra+=(--batch-id "$MARSHAL_BATCH_ID")
+[[ "${MARSHAL_PLANT_EVENTS:-0}" == "1" ]] && extra+=(--events)
+[[ -n "${MARSHAL_PLANT_INCIDENT_VIN:-}" ]] && extra+=(--incident-vin "$MARSHAL_PLANT_INCIDENT_VIN")
+[[ "${MARSHAL_PLANT_NO_INCIDENT:-0}" == "1" ]] && extra+=(--no-incident)
 python3 scripts/demo_carla_plant.py --cars "$CARS" --steps "$STEPS" --wrong-colour "$WRONG" "${extra[@]}"

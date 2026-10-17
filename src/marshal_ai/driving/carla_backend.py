@@ -1177,18 +1177,7 @@ class CarlaDrivingSystem:
         bus = getattr(self, "bus", None)
         if bus is None:
             return
-        probs = {k: round(float(p), 3) for k, p in (getattr(decision, "probs", None) or {}).items()}
-        choice = step["choice"]
-        payload = {
-            "type": "parking.step", "flow": 1, "source": "parking",
-            "title": f"{v.vin} parking {session.slot}: {choice} ({step['p']:.2f})",
-            "detail": ", ".join(f"{k} {p:.2f}" for k, p in probs.items()),
-            "level": "good" if choice.startswith("path_") or choice == "parked" else "warn",
-            "vin": v.vin, "slot": session.slot, "choice": choice, "probs": probs,
-            "decision": step["n"],
-            "paths": [{"option": p.option, "strategy": p.strategy, "metres": round(p.metres, 1)}
-                      for p in getattr(view, "paths", [])],
-        }
+        payload = parking.step_event(v.vin, session.slot, step, view, decision)
         try:
             asyncio.get_running_loop().create_task(bus.publish(Topic.VEHICLE_STATUS, payload))
         except RuntimeError:          # called off the loop (replay, tests): the stream is not needed

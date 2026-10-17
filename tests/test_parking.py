@@ -7,7 +7,7 @@ from types import SimpleNamespace
 from marshal_ai.driving import carla_backend, parking
 from marshal_ai.driving.parking import (
     OPTIONS, Box, GeminiParker, ParkingSession, Pose, advance, is_parked, kerb, overhang, prompt,
-    render, to_slot_frame,
+    render, step_event, to_slot_frame,
 )
 from marshal_ai.eval.parking import Case, KinematicCar, obstacles_for, planner_decide, run_case
 from marshal_ai.llm import decision_schema
@@ -112,6 +112,32 @@ def test_choosing_a_path_drives_its_first_segment_then_asks_again():
     while s.phase != "decide":
         car.step(s.control(car.pose, [kerb()], car.speed, 0.05), 0.05)
     assert s.moves == segment and car.pose.x > -8.0 + 0.5 * len(segment)
+
+
+def test_a_parking_decision_becomes_a_bus_event_the_dashboard_can_describe():
+    from marshal_ai.dashboard import describe
+    from marshal_ai.events import Topic
+
+    view = SimpleNamespace(paths=[SimpleNamespace(option="path_A", strategy="forward only",
+                                                  metres=12.34)])
+    labels = ("path_A", "ask_a_person")
+    step = {"n": 1, "choice": "path_A", "p": 0.99}
+    decision = decision_schema(*labels)(choice="path_A", probs={"path_A": 0.99, "ask_a_person": 0.01})
+
+    payload = step_event("VIN-EVAL", "Y4", step, view, decision)
+
+    assert payload["type"] == "parking.step" and payload["flow"] == 1
+    assert payload["probs"]["path_A"] == 0.99 and payload["decision"] == 1
+    assert payload["paths"] == [{"option": "path_A", "strategy": "forward only", "metres": 12.3}]
+    title, detail, level = describe(Topic.VEHICLE_STATUS, payload)
+    assert "path_A" in title and "0.99" in detail and level == "good"
+
+    asked = decision_schema(*labels)(choice="ask_a_person",
+                                     probs={"path_A": 0.2, "ask_a_person": 0.8})
+    _, _, level = describe(Topic.VEHICLE_STATUS,
+                           step_event("VIN-EVAL", "Y4", {"n": 2, "choice": "ask_a_person", "p": 0.8},
+                                      view, asked))
+    assert level == "warn"
 
 
 def test_a_slot_between_two_cars_ends_with_a_person_not_a_collision():

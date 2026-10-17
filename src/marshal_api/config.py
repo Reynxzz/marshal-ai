@@ -45,6 +45,10 @@ class Settings(BaseSettings):
     # "memory" keeps the seeded SQLite demo; "gcp" reads the live CARLA records from Firestore.
     store: str = "memory"
     bus: str = "memory"
+    # MARSHAL_RUN_PLANT=1 runs the marshal_ai plant on the fake driving system in this process,
+    # on the API's own bus, so /api/v1/events carries live decisions without CARLA (marshal_api.plant).
+    run_plant: bool = False
+    plant_speed: float = 1.0                # simulated seconds per real second for that plant
     gcp_project: str | None = Field(
         default=None,
         validation_alias=AliasChoices("GOOGLE_CLOUD_PROJECT", "MARSHAL_GCP_PROJECT"),
@@ -55,6 +59,20 @@ class Settings(BaseSettings):
     camera_stream_url: str = "http://localhost:8080/camera.mjpg"
     media_signed_url_ttl_seconds: int = 3600
     media_bucket: str | None = None
+
+    # Batch runs use the one CARLA instance attached to this API host.
+    batch_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("MARSHAL_BATCH", "MARSHAL_BATCH_ENABLED"),
+    )
+    batch_max_cars: int = Field(default=6, ge=1, le=6)
+    batch_timeout_s: int = Field(default=1800, ge=30)
+    batch_lab_timeout_s: int = Field(default=900, ge=30)
+    batch_plant_script: str = "scripts/run_carla_plant.sh"
+    batch_lab_script: str = "scripts/run_carla_lab.sh"
+    batch_lab_adversarial: int = Field(default=4, ge=0, le=24)
+    # "memory" for tests/local dev; "firestore" on the CARLA host so state outlives the instance.
+    batch_store: str = "memory"
 
 
 @lru_cache

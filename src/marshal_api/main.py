@@ -22,8 +22,27 @@ DESCRIPTION = (
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # The scaffolding opens no DB connections at startup; Alembic owns the schema.
+    settings = get_settings()
+    if settings.batch_enabled:
+        from marshal_api.services.batch_service import mark_stale_batches
+        from marshal_api.services.batch_store import get_batch_store
+
+        await mark_stale_batches(get_batch_store(settings))
     init_bridge()
+    if settings.run_plant:
+        from marshal_api.plant import get_plant
+
+        await get_plant().start(settings.plant_speed)
     yield
+    if settings.run_plant:
+        from marshal_api.plant import get_plant
+
+        await get_plant().stop()
+    if settings.batch_enabled:
+        from marshal_api.services.batch_service import shutdown_batches
+        from marshal_api.services.batch_store import get_batch_store
+
+        await shutdown_batches(get_batch_store(settings))
     shutdown_bridge()
     await engine.dispose()
 

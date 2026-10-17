@@ -304,6 +304,13 @@ def adversarial_report(call: LLMCall) -> dict:
             "likely_cause": cause, "suggested_fix": fix, "speed_fix": speed_fix}
 
 
+def batch_feedback(call: LLMCall) -> dict:
+    from marshal_ai.batch.feedback import offline_feedback
+
+    digest = _section(call.prompt, "Batch record JSON:\n", "\n\nLogs:") or {}
+    return offline_feedback(digest if isinstance(digest, dict) else {})
+
+
 def drive_park(call: LLMCall) -> dict:
     """The parking planner's next move, from the view's ground truth (driving/parking.py)."""
     from marshal_ai.driving.parking import OPTIONS, Box, Pose, planned_move
@@ -342,4 +349,5 @@ def offline_llm() -> FakeLLM:
         "scenario.spec": scenario_spec,
         "adversarial.propose": adversarial_propose,
         "adversarial.report": adversarial_report,
+        "batch.feedback": batch_feedback,
     })

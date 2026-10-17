@@ -2,9 +2,12 @@
 
     python -m marshal_ai.eval.parking --policy gemini
     python -m marshal_ai.eval.parking --policy planner --frames out/park
+    python -m marshal_ai.eval.parking --policy gemini --publish   # decisions to the event bus
 
 The same ParkingSession the CARLA backend uses, driving a bicycle-model car instead of CARLA's, so
-it runs without the VM. Each case starts the car where the CARLA backend hands over to parking -
+it runs without the VM. With --publish every decision also goes on the event bus (MARSHAL_BUS;
+"gcp" lets the dashboards and the API's SSE stream show the parking loop without CARLA). Each case
+starts the car where the CARLA backend hands over to parking -
 in the lane beside the yard, a run-up before the slot - with the slots on either side empty or
 taken. What it measures is the decision loop: does Gemini get the car inside the slot's limits,
 in how many moves, how long each decision takes, and how often the safety check had to stop it.
@@ -23,7 +26,7 @@ from pathlib import Path
 
 from marshal_ai.driving.parking import (
     CAR_LENGTH_M, CAR_WIDTH_M, SLOT_LENGTH_M, Box, Command, ParkingSession, Pose, kerb, planned_move,
-    render, touching,
+    render, step_event, touching,
 )
 from marshal_ai.llm import Decision, decision_schema
 from marshal_ai.driving.parking import OPTIONS
@@ -87,7 +90,7 @@ def planner_decide(view, image=None) -> Decision:
 
 
 def run_case(case: Case, decide, frames: Path | None = None, max_sim_s: float = 600.0,
-             mode: str = "paths", on_tick=None) -> dict:
+             mode: str = "paths", on_tick=None, on_decision=None) -> dict:
     obstacles = obstacles_for(case)
     car = KinematicCar(Pose(case.x0, case.y0, math.radians(case.yaw0_deg)))
     session = ParkingSession("VIN-EVAL", "Y4", mode=mode)
@@ -113,6 +116,8 @@ def run_case(case: Case, decide, frames: Path | None = None, max_sim_s: float = 
             latency = time.monotonic() - started
             latencies.append(latency)
             session.apply(decision, car.pose, latency, view)
+            if on_decision is not None:
+                on_decision(step_event(session.vin, session.slot, session.trace[-1], view, decision))
             continue
         if session.done:
             break
@@ -240,6 +245,9 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--mode", choices=["paths", "moves"], default="paths")
     ap.add_argument("--frames", type=Path, default=None, help="save each decision's view here")
     ap.add_argument("--out", type=Path, default=None, help="write all results as JSON")
+    ap.add_argument("--publish", action="store_true",
+                    help="send each decision to the event bus (MARSHAL_BUS); with gcp the "
+                         "dashboards and the API's SSE stream show it")
     ap.add_argument("--film", type=Path, default=None,
                     help="with --from: replay each case's recorded decisions into <dir>/<case>.mp4")
     ap.add_argument("--from", dest="source", type=Path, default=None, help="results JSON to film")
@@ -261,9 +269,20 @@ def main(argv: list[str] | None = None) -> None:
     else:
         decide = planner_decide
     chosen = [c for c in cases() if not args.only or c.name in args.only.split(",")]
+    on_decision = None
+    if args.publish:
+        import asyncio
+
+        from marshal_ai.config import settings as rt_settings
+        from marshal_ai.events import Topic, make_bus
+
+        bus = make_bus(rt_settings.bus, rt_settings.gcp_project, subscriber_name="parking-eval")
+
+        def on_decision(payload):
+            asyncio.run(bus.publish(Topic.VEHICLE_STATUS, payload))
     results = []
     for case in chosen:
-        r = run_case(case, decide, args.frames, mode=args.mode)
+        r = run_case(case, decide, args.frames, mode=args.mode, on_decision=on_decision)
         results.append(r)
         print(f"{case.name}: {r['outcome']} in {r['decisions']} moves", flush=True)
     print(f"== parking {args.policy}, {args.mode}")

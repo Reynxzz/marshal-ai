@@ -32,6 +32,7 @@ import logging
 import math
 import time
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from film_notes import note
 from marshal_ai.app import MarshalApp
@@ -92,6 +93,12 @@ def parser() -> argparse.ArgumentParser:
                          "(flows/route.py). Repeatable.")
     ap.add_argument("--no-supervisor", action="store_true",
                     help="leave reviews and rework proposals pending; cars wait where they are")
+    ap.add_argument("--manifest", type=Path, default=None,
+                    help="generated batch manifest; without it the existing demo defaults apply")
+    ap.add_argument("--batch-id", default=None, help="attach this id to batch.event JSONL")
+    ap.add_argument("--events", action="store_true", help="emit event-feed messages as JSONL")
+    ap.add_argument("--incident-vin", default=None)
+    ap.add_argument("--no-incident", action="store_true")
     return ap
 
 
@@ -101,6 +108,73 @@ def emit(obj: dict) -> None:
 
 def parse_steps(value: str) -> list[int] | None:
     return None if value.strip().lower() == "all" else [int(x) for x in value.split(",")]
+
+
+def load_manifest(path: Path) -> dict:
+    manifest = json.loads(path.read_text())
+    cars = manifest.get("cars")
+    if not isinstance(cars, list) or not 1 <= len(cars) <= 6:
+        raise ValueError("manifest must contain 1–6 cars")
+    vins = [car.get("vin") for car in cars]
+    if any(not isinstance(vin, str) or not vin for vin in vins) or len(set(vins)) != len(vins):
+        raise ValueError("manifest VINs must be non-empty and unique")
+    trucks = manifest.get("trucks")
+    if not isinstance(trucks, list) or not trucks or any(not t.get("truck_id") for t in trucks):
+        raise ValueError("manifest must contain at least one named truck")
+    truck_ids = {truck["truck_id"] for truck in trucks}
+    for car in cars:
+        expected = car.get("expected")
+        if (not isinstance(car.get("build_sheet"), dict)
+                or not isinstance(expected, dict)
+                or expected.get("kind") not in {"clean", "wrong_colour", "dead_lamp", "incident"}
+                or car.get("truck_id") not in truck_ids
+                or not isinstance(car.get("spawn_colour"), str)):
+            raise ValueError(f"invalid car entry in manifest: {car.get('vin')}")
+    return manifest
+
+
+def emit_bus_events(events, batch_id: str, since: int) -> int:
+    for event in events.since(since):
+        payload = {"type": "batch.event", "batch_id": batch_id, **event.as_dict()}
+        emit(payload)
+        since = event.seq
+    return since
+
+
+def place_incident(rt, vin: str) -> list:
+    """Put a box and stationary worker ahead of one car at the report point."""
+    import carla
+
+    vehicle = rt.driving.vehicles.get(vin)
+    if vehicle is None:
+        return []
+    world = rt.driving.world
+    transform = vehicle.actor.get_transform()
+    forward, right = transform.get_forward_vector(), transform.get_right_vector()
+    library = world.get_blueprint_library()
+    box_bp = next(iter(library.filter("static.prop.box*")), None)
+    walker_bp = next(iter(library.filter("walker.pedestrian.*")), None)
+    if box_bp is None or walker_bp is None:
+        return []
+    ahead = transform.location + forward * 9.0
+    box_at = carla.Transform(ahead, transform.rotation)
+    spawned = []
+    box = world.try_spawn_actor(box_bp, box_at)
+    if box is None:
+        box_at.location = box_at.location + right * 0.6
+        box = world.try_spawn_actor(box_bp, box_at)
+    if box is None:
+        return []
+    spawned.append(box)
+    worker_at = ahead + forward * 1.0 + right * 2.6
+    worker_at.z += 0.8
+    worker = world.try_spawn_actor(walker_bp, carla.Transform(worker_at, transform.rotation))
+    if worker is not None:
+        spawned.append(worker)
+    else:
+        box.destroy()
+        return []
+    return spawned
 
 
 def set_sun(rt, altitude: float, attempts: int = 10) -> float:
@@ -170,8 +244,13 @@ class Watch:
                     self.release_gaps.append(self.gap_to_released(car.vin))
                 if car.state is CarState.YARD and car.vin not in self.yard_at:
                     self.yard_at[car.vin] = self.sim_s()
+                visual = self.rt.store.get(InspectionResult, f"{car.vin}:visual")
+                report = self.rt.store.get(CarReport, car.vin)
                 emit({"type": "plant.car", "vin": car.vin, "state": car.state.value,
-                      "location": car.location, "sim_s": self.sim_s()})
+                      "location": car.location, "slot": car.yard_slot,
+                      "gate_verdict": visual.verdict.value if visual else None,
+                      "report_verdict": report.verdict.value if report else None,
+                      "sim_s": self.sim_s()})
                 self.last[car.vin] = now
             if car.vin in self.released_at and not finished(car):
                 in_plant += 1
@@ -280,6 +359,11 @@ async def supervise(app, rt) -> None:
 
 
 async def run(args) -> dict:
+    manifest = load_manifest(args.manifest) if args.manifest else None
+    if manifest:
+        args.cars = len(manifest["cars"])
+        args.batch_id = args.batch_id or manifest["batch_id"]
+        args.prefix = manifest["cars"][0]["vin"].rsplit("-", 1)[0] + "-"
     rt = build_runtime(Settings(driving="carla", llm="gemini"), host=args.host, port=args.port)
     app = MarshalApp(rt)
     # MARSHAL_PARKING=gemini: Gemini parks each car in its slot; its choices go in the film's feed
@@ -287,19 +371,39 @@ async def run(args) -> dict:
     if type(rt.llm).__name__ != "GeminiLLM":
         raise RuntimeError(f"expected GeminiLLM, got {type(rt.llm).__name__}")
 
-    vins = [f"{args.prefix}{i + 1}" for i in range(args.cars)]
+    car_specs = manifest["cars"] if manifest else []
+    vins = [car["vin"] for car in car_specs] if manifest else [f"{args.prefix}{i + 1}" for i in range(args.cars)]
     clear_records(rt, vins, args.prefix)
 
     now = datetime.now(timezone.utc)
     trucks = []
-    for spec in args.trucks.split(","):
-        truck_id, minutes = spec.split(":")
+    truck_specs = manifest["trucks"] if manifest else [
+        {"truck_id": item.split(":")[0], "eta_min": item.split(":", 1)[1]}
+        for item in args.trucks.split(",")
+    ]
+    for spec in truck_specs:
+        truck_id = spec["truck_id"]
+        minutes = spec["eta_min"]
         at = now + timedelta(minutes=float(minutes))
         rt.plant.trucks[truck_id] = Truck(truck_id=truck_id, scheduled=at, eta=at)
         trucks.append(truck_id)
+    fault_steps = {}
+    spawn_colours = {}
     for i, vin in enumerate(vins):
-        rt.store.put(Car(vin=vin, state=CarState.LINE_END, location="line_end",
-                         build_sheet=BuildSheet(**BUILD, truck_id=trucks[i % len(trucks)])))
+        if manifest:
+            spec = car_specs[i]
+            expected = spec["expected"]
+            sheet = {**spec["build_sheet"], "truck_id": spec["truck_id"]}
+            rt.store.put(Car(vin=vin, state=CarState.LINE_END, location="line_end",
+                             build_sheet=BuildSheet(**sheet)))
+            spawn_colours[vin] = spec["spawn_colour"]
+            if expected["kind"] == "dead_lamp":
+                fault_steps[vin] = expected["fault_step"]
+                rt.driving.faults[vin] = {expected["fault_step"]}
+        else:
+            rt.store.put(Car(vin=vin, state=CarState.LINE_END, location="line_end",
+                             build_sheet=BuildSheet(**BUILD, truck_id=trucks[i % len(trucks)])))
+            spawn_colours[vin] = CAR_COLOUR
 
     for spec in args.hazard:
         place, what = spec.split(":", 1)
@@ -311,13 +415,22 @@ async def run(args) -> dict:
     start_routine = app.functional.start
 
     async def start_with_steps(vin, chosen=None):
-        return await start_routine(vin, chosen if chosen is not None else steps)
+        if chosen is not None:
+            selected = chosen
+        elif fault_steps.get(vin) == "headlights":
+            selected = [1]
+        elif fault_steps.get(vin) == "brake_lights":
+            selected = [3]
+        else:
+            selected = steps
+        return await start_routine(vin, selected)
     app.functional.start = start_with_steps
 
     sun = set_sun(rt, args.sun_altitude)
     # Every camera is created before the loop starts: a camera spawned mid-tick segfaults the
     # server. That is the gate's four and each car's own three.
-    wrong = vins[args.wrong_colour - 1] if args.wrong_colour else None
+    wrong = (next((car["vin"] for car in car_specs if car["expected"]["kind"] == "wrong_colour"), None)
+             if manifest else vins[args.wrong_colour - 1] if args.wrong_colour else None)
     # Every car of an earlier run with this prefix goes, not only this run's VINs: a four-car run
     # stopped early left VIN-P4 in the lane, and the next three-car run's first car stood behind it
     # on the test track asking for help that nobody in this scene answers.
@@ -326,21 +439,43 @@ async def run(args) -> dict:
     for vin in sorted(leftovers | set(vins)):
         rt.driving.despawn(vin)
     for i, vin in enumerate(vins):
-        rt.driving.spawn(vin, at="line_end", colour=WRONG_COLOUR if vin == wrong else CAR_COLOUR,
+        rt.driving.spawn(vin, at="line_end", colour=spawn_colours[vin] if manifest else
+                         WRONG_COLOUR if vin == wrong else CAR_COLOUR,
                          behind_m=i * args.queue_gap_m)
     rt.gate_camera.prewarm(fixed=True)
+    incident_vin = None if args.no_incident else args.incident_vin or (
+        manifest["incident"].get("vin") if manifest else None
+    )
+    if incident_vin and incident_vin not in vins:
+        raise ValueError(f"incident VIN {incident_vin} is not in this batch")
     emit({"type": "plant.start", "cars": vins, "trucks": {t: rt.plant.trucks[t].eta for t in trucks},
           "next_truck": rt.plant.next_truck().truck_id, "steps": steps or "all", "sun": sun,
           "wrong_colour": wrong,
+          "batch_id": args.batch_id if manifest else None,
+          "incident_vin": incident_vin,
           "cameras": len(rt.driving._cameras) + 3 * len(vins)})
 
     watch = Watch(rt, vins, app)
+    event_log = None
+    event_seq = 0
+    if args.events:
+        from marshal_ai.dashboard import EventLog, attach
+        event_log = EventLog()
+        attach(app, event_log)
+    event_batch_id = args.batch_id or (manifest["batch_id"] if manifest else "demo")
     late = None
     if args.late_truck:
         truck_id, minutes = args.late_truck.split(":")
         late = (truck_id, float(minutes))
     replanned = False
     said = 0                                 # yard decisions already noted for the film
+    incident = {"enabled": bool(incident_vin), "vin": incident_vin, "requested": False,
+                "resolved": False, "test_requests": []}
+    incident_props = []
+    incident_placed = False
+    incident_deadline = None
+    incident_clear_at = None
+    processed_cases: set[str] = set()
     await rt.driving.start()
     note(rt.driving.world, f"{len(vins)} finished cars at the line end, for trucks "
                            f"{', '.join(trucks)}; {rt.plant.next_truck().truck_id} loads first", "plant")
@@ -357,6 +492,8 @@ async def run(args) -> dict:
                                     for p in rt.proposals.values()]})
                 next_beat = time.monotonic() + 30
             await app.tick()                    # release rules and yard exceptions
+            if event_log is not None:
+                event_seq = emit_bus_events(event_log, event_batch_id, event_seq)
             for d in app.yard.decisions[said:]:
                 if d.get("status") == "rejected_plan":
                     note(rt.driving.world, "Gemini's plan rejected by the plan check: "
@@ -367,6 +504,65 @@ async def run(args) -> dict:
             if not args.no_supervisor:
                 await supervise(app, rt)
             cars = watch.poll()
+            incident_car = next((c for c in cars if c.vin == incident_vin), None)
+            if incident_vin and not incident_placed and incident_car:
+                if finished(incident_car):
+                    incident_placed = True
+                    incident["enabled"] = False
+                    emit({"type": "plant.warning", "code": "incident_not_placed", "vin": incident_vin})
+                elif incident_car.state in {CarState.REPORT, CarState.REWORK}:
+                    incident_props = place_incident(rt, incident_vin)
+                    incident_placed = True
+                    if incident_props:
+                        incident_deadline = time.monotonic() + 60.0
+                    else:
+                        incident["enabled"] = False
+                        emit({"type": "plant.warning", "code": "incident_not_placed", "vin": incident_vin})
+            if incident_vin and incident_placed and incident["enabled"]:
+                for request in list(rt.missions.open_requests.values()):
+                    if request.vin != incident_vin or request.case_id in processed_cases:
+                        continue
+                    processed_cases.add(request.case_id)
+                    incident.update({"case_id": request.case_id, "situation": request.reason,
+                                     "requested": True})
+                    emit({"type": "flow2.request", "case_id": request.case_id, "vin": request.vin,
+                          "reason": request.reason, "options": request.options})
+                    case = rt.store.get(AssistanceCase, request.case_id)
+                    if case is not None:
+                        emit({"type": "flow2.card", "case_id": case.case_id,
+                              "situation": case.situation,
+                              "people_or_moving_equipment": case.people_or_moving_equipment,
+                              "recommended": case.recommended})
+                        wait_option = next((option for option in request.options if option.startswith("wait")), None)
+                        choice = case.recommended if case.recommended and case.recommended.startswith("wait") else wait_option
+                        if choice:
+                            resolved = await app.assistance.decide(case.case_id, choice, SUPERVISOR)
+                            incident.update({"resolved": resolved.resolved_by is not None, "choice": choice,
+                                             "situation": case.situation,
+                                             "test_requests": app.test_requests[-1:]})
+                            emit({"type": "flow2.decided", "case_id": case.case_id,
+                                  "choice": choice, "resolved": incident["resolved"]})
+                            incident_clear_at = time.monotonic() + 4.0
+            if incident_clear_at and time.monotonic() >= incident_clear_at:
+                for actor in incident_props:
+                    try:
+                        actor.destroy()
+                    except Exception:
+                        pass
+                incident_props.clear()
+                incident_clear_at = None
+                emit({"type": "plant.supervisor", "decision": "incident cleared",
+                      "vin": incident_vin, "summary": "box and worker removed from lane"})
+            if incident_deadline and time.monotonic() >= incident_deadline and not incident["requested"]:
+                for actor in incident_props:
+                    try:
+                        actor.destroy()
+                    except Exception:
+                        pass
+                incident_props.clear()
+                incident_deadline = None
+                incident["enabled"], incident["failed"] = False, True
+                emit({"type": "plant.warning", "code": "incident_not_detected", "vin": incident_vin})
             if cars and all(finished(c) for c in cars):
                 if late and not replanned:
                     # Flow 1's exception: the next truck is late. The rules have no answer for
@@ -393,6 +589,11 @@ async def run(args) -> dict:
             emit({"type": "plant.timeout", "after_s": args.timeout})
     finally:
         await rt.driving.stop()
+        for actor in incident_props:
+            try:
+                actor.destroy()
+            except Exception:
+                pass
 
     shipped = {}
     for truck in rt.plant.trucks_by_eta():
@@ -416,19 +617,59 @@ async def run(args) -> dict:
 
     by_vin = {c.vin: c for c in cars}
     visual = {vin: rt.store.get(InspectionResult, f"{vin}:visual") for vin in vins}
+    functional_results = {vin: rt.store.get(InspectionResult, f"{vin}:functional") for vin in vins}
     reports = {vin: (r.verdict.value if (r := rt.store.get(CarReport, vin)) else None)
                for vin in vins}
     bays = {vin: [t.bay for t in r.rework] if (r := rt.store.get(CarReport, vin)) else []
             for vin in vins}
     line_to_yard = {vin: round(watch.yard_at[vin] - watch.released_at[vin], 1)
                     for vin in vins if vin in watch.yard_at and vin in watch.released_at}
+    functional = {
+        vin: {
+            "verdict": result.verdict.value,
+            "disagreements": [item.name for item in result.checklist
+                              if item.telemetry_ok != item.camera_ok],
+            "checklist": [item.model_dump(mode="json") for item in result.checklist],
+        }
+        for vin, result in functional_results.items() if result is not None
+    }
+    car_results = {
+        vin: {"state": by_vin[vin].state.value, "location": by_vin[vin].location,
+              "truck": by_vin[vin].build_sheet.truck_id, "report": reports[vin],
+              "gate": visual[vin].verdict.value if visual[vin] else None,
+              "mismatches": visual[vin].build_sheet_mismatches if visual[vin] else [],
+              "booked_bays": bays[vin]}
+        for vin in vins if vin in by_vin
+    }
+    labels = []
+    if manifest:
+        for spec in car_specs:
+            vin, expected = spec["vin"], spec["expected"]
+            actual = car_results.get(vin, {})
+            kind = expected["kind"]
+            checks = functional.get(vin, {}).get("checklist", [])
+            if kind == "wrong_colour":
+                caught = actual.get("gate") == "FAIL" and any("colour" in str(m).lower()
+                                                                 for m in actual.get("mismatches", []))
+            elif kind == "dead_lamp":
+                caught = any(c.get("name") == expected.get("fault_step")
+                             and c.get("telemetry_ok") is True and c.get("camera_ok") is False
+                             for c in checks)
+            elif kind == "incident":
+                caught = bool(incident.get("resolved") and incident.get("test_requests"))
+            else:
+                caught = None
+            labels.append({"vin": vin, "expected": kind, "caught": caught})
     return {
-        "cars": {vin: {"state": by_vin[vin].state.value, "location": by_vin[vin].location,
-                       "truck": by_vin[vin].build_sheet.truck_id, "report": reports[vin],
-                       "gate": visual[vin].verdict.value if visual[vin] else None,
-                       "mismatches": visual[vin].build_sheet_mismatches if visual[vin] else [],
-                       "booked_bays": bays[vin]}
-                 for vin in vins if vin in by_vin},
+        "cars": car_results,
+        "functional": functional,
+        "incident": incident,
+        "labels": {"total": len(labels), "caught": sum(row["caught"] is True for row in labels),
+                   "missed": sum(row["caught"] is False for row in labels),
+                   "false_alarms": sum(car_results.get(row["vin"], {}).get("gate") in ("REVIEW", "FAIL")
+                                       for row in labels if row["expected"] == "clean"),
+                   "cars": labels},
+        "complete": bool(cars) and all(finished(c) for c in cars),
         "wrong_colour": wrong,
         "parked": parked,
         "shipped": shipped,
@@ -458,7 +699,7 @@ def main(argv: list[str] | None = None) -> int:
     wrong = out["wrong_colour"]
     good = {vin: c for vin, c in out["cars"].items() if vin != wrong}
     every_good_car_shipped = all(c["state"] == "shipped" for c in good.values())
-    concurrent = out["max_cars_in_plant_at_once"] >= 2
+    concurrent = out["max_cars_in_plant_at_once"] >= (1 if args.cars == 1 else 2)
     caught = True
     if wrong:
         # Scene 2's claim, as the design states it: the car is flagged at the gate for its colour,
@@ -473,7 +714,10 @@ def main(argv: list[str] | None = None) -> int:
                   and "production_control" in c.get("booked_bays", [])
                   and c.get("state") != "shipped")
         out["wrong_colour_caught"] = caught
-    ok = every_good_car_shipped and concurrent and caught and len(out["cars"]) == args.cars
+    if args.manifest:
+        ok = out["complete"] and len(out["cars"]) == args.cars
+    else:
+        ok = every_good_car_shipped and concurrent and caught and len(out["cars"]) == args.cars
     emit({"type": "plant.done", **out,
           "result": "success" if ok else "not demonstrated"})
     return 0 if ok else 2

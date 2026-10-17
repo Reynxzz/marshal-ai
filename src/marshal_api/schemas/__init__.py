@@ -14,6 +14,19 @@ from marshal_api.schemas.assistance import (
     DecideAssistanceRequest,
     DetectedObject,
 )
+from marshal_api.schemas.batch import (
+    BatchAccepted,
+    BatchCarDto,
+    BatchCancelAccepted,
+    BatchDetail,
+    BatchEventDto,
+    BatchEvents,
+    BatchFlowCounts,
+    BatchList,
+    BatchReport,
+    BatchSummary,
+    CreateBatchRequest,
+)
 from marshal_api.schemas.common import (
     Actor,
     CarState,
@@ -131,4 +144,16 @@ __all__ = [
     "Job",
     "JobAccepted",
     "Media",
+    # batch
+    "BatchAccepted",
+    "BatchCarDto",
+    "BatchCancelAccepted",
+    "BatchDetail",
+    "BatchEventDto",
+    "BatchEvents",
+    "BatchFlowCounts",
+    "BatchList",
+    "BatchReport",
+    "BatchSummary",
+    "CreateBatchRequest",
 ]

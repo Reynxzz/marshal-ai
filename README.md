@@ -57,8 +57,8 @@ The FastAPI service behind `marshal-fe` answers from the seeded SQLite demo by d
 `MARSHAL_STORE=gcp` it reads the CARLA run's own records instead: cars, assistance cases,
 proposals, inspections, reports and the test lab come from Firestore, media from the `gs://`
 URIs the records carry, and `/events` streams the live flow events (set `MARSHAL_BUS=gcp` and
-create the subscriptions with `scripts/create_pubsub_topics.py`). Mutating endpoints return 501
-in this mode: the API cannot command the running plant yet.
+create the subscriptions with `scripts/create_pubsub_topics.py`). Other existing mutating endpoints
+remain read-only in this mode; the CARLA batch runner is enabled separately on its host.
 
 ```
 uv pip install -e ".[gcp,dev]"
@@ -67,6 +67,16 @@ MARSHAL_STORE=gcp MARSHAL_BUS=gcp .venv/bin/uvicorn marshal_api.main:app --port 
 
 Run the API as one process (no `--workers`): the event stream and job bookkeeping are
 process-local state.
+
+### CARLA batch runs
+
+The dashboard's batch feature uses the same API process and CARLA host. Set `MARSHAL_BATCH=1`
+and `MARSHAL_BATCH_STORE=firestore`; batch state lives in Firestore because the AWS instance's
+root volume is ephemeral. The API starts `scripts/run_carla_plant.sh` and runs the lab only when an
+incident produces a test request. Host auth uses Workload Identity Federation (no
+service-account key). The GCP data plane (Firestore, GCS, BigQuery, Pub/Sub, IAM/WIF) is in
+`marshal-tf/gcp/`; operator steps are in
+[docs/BATCH_RUN_RUNBOOK.md](docs/BATCH_RUN_RUNBOOK.md).
 
 ## Remote CARLA 0.9.16
 

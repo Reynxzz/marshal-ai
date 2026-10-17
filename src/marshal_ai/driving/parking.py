@@ -416,6 +416,26 @@ class ParkView:
                 "obstacles": [[b.x, b.y, b.yaw, b.length, b.width, b.label] for b in self.obstacles]}
 
 
+def step_event(vin: str, slot: str, step: dict, view: "ParkView | None", decision) -> dict:
+    """The bus payload for one parking decision (marshal_ai.dashboard.describe renders it).
+
+    One dict with generic keys (flow/source/title/detail/level) and the structured choice: what
+    the CARLA tick and the offline eval both publish, so the dashboards show the same lines.
+    """
+    probs = {k: round(float(p), 3) for k, p in (getattr(decision, "probs", None) or {}).items()}
+    choice = step["choice"]
+    return {
+        "type": "parking.step", "flow": 1, "source": "parking",
+        "title": f"{vin} parking {slot}: {choice} ({step['p']:.2f})",
+        "detail": ", ".join(f"{k} {p:.2f}" for k, p in probs.items()),
+        "level": "good" if choice.startswith("path_") or choice == "parked" else "warn",
+        "vin": vin, "slot": slot, "choice": choice, "probs": probs,
+        "decision": step["n"],
+        "paths": [{"option": p.option, "strategy": p.strategy, "metres": round(p.metres, 1)}
+                  for p in (getattr(view, "paths", None) or [])],
+    }
+
+
 def _side(value: float, positive: str, negative: str) -> str:
     return positive if value >= 0 else negative
 

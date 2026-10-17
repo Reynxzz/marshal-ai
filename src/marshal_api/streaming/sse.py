@@ -17,7 +17,7 @@ from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
-from marshal_ai.dashboard import describe
+from marshal_ai.dashboard import _status_key, describe
 from marshal_ai.dashboard import FLOWS as LIVE_FLOWS
 from marshal_ai.events import Topic
 
@@ -76,30 +76,33 @@ def _decision_data(msg: dict) -> dict | None:
 
 
 def _live(msg: dict, seq: int, topic: Topic | None = None) -> FlowEvent:
-    if topic is not None:
-        # A live bus message is a domain payload (MissionDone, TrackStep, ...); marshal_ai's
-        # dashboard already turns it into the flow's line. No keys are added to the payload.
-        flow, _name = LIVE_FLOWS.get(topic, (1, ""))
-        title, detail, level = describe(topic, msg)
+    data = _decision_data(msg)
+    if topic is None or "title" in msg:
+        # An already-described feed line: services publish these (assist ingest), and the
+        # payload is self-contained.
         return FlowEvent(
             seq=seq,
             at=_at(msg.get("at")),
-            flow=flow,
-            source=str(msg.get("source") or topic.value),
-            title=title or str(msg.get("type", "")),
-            detail=detail,
-            level=_level(level),
-            data=_decision_data(msg),
+            flow=int(msg.get("flow", 1) or 1),
+            source=str(msg.get("source", "system")),
+            title=str(msg.get("title", msg.get("type", ""))),
+            detail=str(msg.get("detail", "")),
+            level=_level(msg.get("level")),
+            data=data,
         )
+    # A domain payload (Status, MissionDone, a decision): marshal_ai's dashboard turns it
+    # into the flow's line. No keys are added to the payload.
+    flow, _name = LIVE_FLOWS.get(topic, (1, ""))
+    title, detail, level = describe(topic, msg)
     return FlowEvent(
         seq=seq,
         at=_at(msg.get("at")),
-        flow=int(msg.get("flow", 1) or 1),
-        source=str(msg.get("source", "system")),
-        title=str(msg.get("title", msg.get("type", ""))),
-        detail=str(msg.get("detail", "")),
-        level=_level(msg.get("level")),
-        data=_decision_data(msg),
+        flow=flow,
+        source=str(msg.get("source") or topic.value),
+        title=title or str(msg.get("type", "")),
+        detail=detail,
+        level=_level(level),
+        data=data,
     )
 
 
@@ -139,6 +142,9 @@ async def _events(
 
         bus.subscribe(topic, on_bus)
 
+    # Status arrives every tick; only a real change is worth a line (same rule as the dashboard,
+    # so the feed is decisions and outcomes, not telemetry).
+    seen_status: dict[str, str | None] = {}
     while True:
         if await request.is_disconnected():
             break
@@ -147,10 +153,17 @@ async def _events(
         except asyncio.TimeoutError:
             yield {"event": "ping", "data": ""}
             continue
+        if topic is Topic.VEHICLE_STATUS:
+            key = _status_key(msg)
+            if key is not None:
+                vin = str(msg.get("vin"))
+                if seen_status.get(vin) == key:
+                    continue
+                seen_status[vin] = key
         last_seq += 1
         yield {
             "id": str(last_seq),
-            "data": _live(msg, last_seq, topic if live else None).model_dump_json(),
+            "data": _live(msg, last_seq, topic).model_dump_json(),
         }
 
 
