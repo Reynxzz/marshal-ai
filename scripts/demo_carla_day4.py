@@ -148,7 +148,8 @@ async def check_one(app: MarshalApp, vin: str, steps: list[int], fault: str | No
             out_path.write_bytes(media.data)
     items = [{"step": i.step, "name": i.name, "telemetry_ok": i.telemetry_ok,
               "camera_ok": i.camera_ok, "camera_confidence": round(i.camera_confidence or 0, 2),
-              "passed": i.passed} for i in result.checklist]
+              "passed": i.passed, **({"telemetry": i.telemetry} if i.telemetry else {})}
+             for i in result.checklist]
     disagreements = [i for i in result.checklist
                      if i.telemetry_ok is not None and i.camera_ok is not None
                      and i.telemetry_ok != i.camera_ok]
