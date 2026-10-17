@@ -24,6 +24,7 @@ import asyncio
 import json
 from pathlib import Path
 
+from film_notes import note
 from marshal_ai.app import MarshalApp
 from marshal_ai.config import Settings
 from marshal_ai.records import (BuildSheet, Car, CarReport, CarState, InspectionResult,
@@ -76,6 +77,7 @@ async def repair_and_reinspect(app: MarshalApp, vin: str, timeout: float) -> dic
     outcome = await app.router.repair_done(vin, by="electrician-joe")
     emit({"type": "flow5.repair_done", "vin": vin, "outcome": outcome,
           "faults_left": sorted(rt.driving.faults.get(vin, set()))})
+    note(rt.driving.world, f"electrician-joe repaired {vin}; it goes back for a re-check", "plant")
     deadline = loop.time() + timeout
     while loop.time() < deadline:
         result = rt.store.get(InspectionResult, f"{vin}:functional")
@@ -93,6 +95,8 @@ async def repair_and_reinspect(app: MarshalApp, vin: str, timeout: float) -> dic
            "bays": [{"bay": t.bay, "done": t.done_at is not None} for t in report.rework],
            "seconds": round(loop.time() - started, 1)}
     emit({"type": "flow5.reinspected", **out})
+    if reinspected:
+        note(rt.driving.world, f"{vin} re-checked: {out['functional']}, report {out['report']}", "gemini")
     return out
 
 
@@ -155,6 +159,11 @@ async def check_one(app: MarshalApp, vin: str, steps: list[int], fault: str | No
                      and i.telemetry_ok != i.camera_ok]
     emit({"type": "flow4.result", "vin": vin, "fault": fault, "verdict": result.verdict.value,
           "checklist": items, "telemetry_camera_disagreements": len(disagreements)})
+    # what the film shows as it happens (scripts/film_notes.py)
+    for i in disagreements:
+        note(app.rt.driving.world, f"{vin} {i.name}: telemetry says {'on' if i.telemetry_ok else 'off'}, "
+             f"Gemini sees {'on' if i.camera_ok else 'off'} ({i.camera_confidence or 0:.2f})", "gemini")
+    note(app.rt.driving.world, f"{vin}: {result.verdict.value}", "gemini" if disagreements else "rules")
 
     # flow 5: confirm the bay while the car is still in the driving system. Confirming after
     # cleanup failed with KeyError because dispatch sends the car a mission to drive there.
@@ -171,6 +180,8 @@ async def check_one(app: MarshalApp, vin: str, steps: list[int], fault: str | No
             continue
         confirmed.append(decision)
         emit({"type": "flow5.confirmed", "vin": vin, "by": SUPERVISOR, "decision": decision})
+        note(app.rt.driving.world, f"{SUPERVISOR} confirmed {vin} for "
+             f"{', '.join(b.replace('rework.', '') for b in decision.get('bays', []))} rework", "supervisor")
         # let the car actually drive to the bay
         arrive = loop.time() + 180.0
         while loop.time() < arrive:
@@ -178,6 +189,7 @@ async def check_one(app: MarshalApp, vin: str, steps: list[int], fault: str | No
             if car is not None and car.location in {t.bay for t in
                                                    rt.store.get(CarReport, vin).rework}:
                 emit({"type": "flow5.arrived", "vin": vin, "bay": car.location})
+                note(rt.driving.world, f"{vin} reached the {car.location.replace('rework.', '')} bay", "rules")
                 break
             await asyncio.sleep(2.0)
         else:

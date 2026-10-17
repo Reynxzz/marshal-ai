@@ -72,4 +72,6 @@ extra=()
 [[ -n "${MARSHAL_PLANT_TIMEOUT:-}" ]] && extra+=(--timeout "$MARSHAL_PLANT_TIMEOUT")
 # MARSHAL_PLANT_HAZARD="finishing_corner:forklift unloading pallets": Gemini routes cars around it
 [[ -n "${MARSHAL_PLANT_HAZARD:-}" ]] && extra+=(--hazard "$MARSHAL_PLANT_HAZARD")
+# MARSHAL_PLANT_STAGE_HAZARD=1: and put it in the world beside the road, for the film
+[[ "${MARSHAL_PLANT_STAGE_HAZARD:-0}" != 0 ]] && extra+=(--stage-hazards)
 python3 scripts/demo_carla_plant.py --cars "$CARS" --steps "$STEPS" --wrong-colour "$WRONG" "${extra[@]}"

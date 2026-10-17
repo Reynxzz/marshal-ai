@@ -25,6 +25,7 @@ import asyncio
 import json
 from pathlib import Path
 
+from film_notes import note
 from marshal_ai.app import MarshalApp
 from marshal_ai.config import Settings
 from marshal_ai.driving import AssistRequest, MissionDone, MissionGo
@@ -141,6 +142,8 @@ async def run(args: argparse.Namespace) -> dict:
         request = requests[0]
         emit({"type": "flow2.request", "case_id": request.case_id, "vin": request.vin,
               "reason": request.reason, "options": request.options})
+        # what the film shows as it happens (scripts/film_notes.py)
+        note(rt.driving.world, f"{request.vin} stopped: {request.reason.split(':')[0]}. It asks for help", "rules")
 
         # The design asks for a 10 s clip with the request, so this is a run of frames now, not
         # one still. All of them are written out: the desk's recommendation should be checkable
@@ -158,6 +161,9 @@ async def run(args: argparse.Namespace) -> dict:
               "people_or_moving_equipment": case.people_or_moving_equipment,
               "recommended": case.recommended, "confidence": round(case.confidence, 2),
               "ranking": case.ranking})
+        seen = "a person in the lane" if case.people_or_moving_equipment else "no one in the lane"
+        note(rt.driving.world, f"Gemini sees {seen}: recommends {(case.recommended or '').replace('_', ' ')} "
+             f"({case.confidence:.2f})", "gemini")
 
         # a human always decides
         chosen = args.choose or case.recommended or request.options[0]
@@ -167,6 +173,7 @@ async def run(args: argparse.Namespace) -> dict:
         resolved = rt.store.get(AssistanceCase, case.case_id)
         emit({"type": "flow2.decided", "by": SUPERVISOR, "choice": resolved.choice,
               "recommended": case.recommended})
+        note(rt.driving.world, f"{SUPERVISOR} chose {resolved.choice.replace('_', ' ')}", "supervisor")
 
         # the car must be released, do what was chosen, and finish its mission
         v = rt.driving.vehicles[args.vin]
@@ -179,6 +186,7 @@ async def run(args: argparse.Namespace) -> dict:
                     actor.destroy()
                 props.clear()
                 emit({"type": "day5.cleared", "after_s": args.clear_after_s})
+                note(rt.driving.world, "The box is moved and the worker steps away", "plant")
             await asyncio.sleep(0.5)
         reached = any(d.mission_id == mission_id for d in done)
         x, y = rt.driving.position_xy(args.vin)
@@ -186,6 +194,9 @@ async def run(args: argparse.Namespace) -> dict:
         outcome = rt.driving.assist_outcomes.get(case.case_id, {})
         emit({"type": "flow2.executed", "reached": reached, "at": args.to_point if reached else None,
               "off_mark_m": round(((x - tx) ** 2 + (y - ty) ** 2) ** 0.5, 2), "outcome": outcome})
+        if reached:
+            note(rt.driving.world, f"{args.vin} carried on to the {args.to_point.replace('_', ' ')}; "
+                 "the case goes to the test lab", "rules")
 
         result = {
             "case_id": case.case_id,
