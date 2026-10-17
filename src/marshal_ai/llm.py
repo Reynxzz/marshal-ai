@@ -12,7 +12,9 @@ import json
 import threading
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Callable, Protocol, TypeVar
+import math
+from functools import lru_cache
+from typing import Any, Callable, ClassVar, Protocol, TypeVar
 
 from pydantic import BaseModel
 
@@ -38,6 +40,39 @@ class LLMCall:
     prompt: str
     media: list[Media]
     system: str
+
+
+class Decision(BaseModel):
+    """A choice from a closed set of options, with a probability for each: Gemini as a decision model.
+
+    Asked for one, Gemini answers with a single option number and nothing else, and the probabilities
+    come from the log-probabilities of that one token, not from a number the model writes. One output
+    token instead of a JSON object with a sentence in it: on the lamp check 2.0 s against 3.3 s, the
+    same verdict. Get a schema for a set of options with `decision_schema("yes", "no")`.
+    """
+
+    OPTIONS: ClassVar[tuple[str, ...]] = ()
+    choice: str
+    probs: dict[str, float]
+
+    @property
+    def confidence(self) -> float:
+        return self.probs.get(self.choice, 0.0)
+
+    def p(self, option: str) -> float:
+        return self.probs.get(option, 0.0)
+
+
+@lru_cache(maxsize=None)
+def decision_schema(*options: str) -> type[Decision]:
+    """The Decision type for these options, in this order."""
+    if len(options) < 2:
+        raise ValueError("a decision needs at least two options")
+    return type(f"Decision_{len(options)}", (Decision,), {"OPTIONS": tuple(options)})
+
+
+def is_decision(schema) -> bool:
+    return isinstance(schema, type) and issubclass(schema, Decision)
 
 
 class LLM(Protocol):
@@ -68,7 +103,11 @@ GATE_THINKING = 512
 # that left the people out (2 of 16), so the field now asks for them (16 of 16, against 12 before).
 # Tasks whose single image needs fine detail: the track's stacked lamp crops (flows/functional.py
 # pair_image), where a lit strip and a dark lens are a few pixels apart at the default resolution.
-TASK_SINGLE_IMAGE_RESOLUTION = {"track.step": "high"}
+TASK_SINGLE_IMAGE_RESOLUTION = {"track.step": "high", "track.decide": "high"}
+
+# Decisions think not at all. MARSHAL_PARK_THINKING gives parking (drive.park) a budget for
+# experiments: in the moves mode, 1024 tokens made it slower (3.5 s a move) and no better.
+DECISION_THINKING = {"drive.park": int(__import__("os").getenv("MARSHAL_PARK_THINKING", "0"))}
 
 TASK_THINKING_BUDGET = {"assist.locate": 0, "assist.assess": 0, "visual.defects": GATE_THINKING,
                         "visual.variant": GATE_THINKING, "visual.verify": GATE_THINKING}
@@ -121,6 +160,8 @@ class GeminiLLM:
     def generate(self, task, prompt, schema=None, media=None, system=""):
         from google.genai import types
 
+        if is_decision(schema):
+            return self._decide(task, prompt, schema, media, system)
         parts: list = []
         for m in media or []:
             if m.label:
@@ -161,6 +202,78 @@ class GeminiLLM:
             return json.loads(response.text)
         except json.JSONDecodeError as e:
             raise LLMError(f"{task}: response was not JSON: {response.text[:300]}") from e
+
+    def _parts(self, prompt, media):
+        from google.genai import types
+
+        parts: list = []
+        for m in media or []:
+            if m.label:
+                parts.append(types.Part.from_text(text=f"[{m.label}]"))
+            if m.data is not None:
+                parts.append(types.Part.from_bytes(data=m.data, mime_type=m.mime))
+            elif m.uri is not None:
+                parts.append(types.Part.from_uri(file_uri=m.uri, mime_type=m.mime))
+            else:
+                raise LLMError(f"media {m.label!r} has no data or uri")
+        parts.append(types.Part.from_text(text=prompt))
+        return parts
+
+    def _decide(self, task, prompt, schema, media, system):
+        """One option number back, constrained to the options; probabilities from its logprobs."""
+        from google.genai import types
+
+        options = schema.OPTIONS
+        numbers = [str(i + 1) for i in range(len(options))]
+        listed = "\n".join(f"{n} = {o}" for n, o in zip(numbers, options))
+        resolution = self.media_resolution if media else None
+        if resolution is None and media and len(media) == 1:
+            resolution = TASK_SINGLE_IMAGE_RESOLUTION.get(task)
+        config = types.GenerateContentConfig(
+            temperature=self.temperature,
+            seed=self.seed,
+            response_mime_type="text/x.enum",
+            response_schema={"type": "STRING", "enum": numbers},
+            response_logprobs=True,
+            logprobs=min(len(numbers), 20),
+            # a decision is the answer itself: thinking would cost the time this is meant to save,
+            # except for a task that has to plan ahead (DECISION_THINKING)
+            thinking_config=types.ThinkingConfig(thinking_budget=DECISION_THINKING.get(task, 0)),
+            system_instruction=system or None,
+            media_resolution=(getattr(types.MediaResolution, f"MEDIA_RESOLUTION_{resolution.upper()}")
+                              if resolution else None),
+        )
+        response = self.client.models.generate_content(
+            model=self.model,
+            contents=[types.Content(role="user", parts=self._parts(
+                f"{prompt}\n\nOptions:\n{listed}\nAnswer with the number of one option.", media))],
+            config=config,
+        )
+        return schema(**decision_from_response(response, numbers, options))
+
+
+def decision_from_response(response, numbers: list[str], options: tuple[str, ...]) -> dict:
+    """The chosen option and a probability per option, from the first token's top candidates.
+
+    Options the model gave no probability to get none; the rest are renormalised over the options,
+    so probability mass on stray tokens (a bracket, a word) does not count. Without logprobs the
+    answer's own text is the choice, at probability 1.
+    """
+    text = (response.text or "").strip()
+    try:
+        top = response.candidates[0].logprobs_result.top_candidates[0].candidates
+        raw = {c.token.strip(): c.log_probability for c in top}
+    except (AttributeError, IndexError, TypeError):
+        raw = {}
+    weights = [math.exp(raw[n]) if n in raw else 0.0 for n in numbers]
+    total = sum(weights)
+    if total <= 0:
+        if text not in numbers:
+            raise LLMError(f"decision answer {text!r} is not one of {numbers}")
+        weights, total = [1.0 if n == text else 0.0 for n in numbers], 1.0
+    probs = {o: w / total for o, w in zip(options, weights)}
+    choice = options[numbers.index(text)] if text in numbers else max(probs, key=probs.get)
+    return {"choice": choice, "probs": probs}
 
 
 Handler = Callable[[LLMCall], Any]

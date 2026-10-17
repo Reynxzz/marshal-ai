@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Literal
 from pydantic import BaseModel, Field
 
 from marshal_ai.driving import CommandRejected, MissionDone, MissionGo, MissionHold, MissionResume
+from marshal_ai.flows import route
 from marshal_ai.flows.base import ask, cars_in, log, update_car
 from marshal_ai.llm import to_prompt_json
 from marshal_ai.records import Car, CarReport, CarState, Verdict
@@ -69,6 +70,13 @@ class YardTraffic:
         self.slot_missions: dict[str, str] = {}   # mission id -> slot
         # moves waiting for a slot's current car to drive off it: occupant vin -> actions
         self.deferred: dict[str, list[YardAction]] = {}
+        # vin -> map points of the way it is driving now, so the next car's route choice sees it
+        self.routes_in_use: dict[str, list[str]] = {}
+        self.route_log: list[dict] = []           # every route choice, Gemini's or the rules' (flows/route.py)
+        # cars being sent to a slot right now: the route choice awaits Gemini for about a second
+        # before the mission is recorded, and the tick, seeing a passed car with no mission, sent it
+        # again (twice for VIN-P3 on CARLA, 2026-10-15)
+        self.sending: set[str] = set()
 
     # ---------- routine rules (no model call) ----------
 
@@ -170,6 +178,15 @@ class YardTraffic:
         return car.vin
 
     async def send_to_slot(self, vin: str) -> str | None:
+        if vin in self.sending:
+            return None
+        self.sending.add(vin)
+        try:
+            return await self._send_to_slot(vin)
+        finally:
+            self.sending.discard(vin)
+
+    async def _send_to_slot(self, vin: str) -> str | None:
         car = self.rt.store.get(Car, vin)
         report = self.rt.store.get(CarReport, vin)
         if not car.do_not_ship and (report is None or report.verdict != Verdict.PASS):
@@ -183,17 +200,26 @@ class YardTraffic:
             # the yard", raised once by detect_exceptions.
             log.info("yard: no free slot for %s; it waits for one", vin)
             return None
-        mission = MissionGo(mission_id=self.rt.next_id("M", 4), vin=vin, waypoints=[slot],
+        # Which way it drives there: the only way, the shortest when nothing is going on, or
+        # Gemini's choice when something is (flows/route.py).
+        waypoints, record = await route.choose(
+            self.rt, vin, car.location, slot, self.routes_in_use, YARD_SPEED_KMH,
+            getattr(self.rt.settings, "route", "reason"))
+        mission = MissionGo(mission_id=self.rt.next_id("M", 4), vin=vin, waypoints=waypoints,
                             max_speed_kmh=YARD_SPEED_KMH)
         await self.rt.missions.send(mission)
         self.slot_missions[mission.mission_id] = slot
-        update_car(self.rt, vin, yard_slot=slot, mission_id=mission.mission_id)
+        self.routes_in_use[vin] = [car.location, *waypoints]
+        self.route_log.append(record)
+        update_car(self.rt, vin, yard_slot=slot, mission_id=mission.mission_id,
+                   route=[car.location, *waypoints], route_by=record["by"])
         return slot
 
     async def on_mission_done(self, event: MissionDone) -> None:
         car = self.rt.store.get(Car, event.vin)
         if car is None:
             return
+        self.routes_in_use.pop(event.vin, None)
         if event.location.startswith("yard.Y"):
             update_car(self.rt, event.vin, state=CarState.YARD, location=event.location,
                        mission_id=None, yard_at=car.yard_at or self.rt.clock())
@@ -354,9 +380,23 @@ class YardTraffic:
             occupant = held_by.get(slot)
             if occupant and occupant != a.vin and occupant in moving:
                 blocked[a.vin] = occupant
-        if blocked and len(blocked) == len(moving):
-            blocked.pop(next(a.vin for a in plan.actions if a.vin in blocked))
+        self._cycle_breakers = {}
+        for a in plan.actions:                    # in plan order, so the first of a cycle breaks it
+            seen, vin = [], a.vin
+            while vin in blocked and vin not in seen:
+                seen.append(vin)
+                vin = blocked[vin]
+            if vin in seen:                       # a cycle: A to B's slot, B to A's, ...
+                first = next(x.vin for x in plan.actions if x.vin in seen[seen.index(vin):])
+                self._cycle_breakers[first] = blocked.pop(first)
         return blocked
+
+    def free_slot(self, plan: YardPlan) -> str | None:
+        """A yard slot no car holds and this plan sends no car to: a cycle's car waits there."""
+        held = {c.yard_slot for c in self.rt.store.list(Car) if c.yard_slot}
+        wanted = {target_slot(a) for a in plan.actions if a.action == "go"}
+        free = [p for p in self.rt.map.points if p.startswith("yard.Y") and p not in held | wanted]
+        return free[0] if free else None
 
     async def execute(self, plan: YardPlan) -> list[str]:
         done = []
@@ -365,7 +405,20 @@ class YardTraffic:
         blocked = self.blocked_by(plan)
         for a in plan.actions:
             try:
-                if a.action == "go" and a.vin in blocked:
+                if a.action == "go" and a.vin in getattr(self, "_cycle_breakers", {}):
+                    # Every car of a cycle waits for another, so one has to go first, and its slot
+                    # is still taken. Sent straight there it stopped behind that car, and both
+                    # waited until the run timed out. It parks in a free slot; once the car in its
+                    # slot has moved on, it goes there.
+                    occupant, free = self._cycle_breakers[a.vin], self.free_slot(plan)
+                    if free is None:
+                        await self.go(a)
+                    else:
+                        await self.go(a.model_copy(update={"waypoints": [free]}))
+                        self.deferred.setdefault(occupant, []).append(a)
+                        log.info("yard: %s parks in %s until %s leaves %s", a.vin, free, occupant,
+                                 target_slot(a))
+                elif a.action == "go" and a.vin in blocked:
                     self.deferred.setdefault(blocked[a.vin], []).append(a)
                     log.info("yard: %s waits for %s to leave %s", a.vin, blocked[a.vin], target_slot(a))
                 elif a.action == "go":
@@ -394,7 +447,7 @@ class YardTraffic:
         waiting = []
         for car in self.rt.store.list(Car):
             if car.state in (CarState.YARD, CarState.SHIPPED) or car.mission_id or car.yard_slot \
-                    or car.do_not_ship:
+                    or car.do_not_ship or car.vin in self.sending:
                 continue
             report = self.rt.store.get(CarReport, car.vin)
             if report is not None and report.verdict == Verdict.PASS:
@@ -421,4 +474,6 @@ class YardTraffic:
             "cars_in_yard": sum(c.state == CarState.YARD for c in cars),
             "cars_shipped": sum(c.state == CarState.SHIPPED for c in cars),
             "avg_line_to_yard_s": round(sum(line_to_yard) / len(line_to_yard)) if line_to_yard else None,
+            "routes_chosen_by_gemini": sum(r["by"] == "gemini" for r in self.route_log),
+            "routes_by_rules": sum(r["by"] == "rules" for r in self.route_log),
         }

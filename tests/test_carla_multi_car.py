@@ -32,7 +32,8 @@ def _stub_carla(monkeypatch):
 
 def _actor(type_id: str, role: str = ""):
     return SimpleNamespace(id=hash((type_id, role)) & 0xFFFF, type_id=type_id,
-                           attributes={"role_name": role})
+                           attributes={"role_name": role},
+                           get_location=lambda: SimpleNamespace(x=0.0, y=6.0, z=0.0))
 
 
 def _stalled_backend(obstacle, plant_vins=("VIN-1",)) -> tuple[CarlaDrivingSystem, _Vehicle]:
@@ -46,6 +47,7 @@ def _stalled_backend(obstacle, plant_vins=("VIN-1",)) -> tuple[CarlaDrivingSyste
     backend.assist_options = ["wait_for_removal"]
     backend.raise_assist = lambda *a, **k: _record(backend, a)
     backend._obstacle_ahead = lambda v: (obstacle, 6.0)
+    backend._executable_options = lambda v, where: list(backend.assist_options)
     stopped = SimpleNamespace(get_velocity=lambda: SimpleNamespace(x=0.0, y=0.0, z=0.0))
     backend.vehicles = {vin: _Vehicle(vin=vin, actor=stopped, agent=None, location="gate")
                         for vin in plant_vins}
@@ -241,3 +243,64 @@ def test_creeping_gives_up_rather_than_hold_up_the_plant():
     v.creep_s = carla_backend.CREEP_MAX_S
 
     assert backend._creep(v) is True
+
+
+def _passing(along_m: float, kmh: float, max_kmh: float = 5.0, obstacle=None):
+    """A car facing +x, `along_m` before the gate mark at the origin, moving at `kmh`."""
+    controls: list = []
+    backend = CarlaDrivingSystem.__new__(CarlaDrivingSystem)
+    backend.fixed_delta_s = 0.05
+    backend.drive_through_gate = True
+    backend.passes = {}
+    backend.map = load_plant_map()
+    backend.transform = lambda point: SimpleNamespace(
+        location=_Loc(x=0.0, y=0.0), get_forward_vector=lambda: _Loc(x=1.0, y=0.0))
+    backend._obstacle_ahead = lambda v: (obstacle, 1.0) if obstacle else (None, 99.0)
+    here = SimpleNamespace(location=_Loc(x=-along_m, y=0.0),
+                           get_forward_vector=lambda: _Loc(x=1.0, y=0.0))
+    ms = kmh / 3.6
+    actor = SimpleNamespace(get_transform=lambda: here,
+                            get_velocity=lambda: _Loc(x=ms, y=0.0, z=0.0),
+                            apply_control=controls.append)
+    v = _Vehicle(vin="VIN-1", actor=actor, agent=None, location="line_end")
+    v.remaining = ["inspection_gate"]
+    v.mission = SimpleNamespace(mission_id="M-1", max_speed_kmh=max_kmh)
+    return backend, v, controls
+
+
+def test_the_gate_is_driven_through_not_stopped_at():
+    backend, v, controls = _passing(3.0, kmh=5.0)
+
+    assert backend._drives_through("inspection_gate")
+    assert backend._pass_through(v) is False, "not across the mark yet"
+    assert controls[-1]["brake"] == 0.0, "rolling at gate speed, not braking"
+
+
+def test_a_slow_car_is_brought_up_to_gate_speed():
+    backend, v, controls = _passing(3.0, kmh=1.0)
+
+    backend._pass_through(v)
+
+    assert controls[-1]["throttle"] > 0
+
+
+def test_crossing_the_mark_counts_and_records_the_speed():
+    backend, v, controls = _passing(-0.1, kmh=4.8)
+
+    assert backend._pass_through(v) is True
+    assert backend.passes["VIN-1"] == 4.8, "the speed it was photographed at is the claim"
+
+
+def test_driving_through_still_brakes_for_anything_in_front():
+    backend, v, controls = _passing(3.0, kmh=5.0, obstacle=_actor("walker.pedestrian.0001"))
+
+    assert backend._pass_through(v) is False
+    assert controls[-1]["brake"] == 1.0
+
+
+def test_the_drive_through_can_be_turned_off():
+    backend, v, controls = _passing(3.0, kmh=5.0)
+    backend.drive_through_gate = False
+
+    assert not backend._drives_through("inspection_gate")
+    assert backend._precise("inspection_gate"), "back to the precise stop it was"

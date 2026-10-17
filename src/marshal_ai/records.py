@@ -51,6 +51,8 @@ class Car(BaseModel):
     location: str = "line_end"                         # plant map point
     mission_id: str | None = None
     yard_slot: str | None = None
+    route: list[str] = Field(default_factory=list)     # map points of the current drive, when chosen
+    route_by: str | None = None                        # "gemini" or "rules" (the shortest way)
     do_not_ship: bool = False
     flags: list[str] = Field(default_factory=list)     # e.g. "untested", "rework_waiting"
     released_at: datetime | None = None
@@ -99,6 +101,9 @@ class ChecklistItem(BaseModel):
     # leaving a bare true/false behind. A verdict nobody can read the reasoning for is a verdict
     # nobody can check, and it is the reasoning that makes a second source worth having.
     observation: str | None = None
+    # What the car reported for the step. On CARLA the reverse and brake test are driven and
+    # measured, so this is where "stopped in 2.1 m from 20 km/h" lives; a pass/fail alone hides it.
+    telemetry: dict | None = None
     clip_uri: str | None = None
     # False when the simulation does not perform this step, so no camera could confirm it and the
     # step rests on telemetry alone. Kept on the record because a report that says PASS should be
@@ -118,6 +123,10 @@ class InspectionResult(BaseModel):
     verdict: Verdict
     findings: list[ZoneFinding] = Field(default_factory=list)
     build_sheet_mismatches: list[str] = Field(default_factory=list)
+    # The same mismatches as structured findings, in the design's form (zone, type, confidence,
+    # image): zone "whole_car", type wrong_colour / wrong_model / wrong_trim / missing_option, the
+    # photo that shows it, the text above as the observation.
+    mismatch_findings: list[ZoneFinding] = Field(default_factory=list)
     checklist: list[ChecklistItem] = Field(default_factory=list)
     # What the inspector saw, per view, in its own words - kept for a pass as well as a failure. A
     # PASS with nothing to read is indistinguishable from a stub that always passes.

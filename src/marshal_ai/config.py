@@ -42,6 +42,29 @@ class Settings:
         default_factory=lambda: float(os.getenv("CARLA_TIMEOUT_S", "20"))
     )
     carla_version: str = field(default_factory=lambda: os.getenv("CARLA_VERSION", "0.9.16"))
+    # Judgements asked of Gemini as a decision model: one option number back, its probability from the
+    # token's log-probability (llm.Decision). Comma-separated task names or prefixes; "0" for none,
+    # "all" for every task that has a decision form. On by default for:
+    #   track.decide   the lamp check: 0.99 s against 3.2 s, no wrong verdict (v8-track)
+    #   visual.screen  the gate, per view: "any defect visible?"; a confident no clears the view
+    #   visual.match   the gate: "matches the build sheet?"; a confident yes needs no mismatch list
+    # The gate's screens kept its accuracy (v6-gate 0.977, no false alarm; v2-damage 93% found) at
+    # about the same median as full answers (4.88 s against 4.84 s in Singapore), with a slower tail
+    # and a damaged car paying for both calls; they are on for the decision's honest probabilities,
+    # not for speed (Rey, 2026-10-14).
+    decisions: str = field(default_factory=lambda: os.getenv(
+        "MARSHAL_DECISIONS", "track.decide,visual.screen,visual.match"))
+    # Who parks a car in its yard slot or bay on CARLA: "standin" (steered by hand, then set on the
+    # spot) or "gemini" (Gemini chooses each manoeuvre as a decision, behind a safety check;
+    # driving/parking.py, eval: python -m marshal_ai.eval.parking).
+    parking: str = field(default_factory=lambda: os.getenv("MARSHAL_PARKING", "standin"))
+    # With parking=gemini: "paths" (Gemini chooses among planned paths, segment by segment) or
+    # "moves" (Gemini chooses every 1 m manoeuvre; did not park a car on the eval). See parking.py.
+    park_mode: str = field(default_factory=lambda: os.getenv("MARSHAL_PARK_MODE", "paths"))
+    # Which way a car drives to its slot (flows/route.py): "reason" asks Gemini when something is
+    # reported on one of the ways (a hazard, a stopped car, other cars) and takes the shortest
+    # otherwise; "always" asks whenever there is more than one way; "never" keeps the shortest.
+    route: str = field(default_factory=lambda: os.getenv("MARSHAL_ROUTE", "reason"))
 
 
 settings = Settings()

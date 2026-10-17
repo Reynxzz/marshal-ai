@@ -27,7 +27,13 @@ def _gemini(app, left_findings, real):
         calls.append(call)
         return {"checks": [{"index": 0, "real": real, "reason": "r"}]}
 
-    app.rt.llm.on("visual.defects", defects).on("visual.verify", verify)
+    def screen(call):                                # the decision agrees with the full answer
+        left = call.media[0].label.startswith("left")
+        seen = bool(left_findings) and left
+        return {"choice": "defect visible" if seen else "no defect visible",
+                "probs": {"defect visible": 0.95 if seen else 0.05, "no defect visible": 0.05 if seen else 0.95}}
+
+    app.rt.llm.on("visual.defects", defects).on("visual.verify", verify).on("visual.screen", screen)
     app.rt.llm.on("visual.variant", lambda c: {"observed_colour": "blue", "mismatches": [], "confidence": 0.95})
     return calls
 

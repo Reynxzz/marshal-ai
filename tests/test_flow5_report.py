@@ -30,8 +30,8 @@ async def test_dead_brake_light_rework_then_only_the_failed_step_is_re_run(plant
     report = app.rt.store.get(CarReport, "VIN-223")
     assert report.verdict == Verdict.PASS and report.rework[0].done_at is not None
     assert car(app, "VIN-223").state == CarState.YARD
-    # only step 3 ran again: one track.step call more than the original six
-    assert sum(c.task == "track.step" for c in app.rt.llm.calls) == 7
+    # only step 3 ran again: one lamp call more than the original six, as a decision or in full
+    assert sum(c.task in ("track.decide", "track.step") for c in app.rt.llm.calls) == 7
 
 
 async def test_wrong_variant_goes_to_production_control_then_full_track(plant):

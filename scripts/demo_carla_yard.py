@@ -108,9 +108,8 @@ async def run(args: argparse.Namespace) -> dict:
         rt.store.put(Car(vin=vin, state=CarState.LINE_END, location="line_end",
                          build_sheet=BuildSheet(model="sedan", colour="black",
                                                 truck_id=args.truck)))
-    for actor in rt.driving.world.get_actors().filter("vehicle.*"):
-        if actor.attributes.get("role_name") in vins:
-            actor.destroy()
+    for vin in vins:
+        rt.driving.despawn(vin)              # with its cameras, if an earlier run left it
 
     releases: list[dict] = []
     spacing_at_release: list[dict] = []
@@ -211,9 +210,10 @@ async def run(args: argparse.Namespace) -> dict:
         }
     finally:
         await rt.driving.stop()
-        for actor in rt.driving.world.get_actors().filter("vehicle.*"):
-            if actor.attributes.get("role_name") in vins:
-                actor.destroy()
+        # despawn, not actor.destroy(): CARLA keeps a destroyed car's cameras streaming to a client
+        # that has gone, which floods the server with "Invalid session" and preceded its crashes.
+        for vin in vins:
+            rt.driving.despawn(vin)
 
     from pathlib import Path
     out = Path(args.output)

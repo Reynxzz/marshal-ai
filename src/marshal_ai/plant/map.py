@@ -92,6 +92,29 @@ class PlantMap:
     def route_length(self, path: list[str]) -> float:
         return sum(self.edges[a][b] for a, b in zip(path, path[1:]))
 
+    def routes(self, start: str, goal: str, k: int = 3, max_ratio: float = 2.0) -> list[list[str]]:
+        """Up to k different ways from start to goal, shortest first: simple paths no longer than
+        max_ratio times the shortest. The plant map is small, so they are simply enumerated."""
+        best = self.route_length(self.route(start, goal))
+        limit = best * max_ratio + 1e-6
+        found: list[tuple[float, list[str]]] = []
+
+        def walk(node: str, path: list[str], length: float) -> None:
+            if length > limit:
+                return
+            if node == goal:
+                found.append((length, list(path)))
+                return
+            for nxt, step in self.edges.get(node, {}).items():
+                if nxt not in path:
+                    path.append(nxt)
+                    walk(nxt, path, length + step)
+                    path.pop()
+
+        walk(start, [start], 0.0)
+        found.sort(key=lambda f: f[0])
+        return [p for _l, p in found[:k]]
+
 
 def _parse(raw: dict) -> PlantMap:
     zones = {name: z.get("description", "") for name, z in raw["zones"].items()}

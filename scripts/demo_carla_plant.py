@@ -86,6 +86,10 @@ def parser() -> argparse.ArgumentParser:
                     help="once every car is parked, delay this truck by MIN minutes: the yard rules "
                          "do not cover it, so Gemini re-plans the slots, a supervisor approves, and "
                          "the cars drive to their new slots (flow 1's exception)")
+    ap.add_argument("--hazard", action="append", default=[], metavar="PLACE:WHAT",
+                    help="report a hazard at a zone or map point, e.g. 'finishing_corner:forklift "
+                         "unloading pallets': cars bound for the yard then ask Gemini which way to take "
+                         "(flows/route.py). Repeatable.")
     ap.add_argument("--no-supervisor", action="store_true",
                     help="leave reviews and rework proposals pending; cars wait where they are")
     return ap
@@ -132,7 +136,8 @@ def clear_records(rt, vins: list[str], prefix: str | None = None) -> None:
 class Watch:
     """Reports each car's progress, and measures what "several cars at once" amounts to."""
 
-    def __init__(self, rt, vins: list[str]):
+    def __init__(self, rt, vins: list[str], app=None):
+        self.app = app                     # for the yard's route log (narrate)
         self.rt, self.vins = rt, vins
         self.last: dict[str, tuple] = {}
         self.released_at: dict[str, float] = {}
@@ -208,6 +213,12 @@ class Watch:
                 note(world, f"{vin} passed; slot {slot}. Its truck {truck} loads "
                             f"{'next, so a slot nearest the loading bay' if first else 'later, so a slot farther from the bay'}",
                      "rules")
+        if slot and slot != was_slot and car.route_by == "gemini" and self.app is not None:
+            record = next((r for r in reversed(self.app.yard.route_log) if r["vin"] == vin), None)
+            if record is not None:
+                why = "; ".join(h for w in record["ways"] for h in w["hazards"] + w["stopped"]) or "traffic"
+                note(world, f"{vin} to {slot} {record['choice']} ({record['probs'][record['choice']]:.2f}): {why}",
+                     "gemini")
         if state is CarState.REWORK and was_state is not CarState.REWORK:
             note(world, f"{vin} booked into rework", "gemini")
 
@@ -271,6 +282,8 @@ async def supervise(app, rt) -> None:
 async def run(args) -> dict:
     rt = build_runtime(Settings(driving="carla", llm="gemini"), host=args.host, port=args.port)
     app = MarshalApp(rt)
+    # MARSHAL_PARKING=gemini: Gemini parks each car in its slot; its choices go in the film's feed
+    rt.driving.park_note = lambda text: note(rt.driving.world, text, "gemini")
     if type(rt.llm).__name__ != "GeminiLLM":
         raise RuntimeError(f"expected GeminiLLM, got {type(rt.llm).__name__}")
 
@@ -288,6 +301,11 @@ async def run(args) -> dict:
         rt.store.put(Car(vin=vin, state=CarState.LINE_END, location="line_end",
                          build_sheet=BuildSheet(**BUILD, truck_id=trucks[i % len(trucks)])))
 
+    for spec in args.hazard:
+        place, what = spec.split(":", 1)
+        rt.plant.hazards[place.strip()] = what.strip()
+        note(rt.driving.world, f"Reported at {place.strip()}: {what.strip()}", "plant")
+
     # The routine each car runs, when the router does not say otherwise.
     steps = parse_steps(args.steps)
     start_routine = app.functional.start
@@ -300,8 +318,14 @@ async def run(args) -> dict:
     # Every camera is created before the loop starts: a camera spawned mid-tick segfaults the
     # server. That is the gate's four and each car's own three.
     wrong = vins[args.wrong_colour - 1] if args.wrong_colour else None
-    for i, vin in enumerate(vins):
+    # Every car of an earlier run with this prefix goes, not only this run's VINs: a four-car run
+    # stopped early left VIN-P4 in the lane, and the next three-car run's first car stood behind it
+    # on the test track asking for help that nobody in this scene answers.
+    leftovers = {a.attributes.get("role_name") for a in rt.driving.world.get_actors().filter("vehicle.*")
+                 if (a.attributes.get("role_name") or "").startswith(args.prefix)}
+    for vin in sorted(leftovers | set(vins)):
         rt.driving.despawn(vin)
+    for i, vin in enumerate(vins):
         rt.driving.spawn(vin, at="line_end", colour=WRONG_COLOUR if vin == wrong else CAR_COLOUR,
                          behind_m=i * args.queue_gap_m)
     rt.gate_camera.prewarm(fixed=True)
@@ -310,7 +334,7 @@ async def run(args) -> dict:
           "wrong_colour": wrong,
           "cameras": len(rt.driving._cameras) + 3 * len(vins)})
 
-    watch = Watch(rt, vins)
+    watch = Watch(rt, vins, app)
     late = None
     if args.late_truck:
         truck_id, minutes = args.late_truck.split(":")
@@ -355,9 +379,14 @@ async def run(args) -> dict:
                                            "No rule covers this: it goes to Gemini", "plant")
                     emit({"type": "plant.late_truck", "truck": late[0], "minutes": late[1],
                           "next": rt.plant.next_truck().truck_id})
+                    await asyncio.sleep(1.0)
                     continue
                 if any(c.mission_id for c in cars) or any(app.yard.deferred.values()):
-                    continue                    # re-slotted cars still driving
+                    # Re-slotted cars still driving. This has to yield as the loop's end does: a bare
+                    # `continue` spun here without ever awaiting, the driving loop never got a turn,
+                    # and the simulation stood still at the moment the re-slot missions were sent.
+                    await asyncio.sleep(1.0)
+                    continue
                 break
             await asyncio.sleep(1.0)
         else:
@@ -371,6 +400,17 @@ async def run(args) -> dict:
         note(rt.driving.world, f"Truck {truck.truck_id} loaded: {', '.join(shipped[truck.truck_id]) or 'nothing'}",
              "plant")
     cars = watch.poll()
+    # Where each car actually stands against the spot its record names, and how squarely: a record
+    # saying yard.Y4 is only true if the car is on Y4, facing along it.
+    parked = {}
+    for c in cars:
+        v = rt.driving.vehicles.get(c.vin)
+        if v is None or c.location not in rt.driving.map.points or not rt.driving.map.points[c.location].carla:
+            continue
+        here, spot = v.actor.get_transform(), rt.driving.transform(c.location)
+        turn = (here.rotation.yaw - spot.rotation.yaw + 180.0) % 360.0 - 180.0
+        parked[c.vin] = {"at": c.location, "off_m": round(here.location.distance(spot.location), 2),
+                         "angle_deg": round(turn, 1)}
     for vin in vins:
         rt.driving.despawn(vin)
 
@@ -390,12 +430,15 @@ async def run(args) -> dict:
                        "booked_bays": bays[vin]}
                  for vin in vins if vin in by_vin},
         "wrong_colour": wrong,
+        "parked": parked,
         "shipped": shipped,
         "max_cars_in_plant_at_once": watch.max_in_plant,
         "max_cars_moving_at_once": watch.max_moving,
         "gap_to_nearest_released_car_m": watch.release_gaps,
         "line_to_yard_sim_s": line_to_yard,
         "gate_false_alarms": FALSE_ALARMS,
+        # The speed each car was photographed at by the gate: the design's drive-through, 5 km/h.
+        "gate_pass_kmh": dict(getattr(rt.driving, "passes", {})),
         "simulated_s": watch.sim_s(),
         "realtime_ratio": rt.driving.realtime_ratio(),
     }

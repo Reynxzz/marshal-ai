@@ -59,6 +59,12 @@ class _Backend:
     def _obstacle_ahead(self, v):
         return self._obstacle
 
+    def _executable_options(self, v, where):
+        return list(self.assist_options)
+
+    def _nearest_point(self, v):
+        return v.location
+
     def assist_clip(self, v):
         # the seconds before the stop, oldest frame first
         return [b"approaching", b"closer", b"forward-frame"]
@@ -70,6 +76,11 @@ class _Backend:
 
 def _vehicle(backend):
     return backend.vehicles["VIN-1"]
+
+
+def _walker():
+    return SimpleNamespace(id=99, type_id="walker.pedestrian.0001",
+                           get_location=lambda: SimpleNamespace(x=3.4, y=0.0, z=0.0))
 
 
 def test_a_moving_car_never_asks_for_help():
@@ -95,7 +106,7 @@ def test_a_car_stopped_with_nothing_ahead_does_not_ask():
 
 
 def test_a_car_blocked_by_a_person_asks_after_the_grace_period():
-    walker = SimpleNamespace(id=99, type_id="walker.pedestrian.0001")
+    walker = _walker()
     backend = _Backend(speed_kmh=0.0, obstacle=walker, distance=3.4)
     v = _vehicle(backend)
 
@@ -115,7 +126,7 @@ def test_a_car_blocked_by_a_person_asks_after_the_grace_period():
 
 
 def test_the_captured_clip_is_offered_to_the_desk_as_bytes():
-    walker = SimpleNamespace(id=99, type_id="walker.pedestrian.0001")
+    walker = _walker()
     backend = _Backend(speed_kmh=0.0, obstacle=walker)
     v = _vehicle(backend)
     for _ in range(3):
@@ -131,7 +142,7 @@ def test_the_captured_clip_is_offered_to_the_desk_as_bytes():
 
 
 def test_only_one_request_per_blockage():
-    walker = SimpleNamespace(id=99, type_id="walker.pedestrian.0001")
+    walker = _walker()
     backend = _Backend(speed_kmh=0.0, obstacle=walker)
     v = _vehicle(backend)
     for _ in range(12):
@@ -141,7 +152,7 @@ def test_only_one_request_per_blockage():
 
 
 def test_auto_assist_can_be_turned_off():
-    walker = SimpleNamespace(id=99, type_id="walker.pedestrian.0001")
+    walker = _walker()
     backend = _Backend(speed_kmh=0.0, obstacle=walker)
     backend.auto_assist = False
     v = _vehicle(backend)
@@ -178,3 +189,18 @@ def test_the_desk_still_works_when_the_backend_has_no_frame():
                                     reason="object", options=ASSIST_OPTIONS, clip_uri=None))
 
     assert media == []
+
+
+def test_the_case_names_where_the_car_stopped_not_where_it_set_off():
+    """Scene 3's car left buffer zone B and stopped on the test track; the lab built its test at
+    buffer zone B, 26 m from the box, and passed it without the car meeting the box."""
+    from marshal_ai.driving.carla_backend import CarlaDrivingSystem
+    from marshal_ai.plant.map import load_plant_map
+
+    ds = CarlaDrivingSystem.__new__(CarlaDrivingSystem)
+    ds.map = load_plant_map()
+    track = ds.map.points["test_track"].carla
+    stopped = SimpleNamespace(get_location=lambda: SimpleNamespace(x=track["x"], y=track["y"] + 9.0))
+    v = _Vehicle(vin="VIN-1", actor=stopped, agent=None, location="buffer_zone_b")
+
+    assert ds._nearest_point(v) == "test_track"

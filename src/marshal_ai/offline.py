@@ -67,6 +67,28 @@ def track_step(call: LLMCall) -> dict:
     return {"seen": True, "confidence": 0.95, "observation": f"{step} as expected"}
 
 
+# ---------- decisions: the same ground truth, as a choice with probabilities ----------
+
+def _decided(choice: str, other: str, p: float) -> dict:
+    return {"choice": choice, "probs": {choice: p, other: round(1 - p, 4)}}
+
+
+def visual_screen(call: LLMCall) -> dict:
+    defects = (call.media[0].truth or {}).get("defects", [])
+    return (_decided("defect visible", "no defect visible", 0.97) if defects
+            else _decided("no defect visible", "defect visible", 0.96))
+
+
+def visual_match(call: LLMCall) -> dict:
+    found = visual_variant(call)["mismatches"]
+    return _decided("does not match", "matches", 0.96) if found else _decided("matches", "does not match", 0.97)
+
+
+def track_decide(call: LLMCall) -> dict:
+    seen = track_step(call)
+    return _decided("yes", "no", 0.95) if seen["seen"] else _decided("no", "yes", 0.93)
+
+
 def assist_assess(call: LLMCall) -> dict:
     scene = (call.media[0].truth if call.media else None) or {}
     options = _section(call.prompt, "Offered options: ", "\nCar state") or []
@@ -282,12 +304,37 @@ def adversarial_report(call: LLMCall) -> dict:
             "likely_cause": cause, "suggested_fix": fix, "speed_fix": speed_fix}
 
 
+def drive_park(call: LLMCall) -> dict:
+    """The parking planner's next move, from the view's ground truth (driving/parking.py)."""
+    from marshal_ai.driving.parking import OPTIONS, Box, Pose, planned_move
+
+    truth = (call.media[0].truth if call.media else None) or {}
+    pose = Pose(*truth["pose"])
+    obstacles = [Box(*b) for b in truth.get("obstacles", [])]
+    options = truth.get("options") or list(OPTIONS)
+    # paths mode: the shortest path the planner proposed (listed first); moves mode: its next move
+    choice = options[0] if options[0].startswith(("path_", "parked")) else planned_move(pose, obstacles)
+    if options == ["ask_a_person"] or choice not in options:
+        choice = "ask_a_person"
+    return {"choice": choice, "probs": {o: (0.9 if o == choice else 0.1 / max(1, len(options) - 1)) for o in options}}
+
+
+def route_choose(call: LLMCall) -> dict:
+    from marshal_ai.flows.route import offline_choice
+    return offline_choice(call)
+
+
 def offline_llm() -> FakeLLM:
     return FakeLLM({
         "visual.defects": visual_defects,
         "visual.verify": visual_verify,
         "visual.variant": visual_variant,
         "track.step": track_step,
+        "visual.screen": visual_screen,
+        "visual.match": visual_match,
+        "track.decide": track_decide,
+        "drive.park": drive_park,
+        "route.choose": route_choose,
         "assist.assess": assist_assess,
         "assist.locate": assist_locate,
         "yard.exception": yard_exception,

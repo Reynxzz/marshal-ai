@@ -52,7 +52,10 @@ def parser() -> argparse.ArgumentParser:
                     help="seconds allowed for one CARLA scenario run")
     ap.add_argument("--adversarial", type=int, default=0, metavar="BUDGET",
                     help="also run flow 7 with this run budget (0 = skip)")
-    ap.add_argument("--batch", type=int, default=1,
+    ap.add_argument("--ports", default=None,
+                    help="CARLA servers to run on in parallel, e.g. 2010,2020,2030 "
+                         "(scripts/carla_pool.sh); --batch then defaults to one run per server")
+    ap.add_argument("--batch", type=int, default=None,
                     help="scenarios run concurrently. Keep at 1 for a single CARLA "
                          "server: every compiled run puts the world in synchronous "
                          "mode and ticks it, so concurrent runs corrupt each other. "
@@ -61,6 +64,8 @@ def parser() -> argparse.ArgumentParser:
                     help="then run the whole library against this driving system release "
                          "(demo scene 5); it is blocked if any test fails")
     ap.add_argument("--engineer", default="eng-demo")
+    ap.add_argument("--no-clips", action="store_true",
+                    help="do not film each run (a clip per test run is the default)")
     return ap
 
 
@@ -79,10 +84,17 @@ def run(args: argparse.Namespace) -> dict:
     if not rt.map.carla_map or not rt.map.carla_map.endswith(("Town05", "Town05_Opt", "OpenDriveMap")):
         raise RuntimeError(f"lab needs a Town05 plant map, got {rt.map.carla_map!r}")
 
-    runner = CarlaRunner(rt.map, host=args.host, port=args.port, timeout_s=args.run_timeout)
+    from marshal_ai.artifacts import make_artifacts
+    runner = CarlaRunner(rt.map, host=args.host, port=args.port, timeout_s=args.run_timeout,
+                         artifacts=make_artifacts(settings.artifacts, settings.gcp_project,
+                                                  settings.bucket),
+                         clips=not args.no_clips, clip_dir=out / "clips",
+                         ports=[int(p) for p in args.ports.split(",")] if args.ports else None)
+    if args.batch is None:
+        args.batch = runner.parallel
     app = MarshalApp(rt, runner=runner)
 
-    emit({"type": "lab.start", "runner": runner.name, "llm": settings.llm,
+    emit({"type": "lab.start", "runner": runner.name, "llm": settings.llm, "batch": args.batch,
           "request": args.request})
 
     # ---- flow 6: generate, validate, compile, dry run in CARLA -------------
@@ -112,7 +124,7 @@ def run(args: argparse.Namespace) -> dict:
 
     emit({"type": "lab.judged", "scenario_id": scenario_id, "run_id": test_run.run_id,
           "passed": test_run.passed, "failed_criteria": test_run.failed_criteria,
-          "metrics": outcome.metrics, "margins": verdict.margins,
+          "metrics": outcome.metrics, "margins": verdict.margins, "clip_uri": test_run.clip_uri,
           "events": outcome.events, "triggered": outcome.triggered})
     (out / f"{scenario_id}.run.json").write_text(
         json.dumps(test_run.model_dump(mode="json"), indent=2, sort_keys=True))

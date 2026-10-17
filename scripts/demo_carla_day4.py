@@ -32,9 +32,10 @@ from marshal_ai.runtime import build_runtime
 
 SUPERVISOR = "supervisor-ana"
 
-# headlights is the only step Gemini confirms reliably from a still (front view, lit road);
-# brake reads as a running light on this vehicle and a blinker needs a clip, so a dark-lamp
-# demo built on those would be ambiguous rather than convincing.
+# headlights is the default dark lamp, the one Gemini confirmed first. The brake lights work too
+# (--fault-step brake_lights: caught in 3 of 3 runs at night, the healthy car passing). Only both
+# brake lamps can go dark: CARLA has one Brake light bit, so a dead *left* brake light cannot be
+# shown (scripts/probe_lamps.py). A blinker needs a clip, so it stays out of this demo.
 FAULT_STEP = "headlights"
 
 
@@ -109,9 +110,7 @@ async def check_one(app: MarshalApp, vin: str, steps: list[int], fault: str | No
     rt.store.put(InspectionResult(vin=vin, kind="visual", verdict=Verdict.PASS,
                                   created_at=rt.clock()))
 
-    for actor in rt.driving.world.get_actors().filter("vehicle.*"):
-        if actor.attributes.get("role_name") == vin:
-            actor.destroy()
+    rt.driving.despawn(vin)                  # with its cameras; see the cleanup below
     rt.driving.spawn(vin, at="test_track", colour="0,80,200")
 
     # The waits below end as soon as these records exist. Left in Firestore by an earlier run,
@@ -187,10 +186,9 @@ async def check_one(app: MarshalApp, vin: str, steps: list[int], fault: str | No
 
     # Remove the car before the next one runs: a finished car left standing on the track
     # blocks the following car's route, which shows up as a mission that never completes.
-    for actor in rt.driving.world.get_actors().filter("vehicle.*"):
-        if actor.attributes.get("role_name") == vin:
-            actor.destroy()
-    rt.driving.vehicles.pop(vin, None)
+    # despawn, not actor.destroy(): the car's three cameras outlive it otherwise, streaming to a
+    # client that no longer listens ("Invalid session" by the thousand before the server crashed).
+    rt.driving.despawn(vin)
     return {"vin": vin, "verdict": result.verdict.value, "checklist": items,
             "disagreements": len(disagreements), "confirmed": confirmed, "reinspection": reinspection}
 
@@ -222,9 +220,10 @@ async def run(args: argparse.Namespace) -> dict:
                                         rework=args.rework)
     finally:
         await rt.driving.stop()
-        for actor in rt.driving.world.get_actors().filter("vehicle.*"):
-            if actor.attributes.get("role_name") in (args.healthy_vin, args.faulty_vin):
-                actor.destroy()
+        # despawn, not actor.destroy(): CARLA keeps a destroyed car's cameras streaming to a client
+        # that has gone, which floods the server with "Invalid session" and preceded its crashes.
+        for vin in (args.healthy_vin, args.faulty_vin):
+            rt.driving.despawn(vin)
 
     # flow 5: the router should have proposed a bay for the faulty car
     pending = [{"id": p.proposal_id, "kind": p.kind, "summary": p.summary}

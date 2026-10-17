@@ -18,8 +18,8 @@ from pydantic import BaseModel, Field
 from marshal_ai.driving import MissionDone, MissionGo, TrackStep
 from marshal_ai.driving.routines import TELEMETRY_CHECKS, RoutineStep, routine_steps
 from marshal_ai.events import Topic
-from marshal_ai.flows.base import ask_or, update_car
-from marshal_ai.llm import Media
+from marshal_ai.flows.base import ask, ask_or, update_car, use_decisions
+from marshal_ai.llm import Media, decision_schema
 from marshal_ai.records import CarState, ChecklistItem, InspectionResult, Verdict
 
 if TYPE_CHECKING:
@@ -36,6 +36,8 @@ class StepSeen(BaseModel):
     confidence: float = Field(ge=0, le=1)
     observation: str = Field(description="what the clip shows, one sentence")
 
+
+SEEN = decision_schema("yes", "no")
 
 # no answer: confidence 0 leaves the step unconfirmed, so the car goes to a supervisor (REVIEW)
 NOT_JUDGED = StepSeen(seen=False, confidence=0.0, observation="not judged: model unavailable")
@@ -159,6 +161,8 @@ class FunctionalChecker:
         if run is None:
             return None
         items = await asyncio.gather(*(self._judge(run, s) for s in run.steps))
+        items = [i.model_copy(update={"telemetry": dict(r.telemetry)})
+                 if (r := run.reported.get(i.step)) is not None else i for i in items]
         self._last_clips[run.vin] = dict(run.clips)
         return await self._record(run.vin, list(items))
 
@@ -229,8 +233,7 @@ class FunctionalChecker:
         if pair is not None:
             prompt = (f"Step {step.step}: {step.command}.\n"
                       f"Expected under test: {step.expected_on_camera}.")
-            seen, _ = await ask_or(self.rt, "track.step", prompt, StepSeen, NOT_JUDGED, [pair],
-                                   PAIR_SYSTEM)
+            seen = await self._seen(prompt, [pair], PAIR_SYSTEM)
         elif reference is not None:
             # Both frames reach Gemini prefixed with their label, so they must be labelled
             # differently: sent as two identical "[track camera]" images the model could not
@@ -243,13 +246,12 @@ class FunctionalChecker:
                            label="frame under test: the car being checked now", truth=clip.truth)
             prompt = (f"Step {step.step}: {step.command}.\n"
                       f"Expected in the frame under test: {step.expected_on_camera}.")
-            seen, _ = await ask_or(self.rt, "track.step", prompt, StepSeen, NOT_JUDGED,
-                                   [first, second], REFERENCE_SYSTEM)
+            seen = await self._seen(prompt, [first, second], REFERENCE_SYSTEM)
         else:
             prompt = (f"Step {step.step}: {step.command}.\n"
                       f"Expected on camera: {step.expected_on_camera}.\n"
                       f"Judge only what this frame shows. Do not assume the car behaved correctly.")
-            seen, _ = await ask_or(self.rt, "track.step", prompt, StepSeen, NOT_JUDGED, [clip], SYSTEM)
+            seen = await self._seen(prompt, [clip], SYSTEM)
         camera_ok = seen.seen if seen.confidence >= CAMERA_MIN_CONFIDENCE else None
         if camera_ok and telemetry_ok and step.name not in self.references:
             # A step both sources agree on becomes the reference the next car is compared to.
@@ -257,6 +259,30 @@ class FunctionalChecker:
         return ChecklistItem(step=step.step, name=step.name, telemetry_ok=telemetry_ok,
                              camera_ok=camera_ok, camera_confidence=seen.confidence,
                              observation=seen.observation, clip_uri=clip.uri)
+
+    async def _seen(self, prompt: str, media: list[Media], system: str) -> StepSeen:
+        """Whether a still frame shows the step done: a decision first, the full answer if needed.
+
+        As a decision (settings.decisions) Gemini answers yes or no and nothing else, its confidence
+        the probability of that answer, read from the token's log-probability. The probabilities are
+        honest where the full answer was not: on dataset v8-track a healthy car whose crop was framed
+        closer failed at confidence 1.0 in full, and as a decision came back unsure (0.51) - a person
+        looks, instead of the car going to rework. Lamp passes took 2.0 s against 3.3 s.
+        """
+        if not use_decisions(self.rt, "track.decide"):
+            seen, _ = await ask_or(self.rt, "track.step", prompt, StepSeen, NOT_JUDGED, media, system)
+            return seen
+        try:
+            d = await ask(self.rt, "track.decide", f"{prompt}\nIs the expected result present in the frame under test?",
+                          SEEN, media, system)
+        except Exception as e:          # no decision: the full answer, with its own safe fallback
+            log.warning("track.decide unavailable (%s: %s); asking for the full answer", type(e).__name__, e)
+            seen, _ = await ask_or(self.rt, "track.step", prompt, StepSeen, NOT_JUDGED, media, system)
+            return seen
+        # No sentence, for a pass or a failure: asking for one after a "no" doubled the time of every
+        # failure (4.7 s against 2.0 s), and the report is written from the steps that failed anyway.
+        return StepSeen(seen=d.choice == "yes", confidence=d.confidence,
+                        observation=f"camera, as a decision: {d.choice} (p={d.confidence:.2f})")
 
     async def _record(self, vin: str, items: list[ChecklistItem]) -> InspectionResult:
         previous = self.rt.store.get(InspectionResult, f"{vin}:functional")
