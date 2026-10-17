@@ -79,7 +79,8 @@ def main(argv=None) -> None:
         from marshal_ai.config import settings
         from marshal_ai.llm import GeminiLLM, RoutedLLM
         from marshal_ai.offline import offline_llm
-        llm = RoutedLLM(offline_llm(), {"route.": GeminiLLM(settings.model)})
+        llm = RoutedLLM(offline_llm(), {"route.": GeminiLLM(settings.model, decision_model=settings.decision_model,
+                  task_models=settings.task_models)})
     else:
         from marshal_ai.offline import offline_llm
         llm = offline_llm()

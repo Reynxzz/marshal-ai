@@ -222,6 +222,9 @@ python -m marshal_ai.eval eval/datasets/v1.json --runs 5
 python -m marshal_ai.eval eval/datasets/v1.json --flows track --runs 10 --model gemini-2.5-pro
 ```
 
+Without `--model` it scores the configured mix of models (see "Which Gemini model does what");
+`--model X` alone puts every task on X, and `--decision-model Y` sends the decisions to Y.
+
 It prints the design's KPIs per flow (gate: first-pass yield, review share, false alarms,
 build-sheet mismatches caught, latency against the 5 s budget; track: dark lamps confirmed as lit,
 lit lamps rejected, unconfirmed; assistance: recommendation, people detected, high-risk
@@ -394,7 +397,53 @@ export GOOGLE_GENAI_USE_VERTEXAI=TRUE
 export GOOGLE_CLOUD_PROJECT=id-rd-ca-hanif-ali
 export GOOGLE_CLOUD_LOCATION=us-central1
 export MARSHAL_LLM=gemini          # "offline" uses the deterministic stand-ins
+export MARSHAL_MODEL=gemini-3.8-flash                                    # the defaults:
+export MARSHAL_DECISION_MODEL=gemini-2.5-flash
+export MARSHAL_TASK_MODELS=visual.=gemini-2.5-flash,track.=gemini-2.5-flash
 ```
+
+Gemini 3 models are served from Vertex AI's `global` endpoint only (`gemini-3.8-flash` is a 404 in
+`us-central1`), so `GeminiLLM` uses `global` for them by itself and `GOOGLE_CLOUD_LOCATION` for the
+rest; `MARSHAL_GEMINI_LOCATION` overrides both.
+
+### Which Gemini model does what
+
+Two models, each where it measured better (2026-10-17, `llm.py`):
+
+| Model | Tasks |
+|---|---|
+| `gemini-3.8-flash` | the assistance card and its object boxes (`assist.*`), the rework report, scenario generation, the test lab's search, explanation and fix |
+| `gemini-2.5-flash` | the gate and the damage check (`visual.*`), the lamp check (`track.*`), and every decision: the gate's screens, the lamp verdict, route choice, Gemini parking |
+
+Every flow scored with each model, no CARLA (1-2 runs per case):
+
+| Flow (dataset) | gemini-2.5-flash | gemini-3.8-flash |
+|---|---|---|
+| Gate (v6-gate, 43 cars) | accuracy 0.977, no false alarm, ~5 s median | 0.84, false alarms 15% (dents on clean grey cars), 13.1 s |
+| Damage (v2-damage) | 93% found, false alarms 37.5% | 83% found, false alarms 12.5% |
+| Lamp check (v1 / v8-track) | 1.0 / 0.9 | 0.67 (a lit headlight failed) / 1.0 |
+| Assistance (v7-assist) | right, 4.3 s | right, box overlap 0.95, 7.5 s |
+| Report (v3-report) | 1.0 | 1.0 |
+| Scenario (v4-scenario) | first try 0.75 | first try 1.0 |
+| Search (v5-search) | 1.0 | 1.0 |
+| Routes (`eval.routes`) | 18 of 20 | 10 of 10, every one at p=1.0 |
+| Parking (`eval.parking`) | 8 of 12 parked, no collision (with rotation) | 8 of 12 parked, no collision |
+
+The mix on v1: gate all right at 6.0 s, lamp check all right at 3.1 s, assistance card right at
+4.4 s (within its 5 s), report checks all 1.0.
+
+Why decisions stay on 2.5: **no Gemini 3 model returns log-probabilities.** `gemini-3-flash-preview`,
+`3.1-pro-preview`, `3.1-flash-lite`, `3.5-flash`, `3.5-flash-lite` and `3.8-flash` all refuse
+(`400 Logprobs is not supported for this model`); `2.5-flash`, `2.5-flash-lite` and `2.5-pro` give
+them. On 3.8 a decision is its bare answer at probability 1, so a doubtful car is never held back for a
+person. 3.8 is also slower: it always thinks (budget 0 still thinks ~50 tokens, `thinking_level`
+"minimal" is refused and "low" made the gate slower, 16.2 s), about 3 s for a one-token answer
+against 0.8 s on 2.5, and the gate makes up to three calls in a row.
+
+Asking each decision with its options in every order and averaging (AnyJev's L0 idea,
+`MARSHAL_DECISION_ROTATIONS=4`) is built and off: on 2.5 the gate kept its answers at 11.6 s median,
+route choice fell to 16 of 20, and the lamp check left fewer cars unsure (13% against 23%) but failed
+a healthy one once.
 
 Keep the key outside the repository. `.gitignore` blocks `sa-*.json`, `*-sa.json` and
 `service-account*.json`, but the safest place is `~/.config/marshal/` at mode `600`.
@@ -977,7 +1026,8 @@ It is not a substitute for asking where the car is.
 
 Still open: parallel scenario execution needs one CARLA server per slot.
 
-**Real Gemini verified** on `id-rd-ca-hanif-ali` via Vertex AI (`gemini-2.5-flash`). Two things had
+**Real Gemini verified** on `id-rd-ca-hanif-ali` via Vertex AI (`gemini-2.5-flash`; since
+2026-10-17 `gemini-3.8-flash` beside it, see "Which Gemini model does what"). Two things had
 to be corrected along the way, both worth knowing:
 
 1. `scripts/demo.py` **ignores `MARSHAL_LLM`**. It hardcodes `llm="offline"` and only uses Gemini
