@@ -188,6 +188,7 @@ class _Vehicle:
     parking: object | None = None          # parking.ParkingSession while Gemini parks it
     park_task: object | None = None        # the decision being asked, an asyncio future
     park_asked_at: float = 0.0
+    park_wait_until: float = 0.0           # holding for a car in the way that is still moving
     park_view: object | None = None        # what Gemini was shown for the decision being asked
     park_fallback: bool = False            # Gemini's session ended without parking: the stand-in parks it
 
@@ -1087,6 +1088,11 @@ class CarlaDrivingSystem:
                 v.vin, point.rsplit(".", 1)[-1], mode=getattr(self.parking_driver, "mode", "paths"))
             log.info("%s: Gemini parks it in %s", v.vin, point)
         pose, obstacles = self._park_scene(v, point)
+        if session.phase == "wait":
+            if time.monotonic() < v.park_wait_until:
+                self._park_brake(v)
+                return False
+            session.resume()
         if v.park_task is not None:
             if not v.park_task.done():
                 self._park_brake(v)
@@ -1099,7 +1105,11 @@ class CarlaDrivingSystem:
                 session.finish("error")
             else:
                 v.park_view = view
-                if decision is not None:      # none when the planner found no path in: it ended
+                if session.phase == "wait":   # no path in while a moving car is in the way
+                    v.park_wait_until = time.monotonic() + parking.WAIT_S
+                    log.info("%s park %s: no path in while %s is moving; waiting %.0f s (%d)", v.vin,
+                             session.slot, session.waiting_for, parking.WAIT_S, session.waits)
+                elif decision is not None:    # none when the planner found no path in: it ended
                     session.apply(decision, pose, time.monotonic() - v.park_asked_at, view)
                     step = session.trace[-1]
                     self._note_park(v, session, step, view)
@@ -1116,7 +1126,7 @@ class CarlaDrivingSystem:
             self._park_brake(v)
             self.parking_log.setdefault(v.vin, []).append({
                 "slot": point, "outcome": session.outcome, "decisions": session.decisions,
-                "safety_stops": session.safety_stops, "trace": list(session.trace),
+                "safety_stops": session.safety_stops, "waits": session.waits, "trace": list(session.trace),
                 "final": {"along_m": round(pose.x, 2), "side_m": round(pose.y, 2),
                           "yaw_deg": round(pose.yaw_deg, 1)}})
             v.parking = None
@@ -1160,7 +1170,7 @@ class CarlaDrivingSystem:
     def _park_ask(self, session, pose, obstacles):
         """What Gemini is shown, and its decision; no decision when there is nothing to choose."""
         view = session.view(pose, obstacles)
-        if session.done:                          # no path into the slot: a person decides
+        if session.done or session.phase == "wait":   # no path in: a person decides, or wait
             return view, None
         return view, self.parking_driver.decide(view, parking.render(view))
 
@@ -1188,8 +1198,19 @@ class CarlaDrivingSystem:
             name = actor.attributes.get("role_name") or ""
             label = (f"the car {name}" if actor.type_id.startswith("vehicle.") and name
                      else "a person" if actor.type_id.startswith("walker.") else "an obstacle")
-            obstacles.append(parking.Box(p.x, p.y, p.yaw, 2 * extent.x, 2 * extent.y, label))
+            obstacles.append(parking.Box(p.x, p.y, p.yaw, 2 * extent.x, 2 * extent.y, label,
+                                         moving=self._still_moving(actor)))
         return pose, obstacles
+
+    def _still_moving(self, actor) -> bool:
+        """A car that will be somewhere else soon: driving, or one of ours still parking or on a mission."""
+        if not actor.type_id.startswith("vehicle."):
+            return False
+        other = next((o for o in self.vehicles.values() if o.actor.id == actor.id), None)
+        if other is not None and (other.parking is not None or other.remaining):
+            return True
+        velocity = actor.get_velocity()
+        return math.hypot(velocity.x, velocity.y) > 0.3
 
     def _square_up(self, v: _Vehicle, point: str) -> None:
         """Square a car up in its slot or bay once it has crept onto it.

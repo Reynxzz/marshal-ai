@@ -67,7 +67,7 @@ def test_ask_a_person_and_running_out_of_moves_end_the_session():
 def test_safety_check_stops_a_move_into_the_car_ahead_without_touching_it():
     ahead = Box(5.0, 0.0, 0.0, 4.9, 1.9, "the car ahead")     # 0.9 m beyond the bumper
     car = KinematicCar(Pose(-0.8, 0.0, 0.0))
-    s = ParkingSession("V1", "Y4")
+    s = ParkingSession("V1", "Y4", mode="moves")                   # one move at a time, told of the stop
     for _ in range(3):                                              # keep trying to drive into it
         s.apply(_decision("forward_straight"), car.pose)
         while s.phase != "decide":
@@ -121,6 +121,57 @@ def test_a_slot_between_two_cars_ends_with_a_person_not_a_collision():
                       mode="moves")
     assert forced["collided"] is None and forced["outcome"] in ("gave_up", "asked")
     assert forced["safety_stops"] >= 1
+
+
+def _neighbour_in_y8(along, moving):
+    """The car parking in the next slot ahead, seen from Y7: its tail in Y7 while it is short of Y8."""
+    return Box(parking.SLOT_LENGTH_M + along, 0.3, 0.0, 4.9, 1.8, "the car VIN-P1", moving=moving)
+
+
+def test_no_path_while_a_neighbour_is_still_parking_waits_and_plans_again(monkeypatch):
+    monkeypatch.setattr(parking, "PLAN_BUDGET_S", 0.3)    # no path: the search runs out its budget
+    # On CARLA, P3 asked for Y7 while P1 was still 1.7 m short of Y8, with its tail in Y7: no path,
+    # and the session handed the car to a person. It waits for the moving car now.
+    s, pose = ParkingSession("VIN-P3", "Y7"), Pose(-12.3, 2.8, math.radians(-11))
+    view = s.view(pose, [kerb(), _neighbour_in_y8(-1.7, moving=True)])
+    assert not view.paths and s.phase == "wait" and not s.done and not s.needs_decision
+    assert s.waiting_for == "the car VIN-P1"
+    s.resume()                                             # P1 has parked meanwhile
+    assert s.needs_decision
+    assert s.view(pose, [kerb(), _neighbour_in_y8(0.0, moving=False)]).paths and not s.done
+
+
+def test_no_path_past_a_parked_car_still_goes_to_a_person(monkeypatch):
+    monkeypatch.setattr(parking, "PLAN_BUDGET_S", 0.3)    # no path: the search runs out its budget
+    s = ParkingSession("VIN-P3", "Y7")
+    s.view(Pose(-12.3, 2.8, math.radians(-11)), [kerb(), _neighbour_in_y8(-1.7, moving=False)])
+    assert s.done and s.outcome == "asked"
+
+
+def test_waiting_is_capped(monkeypatch):
+    monkeypatch.setattr(parking, "PLAN_BUDGET_S", 0.3)    # no path: the search runs out its budget
+    s, pose = ParkingSession("VIN-P3", "Y7"), Pose(-12.3, 2.8, math.radians(-11))
+    for _ in range(parking.MAX_WAITS):
+        s.view(pose, [kerb(), _neighbour_in_y8(-1.7, moving=True)])
+        assert s.phase == "wait"
+        s.resume()
+    s.view(pose, [kerb(), _neighbour_in_y8(-1.7, moving=True)])
+    assert s.outcome == "asked"
+
+
+def test_a_safety_stop_in_paths_mode_is_traced_not_told_to_gemini():
+    # Told about the stop, Gemini asked for a person (0.88) over the one safe path it had (0.95
+    # without the note) when the check stopped P3 behind P1 in Y7.
+    s = ParkingSession("VIN-P3", "Y7")
+    pose, ahead = Pose(-0.5, 0.7, 0.0), [kerb(), _neighbour_in_y8(0.0, moving=False)]
+    view = s.view(pose, ahead)
+    s.apply(decision_schema(*view.options)(choice="path_A", probs={o: float(o == "path_A") for o in view.options}),
+            pose, view=view)
+    s._move, s.phase = parking.MOVES["forward_straight"], "move"
+    s.control(Pose(0.05, 0.7, 0.0), ahead, 0.3, 0.05)
+    assert s.safety_stops == 1 and s.note is None
+    assert s.trace[-1]["safety_stop"]["near"] == "the car VIN-P1"
+    assert s.trace[-1]["offered"] and s.trace[-1]["offered"][0].startswith("path_A: ")
 
 
 # ---------- the CARLA backend's tick, against a stub car ----------
