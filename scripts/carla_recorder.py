@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 
@@ -44,8 +45,10 @@ def main(argv: list[str] | None = None) -> int:
         if not args.name:
             raise SystemExit("start needs --name")
         path = recording_path(args.name, args.dir)
-        # additional_data=True also keeps lights and kinematics, so headlights show in the replay
-        client.start_recorder(path, True)
+        # additional_data=True also keeps lights and kinematics, so headlights show in the replay.
+        # MARSHAL_RECORD_LIGHTS=0 leaves them out: on a fresh host, recording the dressed plant world
+        # (about 700 props) with them segfaulted the server in 3 of 4 starts, and never without.
+        client.start_recorder(path, os.environ.get("MARSHAL_RECORD_LIGHTS", "1") != "0")
         # recording time 0 on the simulator's clock, so decisions noted during the run can be
         # placed in the film (scripts/film_notes.py)
         from film_notes import mark_start

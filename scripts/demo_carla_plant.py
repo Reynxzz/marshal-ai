@@ -439,6 +439,9 @@ async def run(args) -> dict:
         "gate_false_alarms": FALSE_ALARMS,
         # The speed each car was photographed at by the gate: the design's drive-through, 5 km/h.
         "gate_pass_kmh": dict(getattr(rt.driving, "passes", {})),
+        # Each Gemini parking session: every decision, the paths it was offered and any safety stop,
+        # so a car handed to a person can be explained afterwards (MARSHAL_PARKING=gemini).
+        "parking": dict(getattr(rt.driving, "parking_log", {})),
         "simulated_s": watch.sim_s(),
         "realtime_ratio": rt.driving.realtime_ratio(),
     }

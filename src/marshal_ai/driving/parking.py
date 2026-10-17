@@ -76,6 +76,10 @@ SAFETY_LOOKAHEAD_M = 0.4
 SAFETY_MARGIN_M = 0.2
 MAX_DECISIONS = 40
 MAX_REFUSED = 3                     # "parked" answers outside the limits before the session gives up
+# No path in while another car that is still moving is in the way (a neighbour finishing its own
+# parking): wait and plan again, up to MAX_WAITS times, instead of handing the car to a person.
+WAIT_S = 3.0
+MAX_WAITS = 10
 
 # id -> (direction, wheel: +1 left / -1 right, distance)
 MOVES = {
@@ -148,6 +152,7 @@ class Box:
     length: float
     width: float
     label: str = ""
+    moving: bool = False            # a car still driving or parking, which will be somewhere else soon
 
     @cached_property
     def shape(self) -> tuple[list[tuple[float, float]], tuple[float, float, float, float]]:
@@ -582,22 +587,25 @@ class ParkingSession:
     """One car parking in one slot. Asks for a decision, drives it safely, asks again.
 
     The caller loops: while `needs_decision`, show Gemini `view()` and pass its Decision to
-    `apply()`; otherwise apply `control()` to the car each tick. `outcome` is set when it is over:
-    "parked", "gave_up" or "asked".
+    `apply()`; otherwise apply `control()` to the car each tick. In phase "wait" (no path in while a
+    moving car is in the way) hold the car and call `resume()` after WAIT_S. `outcome` is set when it
+    is over: "parked", "gave_up" or "asked".
     """
 
     vin: str
     slot: str
     mode: str = "paths"             # paths | moves; see the module note
     max_decisions: int = MAX_DECISIONS
-    phase: str = "decide"           # decide | move | settle | done
+    phase: str = "decide"           # decide | wait | move | settle | done
     outcome: str | None = None
     decisions: int = 0
     refused: int = 0
     safety_stops: int = 0
+    waits: int = 0
     moves: list[str] = field(default_factory=list)
     trace: list[dict] = field(default_factory=list)
     note: str | None = None
+    waiting_for: str | None = None
     _move: tuple[int, int, float] | None = None
     _queue: list[str] = field(default_factory=list)   # the rest of the chosen path's segment
     _rest: list[str] = field(default_factory=list)    # the chosen path after this segment
@@ -619,9 +627,17 @@ class ParkingSession:
         if self.mode == "paths":
             paths = [] if is_parked(pose) else candidate_paths(pose, obstacles, current=tuple(self._rest))
             if not paths and not is_parked(pose):
-                # nothing to choose between: no way into the slot from here, so a person decides
-                self.note = "The planner found no path into the slot."
-                self.finish("asked")
+                mover = next((b for b in obstacles if b.moving), None)
+                if mover is not None and self.waits < MAX_WAITS:
+                    # in the way for now, not for good: a neighbour still parking had its tail in
+                    # this slot, and the session used to end here and hand the car to a person
+                    self.waits += 1
+                    self.waiting_for = mover.label or "a moving car"
+                    self.phase = "wait"
+                else:
+                    # nothing to choose between: no way into the slot from here, so a person decides
+                    self.note = "The planner found no path into the slot."
+                    self.finish("asked")
             return ParkView(self.vin, self.slot, pose, list(obstacles), ahead, behind, self.decisions,
                             self.moves[-3:], self.note, mode="paths", paths=paths)
         return ParkView(self.vin, self.slot, pose, list(obstacles), ahead, behind,
@@ -648,6 +664,11 @@ class ParkingSession:
         if choice == "ask_a_person":
             self.finish("asked")
             return
+        if view is not None and view.mode == "paths":
+            # what was on offer, so a decision can be explained afterwards
+            self.trace[-1]["offered"] = [f"{p.option}: {p.describe()}" for p in view.paths]
+            if view.note:
+                self.trace[-1]["note"] = view.note
         if choice.startswith("path_"):
             path = next((p for p in (view.paths if view else []) if p.option == choice), None)
             if path is None:
@@ -682,9 +703,18 @@ class ParkingSession:
             if hit is not None:
                 self.safety_stops += 1
                 self._queue, self._rest = [], []
-                self.note = (f"The safety check stopped your last move after {self._travelled:.1f} m: "
-                             f"going on would have brought the car within {SAFETY_MARGIN_M} m of "
-                             f"{hit.label or 'an obstacle'}. Choose a different move.")
+                if self.mode == "paths":
+                    # Not told to Gemini: the next paths are planned from where the car stopped, so
+                    # they already account for it. Told, it asked for a person over the one safe path
+                    # it was offered (P3 behind P1 in Y7: 0.88 with "choose a different move", 0.82
+                    # with "as it is meant to", 0.05 with no note). Kept in the trace instead.
+                    if self.trace:
+                        self.trace[-1]["safety_stop"] = {"after_m": round(self._travelled, 2),
+                                                         "near": hit.label or "an obstacle"}
+                else:
+                    self.note = (f"The safety check stopped your last move after {self._travelled:.1f} m: "
+                                 f"going on would have brought the car within {SAFETY_MARGIN_M} m of "
+                                 f"{hit.label or 'an obstacle'}. Choose a different move.")
                 self.phase = "settle"
                 return STOP
             self._travelled += abs(speed) * dt
@@ -712,6 +742,11 @@ class ParkingSession:
             if touching(ahead, [box], margin) and not touching(now, [box], margin):
                 return box
         return None
+
+    def resume(self) -> None:
+        """After a wait: plan again from where the car is."""
+        if self.phase == "wait":
+            self.phase, self.waiting_for = "decide", None
 
     def finish(self, outcome: str) -> None:
         self.outcome = outcome
