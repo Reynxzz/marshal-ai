@@ -161,3 +161,63 @@ def test_dashboard_defaults_are_loopback_only():
     assert args.bind == "127.0.0.1"
     assert args.http_port == 8090
     assert args.camera_url.startswith("http://127.0.0.1:8080")
+
+
+# --------------------------------------------------------------------------- #
+# The approval pane: a supervisor decides on the page, through the flows' own calls
+# --------------------------------------------------------------------------- #
+
+async def test_open_case_is_on_the_page_and_a_supervisor_resolves_it(plant):
+    from marshal_ai.dashboard import apply_decision, open_cases
+    from marshal_ai.demo import BOX_SCENE
+    from marshal_ai.driving import MissionGo
+    from marshal_ai.records import AssistanceCase
+
+    app = plant(["VIN-240"])
+    await app.rt.missions.send(MissionGo(mission_id="M-1", vin="VIN-240", waypoints=["yard.Y1"]))
+    await app.run_for(10)
+    app.rt.world.scenes["AC-1"] = BOX_SCENE
+    await app.rt.driving.raise_assist("VIN-240", "AC-1", "unknown object in lane",
+                                      ["wait_for_removal", "pass_left_3kmh", "reroute_lane_c"],
+                                      clip_uri="gs://marshal/assist/AC-1.mp4")
+
+    pane = open_cases(app)
+    assert [c["case_id"] for c in pane] == ["AC-1"]
+    assert pane[0]["recommended"] == "wait_for_removal" and pane[0]["options"]
+    json.dumps(pane, default=str)
+
+    result = await apply_decision(app, {"case_id": "AC-1", "choice": "wait_for_removal", "by": "supervisor-ana"})
+
+    assert result == {"case_id": "AC-1", "choice": "wait_for_removal", "resolved_by": "supervisor-ana"}
+    assert app.rt.store.get(AssistanceCase, "AC-1").resolved_by == "supervisor-ana"
+    assert open_cases(app) == []
+
+
+async def test_a_decision_needs_a_name_and_a_known_proposal(app):
+    from marshal_ai.dashboard import apply_decision
+
+    with pytest.raises(ValueError):
+        await apply_decision(app, {"case_id": "AC-1", "choice": "wait_for_removal", "by": ""})
+    with pytest.raises(KeyError):
+        await apply_decision(app, {"proposal_id": "P-404", "approve": True, "by": "supervisor-ana"})
+
+
+async def test_a_pending_proposal_goes_to_the_flow_that_owns_its_kind(app, monkeypatch):
+    from marshal_ai.dashboard import apply_decision
+
+    p = app.rt.propose("replan", "move VIN-P1 to Y6", {"kind": "late_truck", "plan": {}})
+    seen = {}
+
+    async def yard_decide(pid, approve, by):
+        seen.update(pid=pid, approve=approve, by=by)
+        return {"proposal_id": pid, "status": "approved"}
+
+    monkeypatch.setattr(app.yard, "decide", yard_decide)
+    result = await apply_decision(app, {"proposal_id": p.proposal_id, "approve": True, "by": "supervisor-ana"})
+
+    assert seen == {"pid": p.proposal_id, "approve": True, "by": "supervisor-ana"}
+    assert result["status"] == "approved"
+
+
+def test_dashboard_manual_mode_flag():
+    assert parser().parse_args(["--demo", "--manual"]).manual
