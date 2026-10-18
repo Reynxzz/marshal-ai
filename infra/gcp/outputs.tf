@@ -58,3 +58,13 @@ output "project_number" {
   description = "Project number (informational)."
   value       = data.google_project.current.number
 }
+
+output "api_service" {
+  description = "Cloud Run service of the Marshal API (GitHub variable GCP_API_SERVICE), served at /api/* on the load balancer."
+  value       = google_cloud_run_v2_service.api.name
+}
+
+output "api_service_account" {
+  description = "Service account the Marshal API runs as."
+  value       = google_service_account.api.email
+}

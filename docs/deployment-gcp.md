@@ -4,11 +4,14 @@
 
 ```text
 browser ──HTTP(S)──> global external Application LB (static IP, optional managed cert)
-                         └─> backend service ─> serverless NEG ─> Cloud Run (marshal-threejs)
-                                                                   ├─ serve.mjs (Bun): dist/client static + /healthz
-                                                                   └─ dist/server/server.js: SSR + server functions
-                                                                         └─> Vertex AI Gemini (runtime service account)
-GitHub Actions (push to deploy branch) ──OIDC──> Workload Identity Federation ──> deployer SA
+                         ├─ /* ─────> backend service ─> serverless NEG ─> Cloud Run (marshal-threejs)
+                         │                                                 ├─ serve.mjs (Bun): dist/client static + /healthz
+                         │                                                 └─ dist/server/server.js: SSR + server functions
+                         │                                                       └─> Vertex AI Gemini (runtime service account)
+                         └─ /api, /api/* ─> backend service ─> serverless NEG ─> Cloud Run (marshal-api)
+                                                                   └─ marshal_api (FastAPI, faris-be): /api/v1/...
+                                                                         └─> Vertex AI, Firestore, BigQuery, Pub/Sub, GCS (marshal-ai SA)
+GitHub Actions (push to frontend-demo / faris-be) ──OIDC──> Workload Identity Federation ──> deployer SA
     └─ docker build ─> Artifact Registry ─> gcloud run deploy (new revision)
 ```
 
@@ -17,7 +20,10 @@ GitHub Actions (push to deploy branch) ──OIDC──> Workload Identity Feder
 - Gemini runs on Vertex AI. Cloud Run sets `GOOGLE_GENAI_USE_VERTEXAI=true`,
   `GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_LOCATION` and `GEMINI_MODEL`. The runtime service account
   has `roles/aiplatform.user`, so no API key or secret is stored anywhere.
-- No database. The batch, event log and reports live in the browser (IndexedDB/localStorage)
+- The browser bundle is built with `VITE_BACKEND_API_URL=/api/v1` (Dockerfile build arg), so
+  the simulator calls the Marshal API's `/api/v1/bridge/*` same-origin through the LB (no CORS)
+  and falls back to its own server functions when the API fails. See "Marshal API" below.
+- The frontend has no database. The batch, event log and reports live in the browser (IndexedDB/localStorage)
   and the simulation runs in the tab. The server is stateless (SSR + Gemini server functions),
   so Cloud SQL or Firestore would add cost and an attack surface with nothing to store. If
   shared history is needed later, add Firestore or Cloud SQL plus a server function to write it.
@@ -55,6 +61,7 @@ gh variable set GCP_DEPLOY_SA         --body "$(terraform output -raw deployer_s
 gh variable set GCP_AR_REPO           --body "$(terraform output -raw artifact_registry_repo)"
 gh variable set GCP_REGION            --body "$(terraform output -raw region)"
 gh variable set GCP_CLOUD_RUN_SERVICE --body "$(terraform output -raw cloud_run_service)"
+gh variable set GCP_API_SERVICE       --body "$(terraform output -raw api_service)"
 gh variable set GCP_APP_URL           --body "$(terraform output -raw url)"   # optional
 ```
 
@@ -65,6 +72,7 @@ gh variable set GCP_APP_URL           --body "$(terraform output -raw url)"   # 
 | `GCP_AR_REPO` | `artifact_registry_repo` | `asia-southeast2-docker.pkg.dev/my-gcp-project/marshal-threejs` |
 | `GCP_REGION` | `region` | `asia-southeast2` |
 | `GCP_CLOUD_RUN_SERVICE` | `cloud_run_service` | `marshal-threejs` |
+| `GCP_API_SERVICE` | `api_service` | `marshal-api` |
 | `GCP_APP_URL` | `url` | `https://marshal.example.com` |
 
 ## 3. Continuous deployment
@@ -83,15 +91,36 @@ gh variable set GCP_APP_URL           --body "$(terraform output -raw url)"   # 
    every deploy overrides the Terraform scaling.
 
 The WIF provider's `attribute_condition` only accepts tokens whose `repository` is
-`Reynxzz/marshal-ai`, whose `ref` is one of the `github_branches` (`refs/heads/frontend-demo`)
-and whose `workflow_ref` is
-`.github/workflows/deploy-cloudrun.yml` on that same branch. Other branches, forks, pull requests
-and any other workflow file merged into a deploy branch cannot obtain GCP credentials. Set
+`Reynxzz/marshal-ai` and whose `ref` + `workflow_ref` are one of the `github_deploy_workflows`
+pairs (default: `deploy-cloudrun.yml` on `frontend-demo`, `deploy-backend.yml` on `faris-be`).
+Other branches, forks, pull requests, any other workflow file merged into a deploy branch, and
+one branch's workflow file run from the other branch cannot obtain GCP credentials. Set
 `github_repository_id` (`gh api repos/Reynxzz/marshal-ai --jq .id`) to also pin the numeric
 repository id, which survives renames and rejects a re-created repository with the same name.
-Change `github_repository` / `github_branches` / `github_workflow_file` in Terraform if the repo,
-branches or workflow file change, and keep `on.push.branches` plus the `deploy` job condition in
-the workflow in sync with `github_branches`.
+Change `github_repository` / `github_deploy_workflows` in Terraform if the repo, branches or
+workflow files change, and keep `on.push.branches` plus the `deploy` job condition of each
+workflow in sync. (`github_deploy_workflows` replaces the former `github_branches` and
+`github_workflow_file` variables.)
+
+### Marshal API (faris-be)
+
+`api.tf` runs the backend (`marshal_api`, FastAPI) as the Cloud Run service `api_service_name`
+(`marshal-api`) behind the same LB: the URL map sends `/api` and `/api/*` to it and everything
+else to the frontend. It runs as the `marshal-ai` service account (Vertex AI, Firestore,
+BigQuery, Pub/Sub, `storage.objectAdmin` on the artifacts bucket; an existing account is adopted)
+with the deployed demo settings of faris-be `.env.production` (`MARSHAL_RUN_PLANT=1`, memory
+store and bus, `MARSHAL_LLM=gemini`) plus `GOOGLE_CLOUD_PROJECT`, `MARSHAL_CORS_ORIGINS` (the
+domain) and the bucket names; override or add settings with `api_env`. The request timeout is
+3600 s for the `/api/v1/events` SSE stream, CPU stays allocated for the in-process plant, and the
+Cloud Armor policy also throttles `/api/v1/bridge/*` per IP.
+
+faris-be `.github/workflows/deploy-backend.yml` tests (`uv`, `pytest`) on pull requests and
+pushes, and on pushes to `faris-be` builds the faris-be `Dockerfile`, pushes
+`$GCP_AR_REPO/marshal-api:<sha>` (same Artifact Registry repository, separate image) and deploys
+it with `--min-instances=1 --max-instances=1` (= `api_min_instances` / `api_max_instances`). The
+container creates its SQLite demo database at startup, so its data (and the memory store/bus)
+resets on every new instance or revision; keep one instance until the state moves to
+Firestore/Pub/Sub (`MARSHAL_STORE=gcp`, `MARSHAL_BUS=gcp`) or Cloud SQL (`MARSHAL_DB_URL`).
 
 ## 4. Domain and HTTPS (optional)
 
@@ -118,7 +147,8 @@ gcloud run services update-traffic marshal-threejs --region asia-southeast2 \
   --to-revisions <previous-revision>=100
 ```
 
-The next push to a deploy branch deploys a new revision and sends 100% traffic to it again.
+The next push to a deploy branch deploys a new revision and sends 100% traffic to it again. The
+API rolls back the same way with `--service marshal-api`.
 
 ## Security and cost notes
 
@@ -138,6 +168,8 @@ The next push to a deploy branch deploys a new revision and sends 100% traffic t
   gate, lamp and assist image checks stay offline in the browser; only route, parking and yard
   decisions call Gemini.
 - The deployer service account can only push to the app's Artifact Registry repository, deploy
-  Cloud Run revisions (`roles/run.developer`) and act as the runtime service account.
+  Cloud Run revisions (`roles/run.developer`) and act as the two runtime service accounts.
+- The Marshal API is public and unauthenticated through the LB as well (`allUsers` invoker,
+  demo actor), including its write endpoints; put IAP or app-level auth in front before real use.
 - Deleting and recreating the WIF pool with the same ID fails for 30 days (soft delete). Change
   `name_prefix` or undelete the pool if that happens.

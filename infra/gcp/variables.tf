@@ -31,21 +31,20 @@ variable "github_repository" {
   }
 }
 
-variable "github_branches" {
-  description = "Only GitHub Actions runs on these branches may obtain deploy credentials. Keep in sync with on.push.branches and the deploy job condition in .github/workflows/deploy-cloudrun.yml."
-  type        = list(string)
-  default     = ["frontend-demo"]
+variable "github_deploy_workflows" {
+  description = "Branch => workflow file (under .github/workflows/) allowed to obtain deploy credentials, pinned as exact pairs through the ref and workflow_ref OIDC claims. Keep each in sync with on.push.branches and the deploy job condition of that workflow."
+  type        = map(string)
+  default = {
+    "frontend-demo" = "deploy-cloudrun.yml" # frontend (this branch)
+    "faris-be"      = "deploy-backend.yml"  # Marshal API
+  }
 
   validation {
-    condition     = length(var.github_branches) >= 1 && alltrue([for b in var.github_branches : can(regex("^[A-Za-z0-9_./-]+$", b))])
-    error_message = "github_branches must list at least one branch name (letters, digits, _ . / -)."
+    condition = length(var.github_deploy_workflows) >= 1 && alltrue([
+      for b, f in var.github_deploy_workflows : can(regex("^[A-Za-z0-9_./-]+$", b)) && can(regex("^[A-Za-z0-9_.-]+\\.ya?ml$", f))
+    ])
+    error_message = "github_deploy_workflows must map at least one branch name (letters, digits, _ . / -) to a workflow file name ending in .yml or .yaml."
   }
-}
-
-variable "github_workflow_file" {
-  description = "Workflow file (under .github/workflows/) that may obtain deploy credentials. Pinned via the workflow_ref OIDC claim."
-  type        = string
-  default     = "deploy-cloudrun.yml"
 }
 
 variable "github_repository_id" {
@@ -110,8 +109,65 @@ variable "max_instances" {
   }
 }
 
+variable "api_service_name" {
+  description = "Cloud Run service of the Marshal API (GitHub variable GCP_API_SERVICE). Also names its NEG and backend service."
+  type        = string
+  default     = "marshal-api"
+
+  validation {
+    condition     = can(regex("^[a-z][-a-z0-9]{1,30}[a-z0-9]$", var.api_service_name))
+    error_message = "api_service_name must be 3-32 lowercase letters, digits, or hyphens, starting with a letter."
+  }
+}
+
+variable "api_service_account_id" {
+  description = "Account id of the Marshal API runtime service account. An existing account with this id is adopted."
+  type        = string
+  default     = "marshal-ai"
+}
+
+variable "api_artifacts_bucket" {
+  description = "Existing GCS bucket for Marshal evidence/media (MARSHAL_BUCKET, MARSHAL_MEDIA_BUCKET). Empty means marshal-artifacts-<project_id>."
+  type        = string
+  default     = ""
+}
+
+variable "api_model" {
+  description = "Optional MARSHAL_MODEL for the API. Empty keeps the code defaults (marshal_ai and marshal_api pick their own models)."
+  type        = string
+  default     = ""
+}
+
+variable "api_env" {
+  description = "Extra or overriding environment variables for the Marshal API (merged over the deployed demo settings in api.tf)."
+  type        = map(string)
+  default     = {}
+}
+
+variable "api_min_instances" {
+  description = "Minimum Marshal API instances. Keep in sync with --min-instances in faris-be .github/workflows/deploy-backend.yml."
+  type        = number
+  default     = 1
+
+  validation {
+    condition     = var.api_min_instances >= 0
+    error_message = "api_min_instances must be 0 or more."
+  }
+}
+
+variable "api_max_instances" {
+  description = "Maximum Marshal API instances. Keep at 1 while the plant, store, bus and SQLite live in the instance. Keep in sync with --max-instances in deploy-backend.yml."
+  type        = number
+  default     = 1
+
+  validation {
+    condition     = var.api_max_instances >= 1 && var.api_max_instances >= var.api_min_instances
+    error_message = "api_max_instances must be at least 1 and not below api_min_instances."
+  }
+}
+
 variable "image" {
-  description = "Container image for the first apply. CI deploys later images; Terraform ignores image drift."
+  description = "Container image for the first apply of both Cloud Run services. CI deploys later images; Terraform ignores image drift."
   type        = string
   default     = "us-docker.pkg.dev/cloudrun/container/hello"
 }

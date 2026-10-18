@@ -10,9 +10,14 @@ COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile
 
 # 2) Build dist/client + dist/server with vite (TanStack Start plugin).
+# VITE_BACKEND_API_URL is inlined into the browser bundle: the Marshal API base URL. The load
+# balancer routes /api/* to the API, so the image calls it same-origin; local dev (bun run dev,
+# no variable) keeps the default in src/lib/serverFns/client.ts.
 FROM deps AS build
+ARG VITE_BACKEND_API_URL=/api/v1
 COPY . .
-ENV NODE_ENV=production
+ENV NODE_ENV=production \
+    VITE_BACKEND_API_URL=${VITE_BACKEND_API_URL}
 RUN bun run build
 
 # 3) Production-only dependencies for runtime imports from dist/server.

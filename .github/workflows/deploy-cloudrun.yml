@@ -1,7 +1,9 @@
 # Verify, build and deploy to Cloud Run on every push to the deploy branch (frontend-demo of
 # Reynxzz/marshal-ai). Pull requests into frontend-demo run the verify job (plus a docker
-# build) only, so a change is built before it deploys. The deploy branch must match
-# github_branches in infra/gcp (the WIF provider rejects any other ref).
+# build) only, so a change is built before it deploys. The deploy branch and this file must be a
+# pair in github_deploy_workflows in infra/gcp (the WIF provider rejects any other ref/workflow).
+# The browser calls the Marshal API same-origin at /api/v1 (load balancer path rule; faris-be
+# .github/workflows/deploy-backend.yml deploys it).
 # Auth uses Workload Identity Federation (no JSON keys). Configure these repository variables
 # from the infra/gcp Terraform outputs (see docs/deployment-gcp.md):
 #   GCP_WIF_PROVIDER, GCP_DEPLOY_SA, GCP_AR_REPO, GCP_REGION, GCP_CLOUD_RUN_SERVICE, GCP_APP_URL (optional)
@@ -24,6 +26,7 @@ permissions:
 env:
   BUN_VERSION: 1.4.3
   IMAGE_NAME: marshal-threejs
+  VITE_BACKEND_API_URL: /api/v1
 
 jobs:
   verify:
@@ -41,11 +44,11 @@ jobs:
 
       - name: Docker build (pull requests)
         if: github.event_name == 'pull_request'
-        run: docker build --tag "${IMAGE_NAME}:verify" .
+        run: docker build --build-arg VITE_BACKEND_API_URL="$VITE_BACKEND_API_URL" --tag "${IMAGE_NAME}:verify" .
 
   deploy:
     needs: verify
-    # The WIF provider only accepts tokens from the github_branches refs, so never run elsewhere
+    # The WIF provider only accepts tokens from this file on frontend-demo, so never run elsewhere
     # (pull requests only verify).
     if: >-
       github.event_name != 'pull_request' &&
@@ -74,7 +77,7 @@ jobs:
         env:
           IMAGE: ${{ vars.GCP_AR_REPO }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
         run: |
-          docker build --build-arg BUN_VERSION="$BUN_VERSION" -t "$IMAGE" .
+          docker build --build-arg BUN_VERSION="$BUN_VERSION" --build-arg VITE_BACKEND_API_URL="$VITE_BACKEND_API_URL" -t "$IMAGE" .
           docker push "$IMAGE"
           echo "ref=$IMAGE" >> "$GITHUB_OUTPUT"
 
