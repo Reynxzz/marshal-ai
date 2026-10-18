@@ -259,3 +259,34 @@ describe('a car blocked at the report point, the supervisor picks another option
     })
   }
 })
+
+describe('assist case ids', () => {
+  it("a car blocked again after a staged case gets a fresh id, not the shift's AC-<vin>-1", () => {
+    const engine = new ThreeJsEngine()
+    const requests: AssistRequestEvent[] = []
+    engine.on('assist.request', (event) => requests.push(event))
+    engine.spawn('VIN-1', { at: 'line_end', colour: [0, 0, 1] })
+    // The shift stages its own case first under AC-VIN-1-1, and it is decided.
+    engine.raiseAssist('VIN-1', 'AC-VIN-1-1', 'staged', ['wait_for_removal'])
+    engine.send({
+      op: 'assist.choose',
+      case_id: 'AC-VIN-1-1',
+      vin: 'VIN-1',
+      option: 'wait_for_removal',
+      chosen_by: 'supervisor',
+    })
+    // It drives on (nothing to wait for); then a box blocks it for real, and the engine's own case
+    // must not reuse that id.
+    engine.send({
+      op: 'mission.go',
+      mission_id: 'M1',
+      vin: 'VIN-1',
+      waypoints: ['inspection_gate'],
+    })
+    for (let step = 0; step < 4; step++) engine.tick(0.5)
+    const at = engine.getPositionXY('VIN-1')
+    engine.spawnProp('box-1', 'box', at.x + 12, at.y, 0)
+    expect(runUntil(engine, () => requests.length > 1, 120)).toBe(true)
+    expect(requests[1].case_id).toBe('AC-VIN-1-2')
+  })
+})

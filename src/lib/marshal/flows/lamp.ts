@@ -6,8 +6,8 @@
 
 import { offlineLamp, UNVERIFIED } from '../../serverFns/logic'
 import { fitFrames } from '../frames'
-import { patchCar } from '../state'
-import type { TrackStepEvent } from '../types'
+import { type AssistCase, colourToRgb, patchCar, patchCase, upsertCase } from '../state'
+import type { CaseOption, TrackStepEvent } from '../types'
 import type { FlowContext, MissionRecord } from './context'
 
 /** R-12 steps checked on camera. */
@@ -82,10 +82,27 @@ async function evaluateStep(
   if (result.pass) return
 
   mission.failed.push(event.step)
-  // An unverifiable camera check (Gemini down, no hint) is held for a person, not repaired.
+  // A camera check that confirmed nothing is held for a person, not repaired: either Gemini answered
+  // but was not sure enough (below the decision threshold, so no verdict is trusted), or it could
+  // not be reached at all and there was no evidence to answer offline from.
   const held = ctx.state().cars[event.vin]?.reworkReason === 'inspection'
-  const reworkReason = held || result.observed === UNVERIFIED ? 'inspection' : 'lamp'
-  ctx.update((state) => patchCar(state, event.vin, { stage: 'rework', reworkReason }))
+  const unverified = result.observed === UNVERIFIED
+  const reworkReason = held || unverified ? 'inspection' : 'lamp'
+  const lampName = lamp.name.replace(/_/g, ' ')
+  const inspectWhy = !unverified
+    ? undefined
+    : result.degraded
+      ? 'the AI check was unavailable'
+      : `Gemini was not sure the ${lampName} are lit`
+  ctx.update((state) =>
+    patchCar(state, event.vin, {
+      stage: 'rework',
+      reworkReason,
+      ...(inspectWhy ? { inspectWhy } : {}),
+    }),
+  )
+  // A person decides on it from the photo Gemini could not confirm (a card in Waiting on you).
+  if (unverified) ctx.reviews.set(event.vin, { lamp: lampName, frame: fitted.frames.at(-1) })
   const rework = ctx.go(event.vin, ['rework.electrical'], 'rework')
   rework.routine_steps = [...mission.failed]
 }
@@ -100,12 +117,19 @@ export function handleReworkDone(ctx: FlowContext, vin: string): void {
   const car = ctx.state().cars[vin]
   if (!car) return
   ctx.update((state) => patchCar(state, vin, { location: 'rework.electrical' }))
-  if (car.reworkReason !== 'lamp') {
-    const why =
-      car.reworkReason === 'inspection'
-        ? 'Held in the rework bay: AI check unavailable, a person inspects the car'
-        : 'Held in the rework bay for body / paint repair'
+  if (car.reworkReason === 'inspection') {
+    const reason = car.inspectWhy ?? 'the AI check was unavailable'
+    const why = `Held in the rework bay: ${reason}, so a person inspects the car`
     ctx.decide(vin, 'PLANT', why, { exception: true })
+    openLampReview(ctx, vin, reason)
+    return
+  }
+  if (car.reworkReason === 'gate') {
+    // The paint bay: repainted in the build-sheet colour, then back through the gate for a fresh
+    // check (it used to stay in the bay for the rest of the shift).
+    ctx.repaints.set(vin, ctx.now() + REPAINT_S)
+    const minutes = Math.round(REPAINT_S / 60)
+    ctx.decide(vin, 'PLANT', `In the paint bay: repainting ${car.expectedColour} (${minutes} min)`)
     return
   }
 
@@ -119,4 +143,89 @@ export function handleReworkDone(ctx: FlowContext, vin: string): void {
   )
   ctx.update((state) => patchCar(state, vin, { stage: 'test_track' }))
   ctx.go(vin, ['test_track'], 'track', { routine: 'R-12', routine_steps: steps })
+}
+
+/** Sim seconds the paint bay takes to repaint a wrong-colour car (compressed for the demo). */
+export const REPAINT_S = 120
+
+/**
+ * Sends every repainted car back to the gate: called on each orchestrator tick.
+ * @param ctx - Flow context.
+ */
+export function completeRepaints(ctx: FlowContext): void {
+  if (ctx.repaints.size === 0) return
+  const now = ctx.now()
+  for (const [vin, readyAt] of [...ctx.repaints]) {
+    if (now < readyAt) continue
+    ctx.repaints.delete(vin)
+    const car = ctx.state().cars[vin]
+    if (car?.stage !== 'rework') continue
+    ctx.ds.repaint?.(vin, colourToRgb(car.expectedColour))
+    ctx.update((state) => patchCar(state, vin, { colour: car.expectedColour, stage: 'to_gate' }))
+    ctx.decide(vin, 'PLANT', `Repainted ${car.expectedColour}; back to the gate for a re-check`)
+    ctx.go(vin, ['inspection_gate'], 'gate')
+  }
+}
+
+/**
+ * Opens a "Waiting on you" card for a car held after a lamp check nothing confirmed: the photo
+ * Gemini judged, and a person's two calls (lamps fine, or repair and re-check).
+ * @param ctx - Flow context.
+ * @param vin - Car held in the rework bay.
+ * @param reason - Why it is held (Gemini unsure, or the AI check unavailable).
+ */
+function openLampReview(ctx: FlowContext, vin: string, reason: string): void {
+  const pending = ctx.reviews.get(vin)
+  if (!pending) return
+  ctx.reviews.delete(vin)
+  const count = Object.values(ctx.state().cases).filter((item) => item.vin === vin).length
+  const item: AssistCase = {
+    case_id: `RV-${vin}-${count + 1}`,
+    vin,
+    kind: 'review',
+    reason: `Lamp check: ${reason}. Look at the ${pending.lamp} in the photo`,
+    options: ['lamps_ok', 'to_electrical_bay'],
+    frames: pending.frame ? [pending.frame] : [],
+    status: 'open',
+    opened_at: ctx.now(),
+  }
+  ctx.update((state) => upsertCase(state, item))
+}
+
+/**
+ * A person's call on a review card: the lamps are fine (on to the report point), or they are not
+ * (the electrical bay repairs them and the track re-checks the failed steps).
+ * @param ctx - Flow context.
+ * @param item - The open review case.
+ * @param option - The person's call.
+ * @param by - Who decided.
+ * @returns True when the call was applied.
+ */
+export function chooseReview(
+  ctx: FlowContext,
+  item: AssistCase,
+  option: CaseOption,
+  by: 'supervisor' | 'gemini',
+): boolean {
+  if (option !== 'lamps_ok' && option !== 'to_electrical_bay') return false
+  const vin = item.vin
+  const car = ctx.state().cars[vin]
+  if (car?.stage !== 'rework') return false
+  const decided = { status: 'decided' as const, chosen: option, chosen_by: by }
+  ctx.update((state) => patchCase(state, item.case_id, decided))
+  const tag = by === 'supervisor' ? 'SUPERVISOR' : 'GEMINI'
+  if (option === 'lamps_ok') {
+    const text = `${item.case_id}: lamps checked by a person, OK; on to the report point`
+    ctx.decide(vin, tag, text, { exception: true })
+    ctx.update((state) =>
+      patchCar(state, vin, { stage: 'report', reworkReason: undefined, inspectWhy: undefined }),
+    )
+    ctx.go(vin, ['report_point'], 'report')
+    return true
+  }
+  const text = `${item.case_id}: lamps not lit; to the electrical bay for repair`
+  ctx.decide(vin, tag, text, { exception: true })
+  ctx.update((state) => patchCar(state, vin, { reworkReason: 'lamp', inspectWhy: undefined }))
+  handleReworkDone(ctx, vin)
+  return true
 }

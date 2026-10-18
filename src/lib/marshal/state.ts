@@ -2,7 +2,7 @@
 // object (inputs are never mutated) and `derive` recomputes the KPIs, progress and paused flag,
 // so dashboard snapshots can be compared by reference.
 
-import type { AssistAnalysis, AssistOption } from './types'
+import type { AssistAnalysis, CaseOption } from './types'
 
 /**
  * Where a car is in the shift (drives the dashboard lanes). 'waiting' means an assist case is
@@ -63,6 +63,8 @@ export type CarState = {
    * could not be verified ('inspection': a person checks the lamps).
    */
   reworkReason?: 'gate' | 'lamp' | 'inspection'
+  /** Why a car held for inspection is held: Gemini unsure, or the AI check unavailable. */
+  inspectWhy?: string
   /** Sim time the car was parked (for the "just parked" cell state). */
   parkedAt?: number
   /** Already in the yard when the shift started: not counted as off the line or in progress. */
@@ -81,13 +83,15 @@ export type CarState = {
 export type AssistCase = {
   case_id: string
   vin: string
+  /** 'assist': a stopped car asks what to do; 'review': a person checks a held car. */
+  kind?: 'assist' | 'review'
   reason: string
-  options: AssistOption[]
+  options: CaseOption[]
   /** base64 JPEG clip frames. */
   frames: string[]
   analysis?: AssistAnalysis
   status: 'open' | 'decided'
-  chosen?: AssistOption
+  chosen?: CaseOption
   chosen_by?: 'supervisor' | 'gemini'
   /** Sim time the case was opened. */
   opened_at: number
@@ -227,7 +231,8 @@ const DONE_STAGES: ReadonlySet<CarStage> = new Set(['parked', 'held', 'shipped']
 
 function carDone(car: CarState): boolean {
   if (DONE_STAGES.has(car.stage) || car.held !== undefined) return true
-  return car.stage === 'rework' && car.reworkReason !== 'lamp'
+  // Held for a person (the AI check was unavailable); a wrong colour is repainted and re-checked.
+  return car.stage === 'rework' && car.reworkReason === 'inspection'
 }
 
 /**

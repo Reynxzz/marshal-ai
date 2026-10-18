@@ -8,7 +8,7 @@ import { type EventBus, type MarshalEventMap, bus as sharedBus } from './eventBu
 import { autoChooseOpen, chooseAssist, handleAssistRequest } from './flows/assist'
 import type { FlowContext, MissionPurpose, MissionRecord, TruthHintPort } from './flows/context'
 import { handleGateArrival } from './flows/gate'
-import { handleReworkDone, handleTrackStep } from './flows/lamp'
+import { completeRepaints, handleReworkDone, handleTrackStep } from './flows/lamp'
 import { runParking } from './flows/parking'
 import { handleReportArrival, retryHeldAtReport } from './flows/route'
 import {
@@ -30,7 +30,7 @@ import {
   type Truck,
 } from './state'
 import type {
-  AssistOption,
+  CaseOption,
   DrivingSystem,
   EvidencePort,
   GateCapturePort,
@@ -99,7 +99,7 @@ export type Orchestrator = {
    * @param by - Who chose (default 'supervisor').
    * @returns True when accepted.
    */
-  chooseAssist(case_id: string, option: AssistOption, by?: 'supervisor' | 'gemini'): boolean
+  chooseAssist(case_id: string, option: CaseOption, by?: 'supervisor' | 'gemini'): boolean
   /**
    * Sets "Pause when needed"; switching it off applies Gemini's pending recommendations.
    * @param on - New value.
@@ -239,12 +239,15 @@ export function createOrchestrator(options: OrchestratorOptions): Orchestrator {
     },
     parkingAttempts: new Map(),
     parkingCases: new Set(),
+    repaints: new Map(),
+    reviews: new Map(),
     yard: { queue: [], active: null },
   }
 
   const tickTime = () => {
     const now = clock()
     if (now !== state.simTime) update((current) => ({ ...current, simTime: now }))
+    completeRepaints(ctx)
   }
 
   const onStatus = (event: StatusEvent) => {

@@ -219,6 +219,12 @@ describe('assist options change what the car does', () => {
           expect(store().choose('AC-P002-1', option)).toBe(true)
           decidedAt = engine().time
         }
+        // Any other case the shift stops for (P003's parking, after its repaint) gets its first option.
+        for (const item of Object.values(store().shift.cases)) {
+          if (item.status === 'open' && item.case_id !== 'AC-P002-1' && store().shift.paused) {
+            store().choose(item.case_id, item.options[0])
+          }
+        }
         store().advance(SAMPLE_S)
         await flush()
         monitor.sample(engine(), store().shift, engine().time)

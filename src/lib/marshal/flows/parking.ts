@@ -202,6 +202,20 @@ function askPerson(
   why: string,
 ): void {
   if (attempt >= MAX_PARKING_ATTEMPTS) {
+    // The yard crew parks it by hand (CARLA's stand-in parking does the same), so the car does not
+    // stand at the yard entry for the rest of the shift: a slot walled in on both sides can't be
+    // driven into, and the row fills up that way once a late car comes back from rework.
+    const slotId = ctx.state().cars[vin]?.slot
+    const point = slotId ? slotToPoint(slotId) : undefined
+    if (slotId && point && ctx.ds.place && slotIsEmpty(ctx, vin, point)) {
+      ctx.ds.place(vin, point)
+      const parkedAt = ctx.now()
+      ctx.update((state) => setSlot(state, slotId, vin))
+      ctx.update((state) => patchCar(state, vin, { stage: 'parked', location: point, parkedAt }))
+      const text = `Parking ${label}: ${why} after ${attempt} attempts; the yard crew parked it in ${slotId}`
+      ctx.decide(vin, 'YARD', text, { exception: true })
+      return
+    }
     const abandoned = `Parking ${label} abandoned after ${attempt} attempts (${why})`
     const held = `${abandoned}; the yard crew takes over`
     ctx.update((state) => patchCar(state, vin, { stage: 'held', held }))
@@ -212,3 +226,19 @@ function askPerson(
   ctx.parkingCases.add(case_id)
   ctx.ds.raiseAssist(vin, case_id, `Parking ${label}: ${why}`, ['wait_for_removal'])
 }
+
+/**
+ * True when nothing stands in the slot itself (neighbouring cars in their own slots do not
+ * count): the yard crew can set a car down there by hand.
+ */
+function slotIsEmpty(ctx: FlowContext, vin: string, point: string): boolean {
+  const slot: ParkingSlot = { id: point, ...ctx.ds.getTransform(point) }
+  return ctx.parking.getObstacles(vin, slot).every((box) => {
+    const local = toSlotFrame(box, slot)
+    return Math.abs(local.x) > SLOT_HALF_LENGTH_M || Math.abs(local.y) > SLOT_HALF_WIDTH_M
+  })
+}
+
+/** Half the footprint of a yard slot, metres (row-A slots sit nose to tail, 0.6 m apart). */
+const SLOT_HALF_LENGTH_M = 2.4
+const SLOT_HALF_WIDTH_M = 1.3

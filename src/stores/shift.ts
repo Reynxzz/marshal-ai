@@ -17,6 +17,7 @@ import {
 import { type LampFault, ScriptedDrivingSystem } from '#/lib/marshal/testing/scriptedSystem'
 import type {
   AssistOption,
+  CaseOption,
   DrivingSystem,
   EvidencePort,
   GateCapturePort,
@@ -190,7 +191,7 @@ export type ShiftStore = {
    * Decides an assist case as the supervisor.
    * @returns True when the orchestrator accepted the choice.
    */
-  choose: (case_id: string, option: AssistOption) => boolean
+  choose: (case_id: string, option: CaseOption) => boolean
   /** Selects a car (null clears it); also drops a picked case. */
   select: (vin: string | null) => void
   /** Focuses the 3D view (and the car detail) on an assist case's car. */

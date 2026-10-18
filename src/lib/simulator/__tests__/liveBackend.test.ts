@@ -3,11 +3,13 @@
 // camera ports return no frames and the image checks answer offline; driving is the engine's.
 
 import { describe, expect, it } from 'vitest'
+import { POINTS } from '#/lib/marshal/points'
 import { enterableSimSlot } from '#/lib/marshal/state'
 import { createOfflineMarshalAi } from '#/lib/marshal/testing/offlineAi'
+import type { AssistRequestEvent } from '#/lib/marshal/types'
 import { useShiftStore } from '#/stores/shift'
 import { ThreeJsEngine } from '../engine'
-import { createLiveBackend, type LiveBackend } from '../liveBackend'
+import { createLiveBackend, LIVE_ASSIST_FRAMES, type LiveBackend } from '../liveBackend'
 
 async function flush(): Promise<void> {
   for (let i = 0; i < 50; i++) await Promise.resolve()
@@ -30,6 +32,37 @@ describe('live backend', () => {
     backend.dispose()
   })
 
+  it('sends the approach to the obstacle as the assist clip, not one still repeated', () => {
+    // A fake camera: each frame names where the chase camera stood.
+    const backend = createLiveBackend({
+      shoot: (pose) => `${pose.x.toFixed(1)},${pose.y.toFixed(1)}`,
+    })
+    const requests: AssistRequestEvent[] = []
+    backend.on('assist.request', (event) => requests.push(event))
+    backend.spawn('VIN-1', { at: 'line_end', colour: [0, 0, 1] })
+    backend.spawnProp('box-1', 'box', 30, POINTS.line_end.y, 0)
+    backend.send({
+      op: 'mission.go',
+      mission_id: 'M1',
+      vin: 'VIN-1',
+      waypoints: ['inspection_gate'],
+    })
+    for (let t = 0; t < 120 && requests.length === 0; t++) backend.tick(0.5)
+
+    expect(requests).toHaveLength(1)
+    const clip = requests[0].clip_frames
+    expect(clip.length).toBeGreaterThan(1)
+    expect(clip.length).toBeLessThanOrEqual(LIVE_ASSIST_FRAMES)
+    expect(new Set(clip).size).toBe(clip.length)
+    // Oldest first, ending where the car stopped.
+    const stop = backend.getPositionXY('VIN-1')
+    const last = clip[clip.length - 1].split(',').map(Number)
+    expect(Math.hypot(last[0] - (stop.x - 6), last[1] - stop.y)).toBeLessThan(0.2)
+    const xs = clip.map((frame) => Number(frame.split(',')[0]))
+    expect([...xs].sort((a, b) => a - b)).toEqual(xs)
+    backend.dispose()
+  })
+
   it('plays the default shift: every good car parks in its slot', async () => {
     let backend: LiveBackend | null = null
     const store = useShiftStore.getState()
@@ -46,8 +79,9 @@ describe('live backend', () => {
       await flush()
     }
     const { cars, layout } = useShiftStore.getState().shift
-    expect(cars.P003.stage).toBe('rework')
-    for (const vin of ['P001', 'P002', 'P004', 'P005']) {
+    // P003 failed the gate on colour: repainted, re-checked, then parked like the rest.
+    expect(cars.P003.colour).toBe(cars.P003.expectedColour)
+    for (const vin of ['P001', 'P002', 'P003', 'P004', 'P005']) {
       expect(cars[vin].stage).toBe('parked')
       const slot = cars[vin].slot ?? ''
       expect(layout[slot]).toBe(vin)

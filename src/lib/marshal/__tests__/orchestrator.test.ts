@@ -97,7 +97,7 @@ describe('fail-closed offline checks and shift completion', () => {
     const feed = feedText('VIN-X')
     const fail = 'GEMINI Gate FAIL: not_verified_offline; saw unknown, built blue (0.00)'
     expect(feed).toContain(fail)
-    expect(feed.at(-1)).toMatch(/AI check unavailable/)
+    expect(feed.at(-1)).toMatch(/the AI check was unavailable, so a person inspects/)
   })
 
   it('holds a car for inspection when the offline lamp check has no evidence', async () => {
@@ -122,6 +122,87 @@ describe('fail-closed offline checks and shift completion', () => {
     expect(tracks).toHaveLength(1)
   })
 
+  it('says Gemini was unsure, not unavailable, when it answered without confidence', async () => {
+    const { ds, orch, feedText } = setup({
+      ai: {
+        evaluateLampEvidence: async (input) => ({
+          expected: 'ON',
+          observed: input.step === 'brake_lights' ? 'UNVERIFIED' : 'ON',
+          pass: input.step !== 'brake_lights',
+          degraded: false,
+        }),
+      },
+    })
+    orch.start([{ vin: 'VIN-U', colour: 'blue' }])
+    const done = await runUntil(
+      ds,
+      orch.getState,
+      (s) => s.cars['VIN-U'].location === 'rework.electrical',
+    )
+    expect(done).toBe(true)
+    expect(orch.getState().cars['VIN-U']).toMatchObject({ reworkReason: 'inspection' })
+    expect(feedText('VIN-U').at(-1)).toBe(
+      'PLANT Held in the rework bay: Gemini was not sure the brake lights are lit, so a person inspects the car',
+    )
+  })
+
+  for (const option of ['lamps_ok', 'to_electrical_bay'] as const) {
+    it(`opens a review card with the photo; "${option}" sends the car on and it parks`, async () => {
+      let unsure = true
+      const { ds, orch, feedText, missionsOf } = setup({
+        ai: {
+          evaluateLampEvidence: async (input) => {
+            const doubt = input.step === 'brake_lights' && unsure
+            if (doubt) unsure = false
+            return {
+              expected: 'ON',
+              observed: doubt ? 'UNVERIFIED' : 'ON',
+              pass: !doubt,
+              degraded: false,
+            }
+          },
+        },
+      })
+      orch.start([{ vin: 'VIN-V', colour: 'blue' }])
+      const opened = await runUntil(ds, orch.getState, (s) => s.cases['RV-VIN-V-1'] !== undefined)
+      expect(opened).toBe(true)
+      const card = orch.getState().cases['RV-VIN-V-1']
+      expect(card).toMatchObject({
+        kind: 'review',
+        status: 'open',
+        options: ['lamps_ok', 'to_electrical_bay'],
+      })
+      expect(card.reason).toContain('Gemini was not sure the brake lights are lit')
+      expect(card.frames).toHaveLength(1)
+      expect(orch.getState().paused).toBe(true)
+
+      expect(orch.chooseAssist('RV-VIN-V-1', option)).toBe(true)
+      expect(orch.getState().cases['RV-VIN-V-1']).toMatchObject({
+        status: 'decided',
+        chosen: option,
+      })
+      const parked = await runUntil(ds, orch.getState, (s) => s.cars['VIN-V'].stage === 'parked')
+      expect(parked).toBe(true)
+      const feed = feedText('VIN-V')
+      if (option === 'lamps_ok') {
+        expect(feed).toContain(
+          'SUPERVISOR RV-VIN-V-1: lamps checked by a person, OK; on to the report point',
+        )
+        expect(orch.getState().cars['VIN-V'].reworkReason).toBeUndefined()
+      } else {
+        expect(feed).toContain(
+          'SUPERVISOR RV-VIN-V-1: lamps not lit; to the electrical bay for repair',
+        )
+        expect(feed.some((line) => line.startsWith('PLANT Rework repaired brake_lights'))).toBe(
+          true,
+        )
+        // re-checked on the track after the repair
+        const tracks = missionsOf('VIN-V').filter((cmd) => cmd.waypoints.includes('test_track'))
+        expect(tracks.length).toBeGreaterThanOrEqual(2)
+      }
+    })
+  }
+
   it('completes the shift when a car is held because the yard is full', async () => {
     const { ds, orch, feedText } = setup()
     orch.start([{ vin: 'VIN-F', colour: 'blue' }], {
@@ -136,7 +217,7 @@ describe('fail-closed offline checks and shift completion', () => {
 })
 
 describe('Scene A: route choice and gate failure', () => {
-  it('routes via lane_c around a staged hazard; wrong colour goes to rework', async () => {
+  it('routes via lane_c around a staged hazard; wrong colour is repainted, re-checked and parked', async () => {
     const { ds, orch, missionsOf, feedText } = setup()
     const hazard = stageHazard(ds, 'finishing_corner', 'forklift_unloading')
     orch.setHazard(hazard.description)
@@ -148,8 +229,7 @@ describe('Scene A: route choice and gate failure', () => {
     const done = await runUntil(
       ds,
       orch.getState,
-      (s) =>
-        s.cars['VIN-B1'].stage === 'parked' && s.cars['VIN-R1'].location === 'rework.electrical',
+      (s) => s.cars['VIN-B1'].stage === 'parked' && s.cars['VIN-R1'].stage === 'parked',
     )
     expect(done).toBe(true)
 
@@ -157,13 +237,21 @@ describe('Scene A: route choice and gate failure', () => {
     expect(yardMission?.waypoints).toEqual(['lane_c', 'yard.entry'])
     expect(feedText('VIN-B1').some((line) => line.startsWith('GEMINI Route via lane_c'))).toBe(true)
 
+    // The wrong colour: rework, the paint bay, back through the gate, then the usual way to the yard.
     const red = orch.getState().cars['VIN-R1']
-    expect(red.stage).toBe('rework')
     expect(red.reworkReason).toBe('gate')
-    expect(missionsOf('VIN-R1').at(-1)?.waypoints).toEqual(['rework.electrical'])
-    const gateFail = 'GEMINI Gate FAIL: colour_mismatch'
-    expect(feedText('VIN-R1').some((line) => line.startsWith(gateFail))).toBe(true)
-    expect(orch.getState().kpis).toMatchObject({ offLine: 2, inYard: 1, rework: 1 })
+    expect(red.colour).toBe('blue')
+    expect(missionsOf('VIN-R1').map((m) => m.waypoints[0])).toContain('rework.electrical')
+    const feed = feedText('VIN-R1')
+    const order = [
+      feed.findIndex((line) => line.startsWith('GEMINI Gate FAIL: colour_mismatch')),
+      feed.findIndex((line) => line.startsWith('PLANT In the paint bay: repainting blue')),
+      feed.findIndex((line) => line.startsWith('PLANT Repainted blue; back to the gate')),
+      feed.findIndex((line) => line.startsWith('GEMINI Gate PASS: blue as built')),
+    ]
+    expect(order.every((index) => index >= 0)).toBe(true)
+    expect([...order].sort((x, y) => x - y)).toEqual(order)
+    expect(orch.getState().kpis).toMatchObject({ offLine: 2, inYard: 2, rework: 1 })
     expect(orch.getState().progress).toBe(1)
   })
 })

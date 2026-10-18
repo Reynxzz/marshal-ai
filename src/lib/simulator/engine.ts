@@ -503,6 +503,36 @@ export class ThreeJsEngine implements DrivingSystem {
   }
 
   /**
+   * Sets a car down on a named point, stopped and without a mission (the yard crew parking a car
+   * by hand when the planner finds no way into its slot).
+   * @param vin - Car VIN.
+   * @param at - Named point, e.g. 'yard.Y5'.
+   */
+  place(vin: string, at: string): void {
+    const car = this.cars.get(vin)
+    if (!car) return
+    const point = this.point(at)
+    Object.assign(car, { x: point.x, y: point.y, yaw: (point.yaw * Math.PI) / 180, speed_mps: 0 })
+    Object.assign(car, {
+      mission: null,
+      location: at,
+      stoppedForAssist: false,
+      assistPending: false,
+    })
+    Object.assign(car, { avoidPhase: null, avoidProps: [], blockedFor: 0, waitingCase: null })
+  }
+
+  /**
+   * Paints a car another colour (the paint bay's repair of a wrong colour).
+   * @param vin - Car VIN.
+   * @param colour - New RGB colour (0-1).
+   */
+  repaint(vin: string, colour: [number, number, number]): void {
+    const car = this.cars.get(vin)
+    if (car) car.rgb = [...colour] as [number, number, number]
+  }
+
+  /**
    * Lamp faults set on a car (visual overrides, M5.3).
    * @param vin - Car VIN.
    * @returns Fault names.
@@ -1318,7 +1348,10 @@ export class ThreeJsEngine implements DrivingSystem {
       kind === 'worker'
         ? ['wait_for_removal']
         : ['wait_for_removal', 'pass_left_3kmh', 'reroute_lane_c']
-    car.assistSeq += 1
+    // A fresh id: the shift stages its own cases as AC-<vin>-1, and a request under an id that is
+    // already decided is ignored, leaving the car stopped for help with no card to answer.
+    do car.assistSeq += 1
+    while (this.assists.has(`AC-${car.vin}-${car.assistSeq}`))
     this.raiseAssist(
       car.vin,
       `AC-${car.vin}-${car.assistSeq}`,

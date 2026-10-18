@@ -4,6 +4,16 @@ Plant car simulation **without CARLA**, entirely in the browser with **three.js*
 picks how many cars to process, the system runs one batch through **7 flows**, records an event
 log, and **Gemini (ADK)** gives per-batch feedback and a report.
 
+## Branches
+
+| Branch | What it is |
+| --- | --- |
+| **[`main`](https://github.com/Reynxzz/marshal-ai/tree/main)** | Marshal itself: the flows, Gemini, the rules, the CARLA plant and its scripts, the evaluations. |
+| **[`faris-be`](https://github.com/Reynxzz/marshal-ai/tree/faris-be)** | **Backend**: the Marshal API (FastAPI, `src/marshal_api`) on Cloud Run, including the bridge that runs the flows with real Gemini on this plant's camera frames (`api/v1/sim_bridge.py`). Deploys with `.github/workflows/deploy-backend.yml`. |
+| **`frontend-demo`** (this branch) | **Frontend**: the supervisor dashboard and the browser plant (Three.js on CARLA's road layout), served at **[marshal.cmid.cloud](https://marshal.cmid.cloud)**. Deploys to Cloud Run with `.github/workflows/deploy-cloudrun.yml`; infrastructure in `infra/gcp` (Terraform). |
+
+Work goes on a short-lived branch off the one it changes, and comes back through a pull request.
+
 ## Rule #1 — standalone
 
 > **This project is standalone.** It must not integrate with `marshal-ai` (Python) or

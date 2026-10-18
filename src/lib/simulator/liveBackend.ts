@@ -1,8 +1,9 @@
 // Live backend for the dashboard: the ThreeJsEngine drives the cars (pure pursuit, queuing,
 // R-12, assist, kinematic parking) and the cameras render the engine's dressed plant scene, so
 // the gate, lamp and assist checks send real JPEGs to Gemini instead of placeholder frames.
-// Frames are rendered on demand (gate arrival, each R-12 lamp step, an assist request) from a
-// scene synced to the engine at that moment; overlays stay hidden, so frames are clean (M3.1).
+// Frames are rendered on demand (gate arrival, each R-12 lamp step) from a scene synced to the
+// engine at that moment; the assist clip is recorded on the approach to an obstacle and ends with
+// the frame at the stop. Overlays stay hidden, so frames are clean (M3.1).
 
 import * as THREE from 'three'
 import { POINTS } from '#/lib/marshal/points'
@@ -12,7 +13,12 @@ import { buildPlantLayout } from '#/lib/simview/plantMap'
 import { createPlantScene, type PlantScene } from '#/lib/simview/scene'
 import { colourHexFor, type SimSnapshot } from '#/lib/simview/snapshot'
 import type { CarFault } from './actors/car'
-import { CAR_FRAME_HEIGHT, CAR_FRAME_WIDTH, carCameraPoses } from './cameras/carCamera'
+import {
+  ASSIST_PERIOD_S,
+  CAR_FRAME_HEIGHT,
+  CAR_FRAME_WIDTH,
+  carCameraPoses,
+} from './cameras/carCamera'
 import { GATE_FRAME_HEIGHT, GATE_FRAME_WIDTH, gateCameraPoses } from './cameras/gateCamera'
 import { carlaToThree, carlaYawToThree } from './coords'
 import { ThreeJsEngine } from './engine'
@@ -26,16 +32,32 @@ export const LIVE_JPEG_QUALITY = 0.85
  */
 export const GATE_END_FOV = 55
 
-/** Assist clip length: frames rendered from the chase camera when a car asks for help. */
-export const LIVE_ASSIST_FRAMES = 2
+/**
+ * Assist clip length: the most recent distinct chase-camera frames, oldest first, ending with the
+ * frame at the stop (M5.1: the clip before the stop, not one still repeated).
+ */
+export const LIVE_ASSIST_FRAMES = 4
+
+/**
+ * A car records chase frames while an obstacle is this close ahead (the "Braking for" range), so
+ * the clip shows the approach. Only cars near a hazard pay for the extra renders.
+ */
+export const ASSIST_WATCH_M = 18
 
 /** Other cars this close to a camera are left out of its frame (a camera cannot sit inside one). */
 export const CAMERA_CLEARANCE_M = 3.5
 
 /** Renders one camera view of the scene to a base64 JPEG. */
-type Shoot = (pose: CameraPose, width: number, height: number) => string
+export type Shoot = (pose: CameraPose, width: number, height: number) => string
 
-type CameraPose = { x: number; y: number; z: number; yaw: number; pitch: number; fov: number }
+export type CameraPose = {
+  x: number
+  y: number
+  z: number
+  yaw: number
+  pitch: number
+  fov: number
+}
 
 /** The live engine as the shift store sees it. */
 export type LiveBackend = ThreeJsEngine & {
@@ -91,13 +113,22 @@ function createShooter(scene: THREE.Scene): { shoot: Shoot; dispose(): void } | 
   }
 }
 
+/** Options for {@link createLiveBackend}. */
+export type LiveBackendOptions = {
+  /** Camera renderer (tests inject a fake); defaults to a hidden WebGL renderer. */
+  shoot?: Shoot
+}
+
 /**
  * Builds the live backend: a ThreeJsEngine whose camera ports render real frames.
+ * @param options - Optional injected renderer.
  * @returns Engine plus the gate and evidence ports.
  */
-export function createLiveBackend(): LiveBackend {
+export function createLiveBackend(options: LiveBackendOptions = {}): LiveBackend {
   let plant: PlantScene | null = null
-  let shooter: ReturnType<typeof createShooter> | undefined
+  let shooter: ReturnType<typeof createShooter> | undefined = options.shoot
+    ? { shoot: options.shoot, dispose() {} }
+    : undefined
   const layout = buildPlantLayout()
 
   const engine = new ThreeJsEngine(undefined, {
@@ -155,15 +186,61 @@ export function createLiveBackend(): LiveBackend {
     return carCameraPoses(pose).find((item) => item.view === view)
   }
 
-  function assistClip(vin: string): string[] {
+  /** Chase frames per car recorded on the approach to an obstacle, oldest first. */
+  const approach = new Map<string, { frames: string[]; clock: number }>()
+
+  const shootChase = (vin: string): string | null => {
     const pose = carView(vin, 'assist')
     const shoot = pose ? ready([pose], vin) : null
-    if (!shoot || !pose) return []
-    const frame = shoot(pose, CAR_FRAME_WIDTH, CAR_FRAME_HEIGHT)
-    return Array.from({ length: LIVE_ASSIST_FRAMES }, () => frame)
+    return shoot && pose ? shoot(pose, CAR_FRAME_WIDTH, CAR_FRAME_HEIGHT) : null
   }
 
+  /** Appends a frame unless it repeats the last one (a still scene adds nothing), keeping the cap. */
+  const keep = (frames: string[], frame: string): void => {
+    if (frames[frames.length - 1] === frame) return
+    frames.push(frame)
+    if (frames.length > LIVE_ASSIST_FRAMES) frames.shift()
+  }
+
+  /** Records chase frames, every ASSIST_PERIOD_S, for cars with an obstacle close ahead. */
+  const recordApproach = (dt: number): void => {
+    for (const { vin } of engine.listCars()) {
+      const obstacle = engine.telemetryOf(vin)?.obstacle
+      if (!obstacle || obstacle.ahead_m > ASSIST_WATCH_M) {
+        approach.delete(vin)
+        continue
+      }
+      let entry = approach.get(vin)
+      if (!entry) {
+        entry = { frames: [], clock: ASSIST_PERIOD_S }
+        approach.set(vin, entry)
+      } else {
+        entry.clock += dt
+      }
+      if (entry.clock + 1e-9 < ASSIST_PERIOD_S) continue
+      entry.clock = 0
+      const frame = shootChase(vin)
+      if (!frame) return // no WebGL: nothing to record for any car
+      keep(entry.frames, frame)
+    }
+  }
+
+  /** The assist clip: the approach frames plus the frame at the stop, without repeats. */
+  function assistClip(vin: string): string[] {
+    const frames = [...(approach.get(vin)?.frames ?? [])]
+    approach.delete(vin)
+    const now = shootChase(vin)
+    if (now) keep(frames, now)
+    return frames
+  }
+
+  const baseTick = engine.tick.bind(engine)
+
   return Object.assign(engine, {
+    tick(dt: number): void {
+      baseTick(dt)
+      if (dt > 0) recordApproach(dt)
+    },
     placeholderFrames: false as const,
     laneApproach: true as const,
     async capture(vin: string, views: GateView[]): Promise<GateFrames> {
@@ -195,6 +272,7 @@ export function createLiveBackend(): LiveBackend {
       plant?.dispose()
       shooter = undefined
       plant = null
+      approach.clear()
     },
   })
 }
