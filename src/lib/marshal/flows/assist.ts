@@ -7,8 +7,9 @@
 import { offlineAssist } from '../../serverFns/logic'
 import { fitFrames } from '../frames'
 import { patchCar, patchCase, upsertCase } from '../state'
-import type { AssistOption, AssistRequestEvent } from '../types'
+import type { AssistRequestEvent, CaseOption } from '../types'
 import type { FlowContext } from './context'
+import { chooseReview } from './lamp'
 import { runParking } from './parking'
 
 /**
@@ -83,11 +84,13 @@ export async function handleAssistRequest(
 export function chooseAssist(
   ctx: FlowContext,
   case_id: string,
-  option: AssistOption,
+  option: CaseOption,
   by: 'supervisor' | 'gemini',
 ): boolean {
   const item = ctx.state().cases[case_id]
   if (item?.status !== 'open' || !item.options.includes(option)) return false
+  if (item.kind === 'review') return chooseReview(ctx, item, option, by)
+  if (option === 'lamps_ok' || option === 'to_electrical_bay') return false
 
   ctx.send({ op: 'assist.choose', case_id, vin: item.vin, option, chosen_by: by })
   const car = ctx.state().cars[item.vin]

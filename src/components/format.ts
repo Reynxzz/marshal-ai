@@ -1,7 +1,7 @@
 // Small formatting helpers shared by the shift dashboard components.
 
 import type { CarStage, CarState, Decision } from '#/lib/marshal/state'
-import type { AssistOption } from '#/lib/marshal/types'
+import type { CaseOption } from '#/lib/marshal/types'
 
 /** Shift start as seconds after midnight (06:00, as in Main.dc.html). */
 export const SHIFT_START_S = 6 * 3600
@@ -49,10 +49,18 @@ export function whereText(car: CarState): string {
 }
 
 /** Supervisor-facing labels for the assist options. */
-export const OPTION_LABELS: Record<AssistOption, string> = {
+export const OPTION_LABELS: Record<CaseOption, string> = {
   wait_for_removal: 'Wait for removal',
   pass_left_3kmh: 'Pass left at 3 km/h',
   reroute_lane_c: 'Reroute via lane C',
+  lamps_ok: 'Lamps OK, release',
+  to_electrical_bay: 'Send to the electrical bay',
+}
+
+/** What each review option does, under its label. */
+export const REVIEW_HINTS: Partial<Record<CaseOption, string>> = {
+  lamps_ok: 'on to the report point',
+  to_electrical_bay: 'repair, then re-check',
 }
 
 /**

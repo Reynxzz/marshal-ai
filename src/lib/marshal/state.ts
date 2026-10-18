@@ -2,7 +2,7 @@
 // object (inputs are never mutated) and `derive` recomputes the KPIs, progress and paused flag,
 // so dashboard snapshots can be compared by reference.
 
-import type { AssistAnalysis, AssistOption } from './types'
+import type { AssistAnalysis, CaseOption } from './types'
 
 /**
  * Where a car is in the shift (drives the dashboard lanes). 'waiting' means an assist case is
@@ -83,13 +83,15 @@ export type CarState = {
 export type AssistCase = {
   case_id: string
   vin: string
+  /** 'assist': a stopped car asks what to do; 'review': a person checks a held car. */
+  kind?: 'assist' | 'review'
   reason: string
-  options: AssistOption[]
+  options: CaseOption[]
   /** base64 JPEG clip frames. */
   frames: string[]
   analysis?: AssistAnalysis
   status: 'open' | 'decided'
-  chosen?: AssistOption
+  chosen?: CaseOption
   chosen_by?: 'supervisor' | 'gemini'
   /** Sim time the case was opened. */
   opened_at: number

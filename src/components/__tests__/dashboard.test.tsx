@@ -219,6 +219,32 @@ describe('shift dashboard components', () => {
     expect(screen.getByText(/click any car/i)).toBeInTheDocument()
   })
 
+  it('WaitingOnYou renders a lamp review card: the photo, no recommendation, the person decides', () => {
+    const onChoose = vi.fn()
+    const item: AssistCase = {
+      case_id: 'RV-P005-1',
+      vin: 'P005',
+      kind: 'review',
+      reason:
+        'Lamp check: Gemini was not sure the brake lights are lit. Look at the brake lights in the photo',
+      options: ['lamps_ok', 'to_electrical_bay'],
+      frames: ['ZnJhbWU6MA=='],
+      status: 'open',
+      opened_at: 9,
+    }
+    render(<WaitingOnYou cases={[item]} onChoose={onChoose} />)
+    expect(screen.getByRole('heading', { name: 'Lamp check · P005' })).toBeInTheDocument()
+    expect(screen.getByText('NEEDS A LOOK')).toBeInTheDocument()
+    const img = screen.getByRole('img', { name: /Lamp camera photo of P005/ })
+    expect(img).toHaveAttribute('src', 'data:image/jpeg;base64,ZnJhbWU6MA==')
+    expect(screen.getByText(/your call/)).toBeInTheDocument()
+    expect(screen.queryByText('recommended')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /Lamps OK, release/ }))
+    expect(onChoose).toHaveBeenCalledWith('RV-P005-1', 'lamps_ok')
+    fireEvent.click(screen.getByRole('button', { name: /Send to the electrical bay/ }))
+    expect(onChoose).toHaveBeenCalledWith('RV-P005-1', 'to_electrical_bay')
+  })
+
   it('WaitingOnYou renders options, marks the recommended one and calls onChoose', () => {
     const onChoose = vi.fn()
     const item: AssistCase = {

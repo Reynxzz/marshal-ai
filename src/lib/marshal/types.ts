@@ -89,6 +89,10 @@ export type AssistRequestEvent = {
 export type SimEvent = StatusEvent | MissionDoneEvent | TrackStepEvent | AssistRequestEvent
 
 export type AssistOption = 'wait_for_removal' | 'pass_left_3kmh' | 'reroute_lane_c'
+/** A person's call on a car held for review (a lamp check Gemini could not confirm). */
+export type ReviewOption = 'lamps_ok' | 'to_electrical_bay'
+/** Any option a "Waiting on you" card offers. */
+export type CaseOption = AssistOption | ReviewOption
 
 // ---------------------------------------------------------------------------------------------
 // DrivingSystem interface (the engine must implement this)

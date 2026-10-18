@@ -99,6 +99,8 @@ export type FlowContext = {
   parkingCases: Set<string>
   /** Cars in the paint bay: VIN -> sim time the repaint is done. */
   repaints: Map<string, number>
+  /** Cars whose lamp check Gemini could not confirm: VIN -> the lamp and the frame it judged. */
+  reviews: Map<string, { lamp: string; frame?: string }>
   /** Yard re-plan dispatch queue. */
   yard: { queue: OrderedMove[]; active: OrderedMove | null }
 }

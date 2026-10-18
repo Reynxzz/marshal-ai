@@ -1,13 +1,13 @@
 import { useState } from 'react'
 import type { AssistCase } from '#/lib/marshal/state'
-import type { AssistOption } from '#/lib/marshal/types'
-import { OPTION_LABELS } from './format'
+import type { CaseOption } from '#/lib/marshal/types'
+import { OPTION_LABELS, REVIEW_HINTS } from './format'
 
 /** Props for {@link WaitingOnYou}. */
 export type WaitingOnYouProps = {
   /** Open assist cases, oldest first. */
   cases: AssistCase[]
-  onChoose: (case_id: string, option: AssistOption) => void
+  onChoose: (case_id: string, option: CaseOption) => void
   /** Focuses the 3D view on the case's car ("Show in 3D"); the button is hidden without it. */
   onFocus?: (case_id: string) => void
   /** Case the 3D view is focused on. */
@@ -59,13 +59,19 @@ type AssistCardProps = {
 function AssistCard({ item, onChoose, onFocus, focused }: AssistCardProps) {
   const [broken, setBroken] = useState(false)
   const frame = item.frames[0]
-  const recommended = item.analysis?.recommendation
-  const alt = `Clip frame from ${item.vin}: ${item.reason}`
+  // A review card (a lamp check Gemini could not confirm) has no recommendation: a person decides.
+  const review = item.kind === 'review'
+  const recommended = review ? undefined : item.analysis?.recommendation
+  const alt = review
+    ? `Lamp camera photo of ${item.vin} that Gemini could not confirm`
+    : `Clip frame from ${item.vin}: ${item.reason}`
   return (
     <article className="md-card" aria-labelledby={`md-card-${item.case_id}`}>
       <div className="md-card-head">
-        <h3 id={`md-card-${item.case_id}`}>Assistance · {item.vin}</h3>
-        <span className="md-kind">CAR STOPPED</span>
+        <h3 id={`md-card-${item.case_id}`}>
+          {review ? 'Lamp check' : 'Assistance'} · {item.vin}
+        </h3>
+        <span className="md-kind">{review ? 'NEEDS A LOOK' : 'CAR STOPPED'}</span>
       </div>
       {onFocus ? (
         <button
@@ -90,9 +96,11 @@ function AssistCard({ item, onChoose, onFocus, focused }: AssistCardProps) {
       )}
       <p className="md-card-body">
         {item.reason}.{' '}
-        {item.analysis
-          ? `${item.analysis.description}${item.analysis.degraded ? ' (offline answer)' : ''}`
-          : 'Gemini is looking at the clip.'}
+        {review
+          ? 'Marshal never passes a car it is not sure about: your call.'
+          : item.analysis
+            ? `${item.analysis.description}${item.analysis.degraded ? ' (offline answer)' : ''}`
+            : 'Gemini is looking at the clip.'}
       </p>
       <div className="md-opts">
         {item.options.map((option) => {
@@ -105,7 +113,9 @@ function AssistCard({ item, onChoose, onFocus, focused }: AssistCardProps) {
               onClick={() => onChoose(item.case_id, option)}
             >
               <span className="md-opt-label">{OPTION_LABELS[option]}</span>
-              <span className="md-opt-sub">{rec ? 'recommended' : 'option'}</span>
+              <span className="md-opt-sub">
+                {rec ? 'recommended' : (REVIEW_HINTS[option] ?? 'option')}
+              </span>
             </button>
           )
         })}

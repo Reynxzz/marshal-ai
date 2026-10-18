@@ -146,6 +146,63 @@ describe('fail-closed offline checks and shift completion', () => {
     )
   })
 
+  for (const option of ['lamps_ok', 'to_electrical_bay'] as const) {
+    it(`opens a review card with the photo; "${option}" sends the car on and it parks`, async () => {
+      let unsure = true
+      const { ds, orch, feedText, missionsOf } = setup({
+        ai: {
+          evaluateLampEvidence: async (input) => {
+            const doubt = input.step === 'brake_lights' && unsure
+            if (doubt) unsure = false
+            return {
+              expected: 'ON',
+              observed: doubt ? 'UNVERIFIED' : 'ON',
+              pass: !doubt,
+              degraded: false,
+            }
+          },
+        },
+      })
+      orch.start([{ vin: 'VIN-V', colour: 'blue' }])
+      const opened = await runUntil(ds, orch.getState, (s) => s.cases['RV-VIN-V-1'] !== undefined)
+      expect(opened).toBe(true)
+      const card = orch.getState().cases['RV-VIN-V-1']
+      expect(card).toMatchObject({
+        kind: 'review',
+        status: 'open',
+        options: ['lamps_ok', 'to_electrical_bay'],
+      })
+      expect(card.reason).toContain('Gemini was not sure the brake lights are lit')
+      expect(card.frames).toHaveLength(1)
+      expect(orch.getState().paused).toBe(true)
+
+      expect(orch.chooseAssist('RV-VIN-V-1', option)).toBe(true)
+      expect(orch.getState().cases['RV-VIN-V-1']).toMatchObject({
+        status: 'decided',
+        chosen: option,
+      })
+      const parked = await runUntil(ds, orch.getState, (s) => s.cars['VIN-V'].stage === 'parked')
+      expect(parked).toBe(true)
+      const feed = feedText('VIN-V')
+      if (option === 'lamps_ok') {
+        expect(feed).toContain(
+          'SUPERVISOR RV-VIN-V-1: lamps checked by a person, OK; on to the report point',
+        )
+        expect(orch.getState().cars['VIN-V'].reworkReason).toBeUndefined()
+      } else {
+        expect(feed).toContain(
+          'SUPERVISOR RV-VIN-V-1: lamps not lit; to the electrical bay for repair',
+        )
+        expect(feed.some((line) => line.startsWith('PLANT Rework repaired brake_lights'))).toBe(
+          true,
+        )
+        // re-checked on the track after the repair
+        const tracks = missionsOf('VIN-V').filter((cmd) => cmd.waypoints.includes('test_track'))
+        expect(tracks.length).toBeGreaterThanOrEqual(2)
+      }
+    })
+  }
+
   it('completes the shift when a car is held because the yard is full', async () => {
     const { ds, orch, feedText } = setup()
     orch.start([{ vin: 'VIN-F', colour: 'blue' }], {

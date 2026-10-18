@@ -30,7 +30,7 @@ import {
   type Truck,
 } from './state'
 import type {
-  AssistOption,
+  CaseOption,
   DrivingSystem,
   EvidencePort,
   GateCapturePort,
@@ -99,7 +99,7 @@ export type Orchestrator = {
    * @param by - Who chose (default 'supervisor').
    * @returns True when accepted.
    */
-  chooseAssist(case_id: string, option: AssistOption, by?: 'supervisor' | 'gemini'): boolean
+  chooseAssist(case_id: string, option: CaseOption, by?: 'supervisor' | 'gemini'): boolean
   /**
    * Sets "Pause when needed"; switching it off applies Gemini's pending recommendations.
    * @param on - New value.
@@ -240,6 +240,7 @@ export function createOrchestrator(options: OrchestratorOptions): Orchestrator {
     parkingAttempts: new Map(),
     parkingCases: new Set(),
     repaints: new Map(),
+    reviews: new Map(),
     yard: { queue: [], active: null },
   }
 
