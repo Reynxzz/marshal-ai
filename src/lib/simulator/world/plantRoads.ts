@@ -1,4 +1,4 @@
-// The plant's road network, as CARLA builds it (marshal-ai scripts/plant_xodr.py): a one-way
+// The plant's road network, as CARLA builds it (the backend's scripts/plant_xodr.py): a one-way
 // loop of four straights (120 m, 60 m) and four 22 m-radius bends, two driving lanes and a parking
 // shoulder on the outside, and lane C, a two-lane connector across the middle with 10 m turns at
 // each end. Every named point sits on it exactly where CARLA puts it (POINTS): cars drive the outer
