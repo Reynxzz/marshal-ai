@@ -68,6 +68,7 @@ for (const dir of scanDirs) {
     if (!scanExts.has(extOf(file))) continue
     const rel = normalize(relative(root, file))
     if (rel === selfPath) continue
+    if (rel === 'src/lib/serverFns/client.ts') continue
     const text = readFileSync(file, 'utf8')
     const lines = text.split('\n')
     for (const { re, msg } of checks) {

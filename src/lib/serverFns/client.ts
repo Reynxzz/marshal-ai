@@ -50,30 +50,74 @@ export type MarshalAi = {
   replanYardSlots: (input: YardInput) => Promise<YardReplan>
 }
 
+const getBackendUrl = (): string => {
+  if (typeof import.meta !== 'undefined' && import.meta.env?.VITE_BACKEND_API_URL) {
+    return import.meta.env.VITE_BACKEND_API_URL
+  }
+  return 'http://localhost:8000/api/v1'
+}
+
+async function callBridge<T>(endpoint: string, data: unknown): Promise<T> {
+  const base = getBackendUrl()
+  const res = await fetch(`${base}/bridge/${endpoint}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+  if (!res.ok) {
+    throw new Error(`Bridge HTTP ${res.status}: ${res.statusText}`)
+  }
+  return res.json() as Promise<T>
+}
+
 const remote: MarshalAi = {
   async evaluateGatePhotos(input) {
-    const { evaluateGatePhotos } = await import('./gate')
-    return evaluateGatePhotos({ data: input })
+    try {
+      return await callBridge<GateResult>('gate', input)
+    } catch {
+      const { evaluateGatePhotos } = await import('./gate')
+      return evaluateGatePhotos({ data: input })
+    }
   },
   async evaluateLampEvidence(input) {
-    const { evaluateLampEvidence } = await import('./lamp')
-    return evaluateLampEvidence({ data: input })
+    try {
+      return await callBridge<LampResult>('lamp', input)
+    } catch {
+      const { evaluateLampEvidence } = await import('./lamp')
+      return evaluateLampEvidence({ data: input })
+    }
   },
   async analyzeAssistClip(input) {
-    const { analyzeAssistClip } = await import('./assist')
-    return analyzeAssistClip({ data: input })
+    try {
+      return await callBridge<AssistAnalysis>('assist', input)
+    } catch {
+      const { analyzeAssistClip } = await import('./assist')
+      return analyzeAssistClip({ data: input })
+    }
   },
   async planParkingStep(input) {
-    const { planParkingStep } = await import('./parking')
-    return planParkingStep({ data: input })
+    try {
+      return await callBridge<ParkingStep>('parking', input)
+    } catch {
+      const { planParkingStep } = await import('./parking')
+      return planParkingStep({ data: input })
+    }
   },
   async chooseRouteHazard(input) {
-    const { chooseRouteHazard } = await import('./route')
-    return chooseRouteHazard({ data: input })
+    try {
+      return await callBridge<RouteChoice>('route', input)
+    } catch {
+      const { chooseRouteHazard } = await import('./route')
+      return chooseRouteHazard({ data: input })
+    }
   },
   async replanYardSlots(input) {
-    const { replanYardSlots } = await import('./yard')
-    return replanYardSlots({ data: input })
+    try {
+      return await callBridge<YardReplan>('yard', input)
+    } catch {
+      const { replanYardSlots } = await import('./yard')
+      return replanYardSlots({ data: input })
+    }
   },
 }
 
