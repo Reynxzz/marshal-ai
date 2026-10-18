@@ -259,7 +259,12 @@ def test_carla_backend_parks_with_gemini_decisions(monkeypatch):
         for _ in range(20000):
             if system._gemini_park(v, "yard.Y4"):
                 return True
-            await asyncio.sleep(0)
+            if v.park_task is not None and not v.park_task.done():
+                # A decision is being made on a thread: wait for it rather than spin, so a slow
+                # runner cannot use up the step budget before the car has moved.
+                await asyncio.wait({v.park_task})
+            else:
+                await asyncio.sleep(0)
             c = car.control
             wheel = -c.steer / carla_backend.CARLA_PARK_STEER
             speed = 0.0 if c.brake >= 0.5 else (-0.6 if c.reverse else 0.7) if c.throttle > 0 or abs(car.sim.speed) > 0 else 0.0
