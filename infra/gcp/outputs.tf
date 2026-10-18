@@ -8,6 +8,22 @@ output "url" {
   value       = local.https_enabled ? "https://${var.domain}" : "http://${google_compute_global_address.lb.address}"
 }
 
+output "dns_records" {
+  description = "DNS records to create for the domain: the A record (traffic) and the CNAME that authorizes the managed certificate."
+  value = local.https_enabled ? {
+    a = {
+      name = "${var.domain}."
+      type = "A"
+      data = google_compute_global_address.lb.address
+    }
+    cert_cname = {
+      name = google_certificate_manager_dns_authorization.app[0].dns_resource_record[0].name
+      type = google_certificate_manager_dns_authorization.app[0].dns_resource_record[0].type
+      data = google_certificate_manager_dns_authorization.app[0].dns_resource_record[0].data
+    }
+  } : null
+}
+
 output "cloud_run_service" {
   description = "Cloud Run service name (GitHub variable GCP_CLOUD_RUN_SERVICE)."
   value       = google_cloud_run_v2_service.app.name

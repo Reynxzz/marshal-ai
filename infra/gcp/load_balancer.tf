@@ -89,15 +89,29 @@ resource "google_compute_url_map" "app" {
   default_service = google_compute_backend_service.app.id
 }
 
-# HTTPS (only when a domain is configured).
+# HTTPS (only when a domain is configured). Certificate Manager with DNS authorization: the
+# certificate is issued from a CNAME (output `dns_records`), so it can be ready before the
+# domain's A record points at the load balancer.
 
-resource "google_compute_managed_ssl_certificate" "app" {
+resource "google_certificate_manager_dns_authorization" "app" {
   count = local.https_enabled ? 1 : 0
 
-  name = "${var.name_prefix}-cert"
+  name   = "${var.name_prefix}-dns-auth"
+  domain = var.domain
+  labels = local.labels
+
+  depends_on = [google_project_service.required]
+}
+
+resource "google_certificate_manager_certificate" "app" {
+  count = local.https_enabled ? 1 : 0
+
+  name   = "${var.name_prefix}-cert"
+  labels = local.labels
 
   managed {
-    domains = [var.domain]
+    domains            = [var.domain]
+    dns_authorizations = [google_certificate_manager_dns_authorization.app[0].id]
   }
 
   lifecycle {
@@ -105,12 +119,33 @@ resource "google_compute_managed_ssl_certificate" "app" {
   }
 }
 
+resource "google_certificate_manager_certificate_map" "app" {
+  count = local.https_enabled ? 1 : 0
+
+  name   = "${var.name_prefix}-cert-map"
+  labels = local.labels
+
+  depends_on = [google_project_service.required]
+}
+
+resource "google_certificate_manager_certificate_map_entry" "app" {
+  count = local.https_enabled ? 1 : 0
+
+  name         = "${var.name_prefix}-cert-map-entry"
+  map          = google_certificate_manager_certificate_map.app[0].name
+  hostname     = var.domain
+  certificates = [google_certificate_manager_certificate.app[0].id]
+  labels       = local.labels
+}
+
 resource "google_compute_target_https_proxy" "app" {
   count = local.https_enabled ? 1 : 0
 
-  name             = "${var.name_prefix}-https-proxy"
-  url_map          = google_compute_url_map.app.id
-  ssl_certificates = [google_compute_managed_ssl_certificate.app[0].id]
+  name            = "${var.name_prefix}-https-proxy"
+  url_map         = google_compute_url_map.app.id
+  certificate_map = "//certificatemanager.googleapis.com/${google_certificate_manager_certificate_map.app[0].id}"
+
+  depends_on = [google_certificate_manager_certificate_map_entry.app]
 }
 
 resource "google_compute_global_forwarding_rule" "https" {
