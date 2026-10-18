@@ -38,10 +38,18 @@ cd "$APP_ROOT"
 export MARSHAL_MODEL="${MARSHAL_MODEL:-gemini-3.8-flash}"
 export MARSHAL_STORE=memory MARSHAL_RECORD_LIGHTS=0
 export MARSHAL_FILM_DIR="$OUT/live"
+# The plant run is filmed from its recording (replay), not live: live film cameras encoded in the camera
+# callback held up the driving loop (fixed since: the writer encodes on its own thread, dropping frames when
+# behind), and the replay gives the cinematic look at 40 fps anyway. MARSHAL_HERO_CARS=VIN-P1 films it live too.
+# Each 1080p film camera renders every tick at Epic on the T4. Four of them (chase and top on two cars), with
+# the cars' own evidence cameras, slowed the plant run to 10 simulated seconds in 11 minutes and timed out a
+# driving step (2026-10-18), so the plant run films chase views only (MARSHAL_HERO_VIEWS to change) and
+# waits longer for the server.
+export CARLA_TIMEOUT_S="${CARLA_TIMEOUT_S:-60}"
 
 shoot_plant() {
   echo "== plant: the hero run" >&2
-  MARSHAL_FILM=VIN-P1,VIN-P2 MARSHAL_FILM_VIEWS=chase,top \
+  MARSHAL_FILM="${MARSHAL_HERO_CARS:-NONE}" MARSHAL_FILM_VIEWS="${MARSHAL_HERO_VIEWS:-chase}" \
   MARSHAL_PARKING=gemini MARSHAL_PARK_MODE=paths \
   MARSHAL_EVIDENCE_DIR="$OUT/evidence" \
   MARSHAL_PLANT_CARS=4 MARSHAL_PLANT_WRONG_COLOUR=2 \
@@ -56,9 +64,11 @@ shoot_replay() {
   name=$(sudo ls -t /var/lib/carla/recordings 2>/dev/null | grep '^plant-.*\.log$' | head -1)
   [[ -n "$name" ]] || { echo "no plant recording to replay" >&2; return 1; }
   name="${name%.log}"
-  echo "== replay: $name, chasing VIN-P1" >&2
-  bash scripts/run_carla_replay.sh "$name" --follow VIN-P1 --look cinematic \
-    --no-labels --no-notes --out "$OUT/replay-VIN-P1.mp4"
+  for vin in VIN-P1 VIN-P2; do
+    echo "== replay: $name, chasing $vin" >&2
+    bash scripts/run_carla_replay.sh "$name" --follow "$vin" --look cinematic \
+      --no-labels --no-notes --out "$OUT/replay-$vin.mp4"
+  done
   echo "$name" > "$OUT/recording.txt"
 }
 

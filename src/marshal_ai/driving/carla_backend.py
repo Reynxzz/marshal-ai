@@ -85,45 +85,69 @@ ASSIST_WINDOW_S, ASSIST_FRAMES = 10.0, 8
 
 
 class _FilmWriter:
-    """Frames from a CARLA camera into an MP4 as they arrive, for the video. Closed with the car's
-    cameras, and at exit for a car the run never removed."""
+    """Frames from a CARLA camera into an MP4, for the video. Closed with the car's cameras, and at exit for a
+    car the run never removed.
+
+    The camera callback only queues the frame; a thread of its own encodes it. Encoding in the callback (31 ms
+    a 1080p frame on the 4-core host, per camera) held up the driving loop until the simulator calls timed out:
+    the plant run reached 1.8 simulated seconds in 90 real ones (2026-10-18). A frame that arrives while the
+    queue is full is dropped, and counted, rather than slowing the simulation.
+    """
 
     _open: list = []
+    QUEUE = 240
 
     def __init__(self, path: Path):
         import atexit
         import imageio_ffmpeg
         self.path = path
-        self._lock = threading.Lock()
+        self._q: queue.Queue = queue.Queue(maxsize=self.QUEUE)
         self._closed = False
+        self.frames = self.dropped = 0
         self._w = imageio_ffmpeg.write_frames(str(path), FILM_SIZE, fps=FILM_FPS, codec="libx264",
                                               pix_fmt_out="yuv420p", quality=None, macro_block_size=8,
-                                              output_params=["-preset", "veryfast", "-crf", "18"])
+                                              output_params=["-preset", "ultrafast", "-crf", "18"])
         self._w.send(None)
-        self.frames = 0
+        self._thread = threading.Thread(target=self._encode, name=f"film-{path.stem}", daemon=True)
+        self._thread.start()
         if not _FilmWriter._open:
             atexit.register(_FilmWriter.close_all)
         _FilmWriter._open.append(self)
 
     def add(self, image) -> None:
+        if self._closed:
+            return
+        try:
+            self._q.put_nowait((bytes(image.raw_data), image.height, image.width))
+        except queue.Full:
+            self.dropped += 1
+
+    def _encode(self) -> None:
         import numpy as np
-        rgb = np.frombuffer(image.raw_data, dtype=np.uint8).reshape(image.height, image.width, 4)[:, :, 2::-1]
-        with self._lock:
-            if self._closed:
+        while True:
+            item = self._q.get()
+            if item is None:
                 return
-            self._w.send(np.ascontiguousarray(rgb).tobytes())
-            self.frames += 1
+            raw, h, w = item
+            rgb = np.frombuffer(raw, dtype=np.uint8).reshape(h, w, 4)[:, :, 2::-1]
+            try:
+                self._w.send(np.ascontiguousarray(rgb).tobytes())
+                self.frames += 1
+            except Exception as exc:                     # ffmpeg gone: keep draining, write nothing
+                log.warning("film %s: %s", self.path, exc)
 
     def close(self) -> None:
-        with self._lock:
-            if self._closed:
-                return
-            self._closed = True
-            try:
-                self._w.close()
-            except Exception as exc:                 # a half-written film is still worth keeping
-                log.warning("film %s did not close cleanly: %s", self.path, exc)
-        log.info("film %s: %d frames (%.1f s)", self.path, self.frames, self.frames / FILM_FPS)
+        if self._closed:
+            return
+        self._closed = True
+        self._q.put(None)
+        self._thread.join(timeout=120)
+        try:
+            self._w.close()
+        except Exception as exc:                         # a half-written film is still worth keeping
+            log.warning("film %s did not close cleanly: %s", self.path, exc)
+        log.info("film %s: %d frames (%.1f s), %d dropped", self.path, self.frames, self.frames / FILM_FPS,
+                 self.dropped)
 
     @classmethod
     def close_all(cls) -> None:
@@ -344,6 +368,7 @@ FILM_VIEWS = {
     "front": dict(x=6.5, y=0.0, z=1.3, pitch=-5.0, yaw=180.0),       # facing the lamps
     "side": dict(x=0.0, y=-6.5, z=1.6, pitch=-4.0, yaw=90.0),
     "top": dict(x=0.0, y=0.0, z=16.0, pitch=-90.0, yaw=0.0),
+    "high": dict(x=0.0, y=0.0, z=24.0, pitch=-90.0, yaw=0.0),        # a yard's neighbouring slots in frame
 }
 FILM_SIZE, FILM_FPS, FILM_FOV = (1920, 1080), 20, 70.0   # one frame a tick: 20 fps is simulated real time
 
