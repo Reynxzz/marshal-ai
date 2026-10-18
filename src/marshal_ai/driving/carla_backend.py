@@ -84,6 +84,53 @@ ONBOARD_VIEWS = {
 ASSIST_WINDOW_S, ASSIST_FRAMES = 10.0, 8
 
 
+class _FilmWriter:
+    """Frames from a CARLA camera into an MP4 as they arrive, for the video. Closed with the car's
+    cameras, and at exit for a car the run never removed."""
+
+    _open: list = []
+
+    def __init__(self, path: Path):
+        import atexit
+        import imageio_ffmpeg
+        self.path = path
+        self._lock = threading.Lock()
+        self._closed = False
+        self._w = imageio_ffmpeg.write_frames(str(path), FILM_SIZE, fps=FILM_FPS, codec="libx264",
+                                              pix_fmt_out="yuv420p", quality=None, macro_block_size=8,
+                                              output_params=["-preset", "veryfast", "-crf", "18"])
+        self._w.send(None)
+        self.frames = 0
+        if not _FilmWriter._open:
+            atexit.register(_FilmWriter.close_all)
+        _FilmWriter._open.append(self)
+
+    def add(self, image) -> None:
+        import numpy as np
+        rgb = np.frombuffer(image.raw_data, dtype=np.uint8).reshape(image.height, image.width, 4)[:, :, 2::-1]
+        with self._lock:
+            if self._closed:
+                return
+            self._w.send(np.ascontiguousarray(rgb).tobytes())
+            self.frames += 1
+
+    def close(self) -> None:
+        with self._lock:
+            if self._closed:
+                return
+            self._closed = True
+            try:
+                self._w.close()
+            except Exception as exc:                 # a half-written film is still worth keeping
+                log.warning("film %s did not close cleanly: %s", self.path, exc)
+        log.info("film %s: %d frames (%.1f s)", self.path, self.frames, self.frames / FILM_FPS)
+
+    @classmethod
+    def close_all(cls) -> None:
+        for w in list(cls._open):
+            w.close()
+
+
 class _FrameBuffer:
     """The recent past of one camera, sampled over time.
 
@@ -185,6 +232,8 @@ class _Vehicle:
     onboard_frames: object | None = None   # _FrameBuffer of its frames
     # view name -> (sensor, _FrameBuffer). Track evidence rides with the car; see _attach_evidence.
     evidence: dict = field(default_factory=dict)
+    # view name -> (sensor, _FilmWriter): MARSHAL_FILM cameras recording this car live, for the video
+    film: dict = field(default_factory=dict)
     parking: object | None = None          # parking.ParkingSession while Gemini parks it
     park_task: object | None = None        # the decision being asked, an asyncio future
     park_asked_at: float = 0.0
@@ -284,6 +333,19 @@ PARK_SCENE_RADIUS_M = 15.0         # cars, people and props this close to the sl
 # GPU - and nothing could tell Marshal's apart from the viewer's or a replay's. The lab already tags
 # its actors the same way ("marshal-lab").
 SENSOR_ROLE = "marshal-sensor"
+
+# Live film cameras, for the video (scripts/film_hero.sh). MARSHAL_FILM names the cars to film
+# ("VIN-P1,VIN-DARK", or "*"), MARSHAL_FILM_VIEWS the views, MARSHAL_FILM_DIR where the MP4s go. Filmed
+# live rather than replayed: a replay cannot show headlights on the dressed plant world (recording light
+# data crashed the server), and a replay over the live world showed the live car beside its replay.
+# Pose relative to the car: x forward, y right, z up (m); pitch and yaw in degrees.
+FILM_VIEWS = {
+    "chase": dict(x=-7.0, y=-3.0, z=3.4, pitch=-15.0, yaw=23.0),     # high three-quarter, behind left
+    "front": dict(x=6.5, y=0.0, z=1.3, pitch=-5.0, yaw=180.0),       # facing the lamps
+    "side": dict(x=0.0, y=-6.5, z=1.6, pitch=-4.0, yaw=90.0),
+    "top": dict(x=0.0, y=0.0, z=16.0, pitch=-90.0, yaw=0.0),
+}
+FILM_SIZE, FILM_FPS, FILM_FOV = (1920, 1080), 20, 70.0   # one frame a tick: 20 fps is simulated real time
 
 STEP_LIGHTS = {
     "headlights": "LowBeam", "indicators": "LeftBlinker", "brake_lights": "Brake", "reverse": "Reverse",
@@ -424,12 +486,45 @@ class CarlaDrivingSystem:
         v.onboard, v.onboard_frames = self._attach_camera(
             v, x=-6.0, z=3.0, pitch=-12.0, yaw=0.0,
             window_s=ASSIST_WINDOW_S, frames=ASSIST_FRAMES)
+        self._attach_film(v)
         for view, (x, z, pitch, yaw) in ONBOARD_VIEWS.items():
             cam, buffer = self._attach_camera(v, x=x, z=z, pitch=pitch, yaw=yaw,
                                               window_s=CLIP_WINDOW_S, frames=CLIP_FRAMES,
                                               fov=EVIDENCE_FOV)
             if cam is not None:
                 v.evidence[view] = (cam, buffer)
+
+    def _attach_film(self, v: "_Vehicle") -> None:
+        """MARSHAL_FILM: cameras that record this car live into MP4s, attached at spawn like the evidence
+        cameras (a camera spawned mid-run, outside a car's spawn, has segfaulted the server)."""
+        import os
+        wanted = {w.strip() for w in os.getenv("MARSHAL_FILM", "").split(",") if w.strip()}
+        if not wanted or ("*" not in wanted and v.vin not in wanted):
+            return
+        folder = Path(os.getenv("MARSHAL_FILM_DIR", Path.home() / "rey-runs" / "live"))
+        folder.mkdir(parents=True, exist_ok=True)
+        for view in [w.strip() for w in os.getenv("MARSHAL_FILM_VIEWS", "chase").split(",") if w.strip()]:
+            pose = FILM_VIEWS.get(view)
+            if pose is None:
+                log.warning("MARSHAL_FILM_VIEWS: no view %r (have %s)", view, sorted(FILM_VIEWS))
+                continue
+            try:
+                bp = self._camera_blueprint(*FILM_SIZE, FILM_FOV)
+                # as replay_carla.py's cinematic look: every tick, CARLA's post-processing on, no motion
+                # blur (it smears the car at this frame rate)
+                for name, value in (("sensor_tick", "0.0"), ("enable_postprocess_effects", "True"),
+                                    ("motion_blur_intensity", "0.0")):
+                    if bp.has_attribute(name):
+                        bp.set_attribute(name, value)
+                writer = _FilmWriter(folder / f"{v.vin}-{view}-{time.strftime('%H%M%S')}.mp4")
+                cam = self.world.spawn_actor(bp, carla.Transform(
+                    carla.Location(x=pose["x"], y=pose["y"], z=pose["z"]),
+                    carla.Rotation(pitch=pose["pitch"], yaw=pose["yaw"])), attach_to=v.actor)
+                cam.listen(writer.add)
+                v.film[view] = (cam, writer)
+                log.info("filming %s from %s into %s", v.vin, view, writer.path)
+            except Exception as exc:
+                log.warning("no film camera %s for %s: %s: %s", view, v.vin, type(exc).__name__, exc)
 
     def _attach_camera(self, v: "_Vehicle", x: float, z: float, pitch: float, yaw: float,
                        window_s: float, frames: int, fov: float | None = None):
@@ -489,6 +584,14 @@ class CarlaDrivingSystem:
                 cam.destroy()
             except Exception as exc:              # already gone with the world
                 log.warning("could not release a camera on %s: %s", v.vin, exc)
+        for cam, writer in v.film.values():
+            try:
+                cam.stop()
+                cam.destroy()
+            except Exception as exc:
+                log.warning("could not release a film camera on %s: %s", v.vin, exc)
+            writer.close()
+        v.film.clear()
         v.onboard, v.onboard_frames = None, None
         v.evidence.clear()
 

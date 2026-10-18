@@ -272,9 +272,29 @@ def place_meshes(world) -> int:
     return len(d.spawned)
 
 
+def purge_vehicles(world) -> int:
+    """Remove every car (and the cameras on it) left in the live world before replaying.
+
+    The replayer re-creates the recorded cars; a car the live run left behind stays where it ended. Filmed
+    that way, Gemini's parking showed the car driving into a copy of itself already standing in Y8, its
+    final pose from the live run (carla-park-p1.mp4, 15 Oct), and the same in the electrical bay.
+    """
+    actors = world.get_actors()
+    cars = list(actors.filter("vehicle.*"))
+    ids = {c.id for c in cars}
+    for sensor in actors.filter("sensor.*"):
+        if sensor.parent is not None and sensor.parent.id in ids:
+            sensor.destroy()
+    for car in cars:
+        car.destroy()
+    return len(cars)
+
+
 def start_replay(client, world, path: str, args) -> None:
     client.set_replayer_ignore_spectator(True)
     purge_dressing(world)
+    if purge_vehicles(world):
+        world.tick()
     world.tick()
     client.replay_file(path, args.start, args.duration, 0, False)
     world.tick()

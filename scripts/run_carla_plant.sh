@@ -74,4 +74,6 @@ extra=()
 [[ -n "${MARSHAL_PLANT_HAZARD:-}" ]] && extra+=(--hazard "$MARSHAL_PLANT_HAZARD")
 # MARSHAL_PLANT_STAGE_HAZARD=1: and put it in the world beside the road, for the film
 [[ "${MARSHAL_PLANT_STAGE_HAZARD:-0}" != 0 ]] && extra+=(--stage-hazards)
+# MARSHAL_PLANT_SUN=35: the sun's altitude for the whole run (default 15, low enough for lamps)
+[[ -n "${MARSHAL_PLANT_SUN:-}" ]] && extra+=(--sun-altitude "$MARSHAL_PLANT_SUN")
 python3 scripts/demo_carla_plant.py --cars "$CARS" --steps "$STEPS" --wrong-colour "$WRONG" "${extra[@]}"
