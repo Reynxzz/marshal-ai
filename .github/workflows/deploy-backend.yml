@@ -1,0 +1,105 @@
+# Test, build and deploy the Marshal API (marshal_api) to Cloud Run on every push to faris-be of
+# Reynxzz/marshal-ai. Pull requests into faris-be run the tests (plus a docker build) only. The
+# service sits behind the same load balancer as the frontend: https://<domain>/api/* routes here.
+# The WIF provider (frontend-demo infra/gcp, github_deploy_workflows) only accepts this workflow
+# file on refs/heads/faris-be.
+# Repository variables (shared with deploy-cloudrun.yml on frontend-demo, from the infra/gcp
+# Terraform outputs): GCP_WIF_PROVIDER, GCP_DEPLOY_SA, GCP_AR_REPO, GCP_REGION, GCP_API_SERVICE,
+# GCP_APP_URL (optional).
+name: Deploy backend to Cloud Run
+
+on:
+  push:
+    branches: [faris-be]
+  pull_request:
+    branches: [faris-be]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-backend-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.13"
+  UV_VERSION: 0.11.8
+  IMAGE_NAME: marshal-api
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10.3.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - run: uv sync --frozen --extra dev --extra gcp
+
+      # Pillow is not a declared dependency (only the CARLA parking renderer and eval tools use
+      # it), but tests/test_parking.py draws with it.
+      - run: uv run --frozen --with pillow==12.0.0 pytest -q
+
+      - name: Docker build (pull requests)
+        if: github.event_name == 'pull_request'
+        run: docker build --tag "${IMAGE_NAME}:verify" .
+
+  deploy:
+    needs: test
+    # The WIF provider only accepts tokens from refs/heads/faris-be running this file, so never
+    # run elsewhere (pull requests only test).
+    if: >-
+      github.event_name != 'pull_request' &&
+      github.repository == 'Reynxzz/marshal-ai' &&
+      github.ref == 'refs/heads/faris-be'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - id: auth
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SA }}
+
+      - uses: google-github-actions/setup-gcloud@v3
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker "${{ vars.GCP_REGION }}-docker.pkg.dev" --quiet
+
+      - name: Build and push image
+        id: image
+        env:
+          IMAGE: ${{ vars.GCP_AR_REPO }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+        run: |
+          docker build --build-arg PYTHON_VERSION="$PYTHON_VERSION" --build-arg UV_VERSION="$UV_VERSION" -t "$IMAGE" .
+          docker push "$IMAGE"
+          echo "ref=$IMAGE" >> "$GITHUB_OUTPUT"
+
+      - id: deploy
+        uses: google-github-actions/deploy-cloudrun@v3
+        with:
+          service: ${{ vars.GCP_API_SERVICE }}
+          region: ${{ vars.GCP_REGION }}
+          image: ${{ steps.image.outputs.ref }}
+          # Must equal api_min_instances / api_max_instances in infra/gcp. One instance: the
+          # in-process plant, memory store/bus and SQLite live in that instance.
+          flags: --min-instances=1 --max-instances=1
+
+      - name: Summary
+        env:
+          APP_URL: ${{ vars.GCP_APP_URL }}
+          IMAGE: ${{ steps.image.outputs.ref }}
+        run: |
+          {
+            echo "### Deployed the API to Cloud Run"
+            echo "- Image: \`$IMAGE\`"
+            if [ -n "$APP_URL" ]; then echo "- API (load balancer): $APP_URL/api/v1/healthz"; fi
+          } >> "$GITHUB_STEP_SUMMARY"
