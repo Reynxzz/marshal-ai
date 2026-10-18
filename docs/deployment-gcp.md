@@ -69,9 +69,10 @@ gh variable set GCP_APP_URL           --body "$(terraform output -raw url)"   # 
 
 ## 3. Continuous deployment
 
-`.github/workflows/deploy-cloudrun.yml` runs on every push to `threejs` or
-`feat/qais-marshal-flows-gcp` (and manually via `workflow_dispatch` on those branches). Pull requests into `threejs` run only `verify` plus a `docker build`, so
-open a PR first: the first push to `threejs` should not be the first real build.
+`.github/workflows/deploy-cloudrun.yml` runs on every push to `frontend-demo` in
+`Reynxzz/marshal-ai` (and manually via `workflow_dispatch` on that branch). Pull requests into
+`frontend-demo` run only `verify` plus a `docker build`, so open a PR first: the first push to
+`frontend-demo` should not be the first real build.
 
 1. `verify`: `bun install --frozen-lockfile` + `bun run verify` (lint, typecheck, standalone
    guard, tests, build).
@@ -82,11 +83,11 @@ open a PR first: the first push to `threejs` should not be the first real build.
    every deploy overrides the Terraform scaling.
 
 The WIF provider's `attribute_condition` only accepts tokens whose `repository` is
-`farissbayu/marshal-fe`, whose `ref` is one of the `github_branches` (`refs/heads/threejs`,
-`refs/heads/feat/qais-marshal-flows-gcp`) and whose `workflow_ref` is
+`Reynxzz/marshal-ai`, whose `ref` is one of the `github_branches` (`refs/heads/frontend-demo`)
+and whose `workflow_ref` is
 `.github/workflows/deploy-cloudrun.yml` on that same branch. Other branches, forks, pull requests
 and any other workflow file merged into a deploy branch cannot obtain GCP credentials. Set
-`github_repository_id` (`gh api repos/farissbayu/marshal-fe --jq .id`) to also pin the numeric
+`github_repository_id` (`gh api repos/Reynxzz/marshal-ai --jq .id`) to also pin the numeric
 repository id, which survives renames and rejects a re-created repository with the same name.
 Change `github_repository` / `github_branches` / `github_workflow_file` in Terraform if the repo,
 branches or workflow file change, and keep `on.push.branches` plus the `deploy` job condition in
@@ -94,9 +95,18 @@ the workflow in sync with `github_branches`.
 
 ## 4. Domain and HTTPS (optional)
 
-Set `domain = "marshal.example.com"` and apply. Then create a DNS `A` record for the domain
-pointing at `terraform output -raw lb_ip`. The Google-managed certificate becomes `ACTIVE` once
-DNS resolves (usually 15 to 60 minutes). After that, HTTP redirects to HTTPS. Without a domain the
+Set `domain = "marshal.example.com"` and apply. Then create the two DNS records from
+`terraform output dns_records`: the `A` record pointing at the LB IP, and the
+`_acme-challenge` `CNAME` that authorizes the Certificate Manager certificate (DNS
+authorization, so the certificate can be issued before the `A` record points at the LB). The
+certificate becomes `ACTIVE` once the CNAME resolves (usually 15 to 60 minutes); check with
+`gcloud certificate-manager certificates describe <name_prefix>-cert`. HTTP always redirects to
+HTTPS once a domain is set.
+
+If the domain is proxied through Cloudflare (orange cloud), set the Cloudflare SSL/TLS mode to
+**Full (strict)**: Flexible connects to the origin over HTTP, which redirects to HTTPS and loops,
+and Cloudflare shows 525 until the Google certificate is `ACTIVE`. DNS-only (grey cloud) also
+works. Without a domain the
 app is served over plain HTTP on the LB IP, including the server function RPC calls, which is
 fine for a private demo only: set a domain before sharing the URL.
 

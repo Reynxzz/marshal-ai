@@ -60,7 +60,7 @@ See `docs/ARCHITECTURE.md` for the data flow and `docs/DEMO.md` for a 5-minute d
 ## Deployment
 
 Production runs on GCP: a global external HTTPS Load Balancer in front of Cloud Run, deployed by
-GitHub Actions through Workload Identity Federation on every push to `threejs` (or `feat/qais-marshal-flows-gcp`). Terraform is in
+GitHub Actions through Workload Identity Federation on every push to `frontend-demo` of `Reynxzz/marshal-ai`. Terraform is in
 `infra/gcp`; see [docs/deployment-gcp.md](docs/deployment-gcp.md). Locally, `bun run build &&
 bun run start` serves the production build on port 8080.
 

@@ -23,7 +23,7 @@ variable "name_prefix" {
 variable "github_repository" {
   description = "GitHub repository (owner/name) allowed to deploy through Workload Identity Federation."
   type        = string
-  default     = "farissbayu/marshal-fe"
+  default     = "Reynxzz/marshal-ai"
 
   validation {
     condition     = can(regex("^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", var.github_repository))
@@ -34,7 +34,7 @@ variable "github_repository" {
 variable "github_branches" {
   description = "Only GitHub Actions runs on these branches may obtain deploy credentials. Keep in sync with on.push.branches and the deploy job condition in .github/workflows/deploy-cloudrun.yml."
   type        = list(string)
-  default     = ["threejs", "feat/qais-marshal-flows-gcp"]
+  default     = ["frontend-demo"]
 
   validation {
     condition     = length(var.github_branches) >= 1 && alltrue([for b in var.github_branches : can(regex("^[A-Za-z0-9_./-]+$", b))])
