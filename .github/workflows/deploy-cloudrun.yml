@@ -1,6 +1,6 @@
-# Verify, build and deploy to Cloud Run on every push to a deploy branch (threejs and
-# feat/qais-marshal-flows-gcp). Pull requests into threejs run the verify job (plus a docker
-# build) only, so a change is built before it deploys. The deploy branches must match
+# Verify, build and deploy to Cloud Run on every push to the deploy branch (frontend-demo of
+# Reynxzz/marshal-ai). Pull requests into frontend-demo run the verify job (plus a docker
+# build) only, so a change is built before it deploys. The deploy branch must match
 # github_branches in infra/gcp (the WIF provider rejects any other ref).
 # Auth uses Workload Identity Federation (no JSON keys). Configure these repository variables
 # from the infra/gcp Terraform outputs (see docs/deployment-gcp.md):
@@ -9,9 +9,9 @@ name: Deploy to Cloud Run
 
 on:
   push:
-    branches: [threejs, feat/qais-marshal-flows-gcp]
+    branches: [frontend-demo]
   pull_request:
-    branches: [threejs]
+    branches: [frontend-demo]
   workflow_dispatch:
 
 concurrency:
@@ -49,7 +49,8 @@ jobs:
     # (pull requests only verify).
     if: >-
       github.event_name != 'pull_request' &&
-      (github.ref == 'refs/heads/threejs' || github.ref == 'refs/heads/feat/qais-marshal-flows-gcp')
+      github.repository == 'Reynxzz/marshal-ai' &&
+      github.ref == 'refs/heads/frontend-demo'
     runs-on: ubuntu-latest
     permissions:
       contents: read

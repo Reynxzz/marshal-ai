@@ -2,6 +2,7 @@ locals {
   required_apis = toset([
     "aiplatform.googleapis.com",
     "artifactregistry.googleapis.com",
+    "certificatemanager.googleapis.com",
     "compute.googleapis.com",
     "iam.googleapis.com",
     "iamcredentials.googleapis.com",
