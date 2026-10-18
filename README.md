@@ -394,7 +394,7 @@ service account that means Vertex AI mode:
 ```bash
 export GOOGLE_APPLICATION_CREDENTIALS=~/.config/marshal/sa-gemini-carla.json
 export GOOGLE_GENAI_USE_VERTEXAI=TRUE
-export GOOGLE_CLOUD_PROJECT=id-rd-ca-hanif-ali
+export GOOGLE_CLOUD_PROJECT=id-rd-ca-qais-jabbar
 export GOOGLE_CLOUD_LOCATION=us-central1
 export MARSHAL_LLM=gemini          # "offline" uses the deterministic stand-ins
 export MARSHAL_MODEL=gemini-3.8-flash                                    # the defaults:
@@ -450,7 +450,7 @@ Keep the key outside the repository. `.gitignore` blocks `sa-*.json`, `*-sa.json
 
 ### Permissions actually required
 
-| Need | Role | Status on `rey-gemini-sa` |
+| Need | Role | Status on `marshal-ai` |
 | --- | --- | --- |
 | Gemini text + vision | `roles/aiplatform.user` | granted, verified |
 | Pub/Sub bus (`MARSHAL_BUS=gcp`) | `roles/pubsub.admin` (or `editor` + `publisher` + `subscriber`) | granted, verified |
@@ -463,15 +463,15 @@ returned `IAM_PERMISSION_DENIED` at first and worked shortly after with no chang
 needs a **database to exist**, which is separate from enabling the API and from IAM:
 
 ```
-NotFound 404 The database (default) does not exist for project id-rd-ca-hanif-ali
+NotFound 404 The database (default) does not exist for project id-rd-ca-qais-jabbar
 ```
 
 Create it once (the location is permanent), then grant `roles/datastore.user`:
 
 ```bash
-gcloud firestore databases create --location=asia-southeast2 --project=id-rd-ca-hanif-ali
-gcloud projects add-iam-policy-binding id-rd-ca-hanif-ali \
-  --member=serviceAccount:rey-gemini-sa@id-rd-ca-hanif-ali.iam.gserviceaccount.com \
+gcloud firestore databases create --location=asia-southeast2 --project=id-rd-ca-qais-jabbar
+gcloud projects add-iam-policy-binding id-rd-ca-qais-jabbar \
+  --member=serviceAccount:marshal-ai@id-rd-ca-qais-jabbar.iam.gserviceaccount.com \
   --role=roles/datastore.user
 ```
 
@@ -489,7 +489,7 @@ export MARSHAL_ARTIFACTS=gcs            # "none" (default) keeps the URI as a la
 # export MARSHAL_BUCKET=...             # defaults to marshal-artifacts-$GOOGLE_CLOUD_PROJECT
 ```
 
-Bucket `marshal-artifacts-id-rd-ca-hanif-ali` exists in `asia-southeast2`, with uniform
+Bucket `marshal-artifacts-id-rd-ca-qais-jabbar` exists in `asia-southeast2`, with uniform
 bucket-level access and **public access prevention enforced** — these are internal plant photos.
 `run_carla_day4.sh` and `run_carla_day5.sh` default to `gcs`.
 
@@ -550,7 +550,7 @@ CarReport  verdict=FAIL
 
 ```sql
 SELECT recorded_at, kind, JSON_VALUE(payload, '$.verdict') AS verdict
-FROM `id-rd-ca-hanif-ali.marshal.record_history`
+FROM `id-rd-ca-qais-jabbar.marshal.record_history`
 WHERE key = 'VIN-DARK' ORDER BY recorded_at
 ```
 
