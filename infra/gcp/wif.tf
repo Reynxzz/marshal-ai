@@ -1,9 +1,13 @@
-# Workload Identity Federation: GitHub Actions on <github_repository>@<github_branches> can
-# impersonate the deployer service account with short-lived tokens (no JSON keys).
+# Workload Identity Federation: GitHub Actions in <github_repository> can impersonate the deployer
+# service account with short-lived tokens (no JSON keys), only from the (branch, workflow file)
+# pairs in github_deploy_workflows.
 
 locals {
-  deploy_refs          = [for b in var.github_branches : "refs/heads/${b}"]
-  deploy_workflow_refs = [for r in local.deploy_refs : "${var.github_repository}/.github/workflows/${var.github_workflow_file}@${r}"]
+  deploy_refs = [for b in keys(var.github_deploy_workflows) : "refs/heads/${b}"]
+  # A workflow_ref names both the file and the ref it runs from, so each entry is one exact pair.
+  deploy_workflow_refs = [
+    for b, f in var.github_deploy_workflows : "${var.github_repository}/.github/workflows/${f}@refs/heads/${b}"
+  ]
 }
 
 resource "google_iam_workload_identity_pool" "github" {
@@ -29,9 +33,9 @@ resource "google_iam_workload_identity_pool_provider" "github" {
     "attribute.workflow_ref"  = "assertion.workflow_ref"
   }
 
-  # Only the deploy workflow file on a deploy branch of this repository can authenticate:
-  # another workflow merged into the branch cannot impersonate the deployer. The numeric
-  # repository id (when set) also survives renames and blocks a re-created repo with the same name.
+  # Only a deploy branch running its own deploy workflow file can authenticate: another workflow
+  # merged into the branch (or the other branch's workflow) cannot impersonate the deployer. The
+  # numeric repository id (when set) also survives renames and blocks a re-created repo with the same name.
   attribute_condition = join(" && ", compact([
     "assertion.repository == '${var.github_repository}'",
     "assertion.ref in [${join(", ", [for r in local.deploy_refs : "'${r}'"])}]",

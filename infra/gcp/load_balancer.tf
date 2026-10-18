@@ -37,8 +37,9 @@ resource "google_compute_backend_service" "app" {
   }
 }
 
-# Cloud Armor: the server functions (Gemini calls, server-side A*) are public RPC endpoints, so
-# they are rate limited per client IP. Everything else (static assets, pages) is allowed.
+# Cloud Armor (frontend and API backend services): the server functions (Gemini calls,
+# server-side A*) and the API bridge are public RPC endpoints, so they are rate limited per client
+# IP. Everything else (static assets, pages, other API routes) is allowed.
 resource "google_compute_security_policy" "app" {
   name        = "${var.name_prefix}-armor"
   description = "Rate limits the server function RPC endpoints per client IP."
@@ -52,6 +53,30 @@ resource "google_compute_security_policy" "app" {
     match {
       expr {
         expression = "request.path.startsWith('/_serverFn')"
+      }
+    }
+
+    rate_limit_options {
+      conform_action = "allow"
+      exceed_action  = "deny(429)"
+      enforce_on_key = "IP"
+
+      rate_limit_threshold {
+        count        = var.ai_rate_limit_per_minute
+        interval_sec = 60
+      }
+    }
+  }
+
+  # The API's simulator bridge (api.tf) answers the same AI calls for the browser.
+  rule {
+    action      = "throttle"
+    priority    = 1100
+    description = "API bridge: ${var.ai_rate_limit_per_minute} requests per IP per minute"
+
+    match {
+      expr {
+        expression = "request.path.startsWith('/api/v1/bridge/')"
       }
     }
 
@@ -84,9 +109,25 @@ resource "google_compute_security_policy" "app" {
   depends_on = [google_project_service.required]
 }
 
+# /api and /api/* go to the Marshal API (api.tf); everything else to the frontend.
 resource "google_compute_url_map" "app" {
   name            = "${var.name_prefix}-urlmap"
   default_service = google_compute_backend_service.app.id
+
+  host_rule {
+    hosts        = ["*"]
+    path_matcher = "app"
+  }
+
+  path_matcher {
+    name            = "app"
+    default_service = google_compute_backend_service.app.id
+
+    path_rule {
+      paths   = ["/api", "/api/*"]
+      service = google_compute_backend_service.api.id
+    }
+  }
 }
 
 # HTTPS (only when a domain is configured). Certificate Manager with DNS authorization: the

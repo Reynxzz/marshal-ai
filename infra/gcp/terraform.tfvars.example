@@ -5,8 +5,10 @@ project_id = "my-gcp-project"
 # region            = "asia-southeast2"
 # name_prefix       = "marshal-threejs"
 # github_repository = "Reynxzz/marshal-ai"
-# github_branches   = ["frontend-demo"]
-# github_workflow_file = "deploy-cloudrun.yml"
+# github_deploy_workflows = { # branch => workflow file allowed to deploy
+#   "frontend-demo" = "deploy-cloudrun.yml"
+#   "faris-be"      = "deploy-backend.yml"
+# }
 # github_repository_id = "" # numeric id: gh api repos/OWNER/NAME --jq .id
 # ai_rate_limit_per_minute = 120
 # domain            = "" # e.g. "marshal.example.com" to enable HTTPS
@@ -14,3 +16,10 @@ project_id = "my-gcp-project"
 # gemini_model      = "gemini-2.5-flash"
 # min_instances     = 1 # keep equal to --min-instances in the deploy workflow
 # max_instances     = 1 # keep equal to --max-instances in the deploy workflow
+# api_service_name  = "marshal-api"
+# api_service_account_id = "marshal-ai"
+# api_artifacts_bucket = "" # default marshal-artifacts-<project_id>
+# api_model         = "" # MARSHAL_MODEL; empty keeps the code defaults
+# api_env           = {} # extra/overriding env, e.g. { MARSHAL_LLM = "offline" }
+# api_min_instances = 1 # keep equal to --min-instances in faris-be deploy-backend.yml
+# api_max_instances = 1 # keep equal to --max-instances in faris-be deploy-backend.yml
