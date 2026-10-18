@@ -5,10 +5,10 @@
     {
       "id": "clean-blue-sun15-default",
       "views": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/blue-sun15-default/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/blue-sun15-default/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/blue-sun15-default/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/blue-sun15-default/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/blue-sun15-default/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/blue-sun15-default/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/blue-sun15-default/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/blue-sun15-default/right.jpg"
       },
       "build_sheet": {
         "model": "sedan",
@@ -20,19 +20,19 @@
       ],
       "note": "Clean blue sedan on the gate, sun at 15 degrees, the map's azimuth. No damage; matches its sheet. Reference: clean-white-sun15-default.",
       "reference": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/white-sun15-default/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/white-sun15-default/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/white-sun15-default/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/white-sun15-default/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/white-sun15-default/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/white-sun15-default/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/white-sun15-default/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/white-sun15-default/right.jpg"
       }
     },
     {
       "id": "colour-blue-sun15-default",
       "views": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/blue-sun15-default/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/blue-sun15-default/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/blue-sun15-default/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/blue-sun15-default/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/blue-sun15-default/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/blue-sun15-default/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/blue-sun15-default/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/blue-sun15-default/right.jpg"
       },
       "build_sheet": {
         "model": "sedan",
@@ -48,19 +48,19 @@
       ],
       "note": "Same blue car, build sheet says red: scene 2's wrong colour, sun at 15 degrees, the map's azimuth. Reference: clean-white-sun15-default.",
       "reference": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/white-sun15-default/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/white-sun15-default/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/white-sun15-default/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/white-sun15-default/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/white-sun15-default/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/white-sun15-default/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/white-sun15-default/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/white-sun15-default/right.jpg"
       }
     },
     {
       "id": "clean-blue-sun15-road",
       "views": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/blue-sun15-road/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/blue-sun15-road/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/blue-sun15-road/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/blue-sun15-road/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/blue-sun15-road/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/blue-sun15-road/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/blue-sun15-road/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/blue-sun15-road/right.jpg"
       },
       "build_sheet": {
         "model": "sedan",
@@ -72,19 +72,19 @@
       ],
       "note": "Clean blue sedan on the gate, sun at 15 degrees, along the road. No damage; matches its sheet. Reference: clean-white-sun15-road.",
       "reference": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/white-sun15-road/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/white-sun15-road/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/white-sun15-road/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/white-sun15-road/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/white-sun15-road/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/white-sun15-road/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/white-sun15-road/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/white-sun15-road/right.jpg"
       }
     },
     {
       "id": "clean-blue-sun30-road",
       "views": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/blue-sun30-road/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/blue-sun30-road/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/blue-sun30-road/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/blue-sun30-road/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/blue-sun30-road/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/blue-sun30-road/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/blue-sun30-road/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/blue-sun30-road/right.jpg"
       },
       "build_sheet": {
         "model": "sedan",
@@ -96,19 +96,19 @@
       ],
       "note": "Clean blue sedan on the gate, sun at 30 degrees, along the road. No damage; matches its sheet. Reference: clean-white-sun30-road.",
       "reference": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/white-sun30-road/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/white-sun30-road/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/white-sun30-road/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/white-sun30-road/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/white-sun30-road/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/white-sun30-road/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/white-sun30-road/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/white-sun30-road/right.jpg"
       }
     },
     {
       "id": "clean-blue-sun45-default",
       "views": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/blue-sun45-default/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/blue-sun45-default/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/blue-sun45-default/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/blue-sun45-default/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/blue-sun45-default/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/blue-sun45-default/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/blue-sun45-default/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/blue-sun45-default/right.jpg"
       },
       "build_sheet": {
         "model": "sedan",
@@ -120,19 +120,19 @@
       ],
       "note": "Clean blue sedan on the gate, sun at 45 degrees, the map's azimuth. No damage; matches its sheet. Reference: clean-white-sun45-default.",
       "reference": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/white-sun45-default/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/white-sun45-default/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/white-sun45-default/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/white-sun45-default/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/white-sun45-default/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/white-sun45-default/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/white-sun45-default/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/white-sun45-default/right.jpg"
       }
     },
     {
       "id": "clean-blue-sun45-road",
       "views": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/blue-sun45-road/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/blue-sun45-road/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/blue-sun45-road/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/blue-sun45-road/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/blue-sun45-road/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/blue-sun45-road/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/blue-sun45-road/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/blue-sun45-road/right.jpg"
       },
       "build_sheet": {
         "model": "sedan",
@@ -144,19 +144,19 @@
       ],
       "note": "Clean blue sedan on the gate, sun at 45 degrees, along the road. No damage; matches its sheet. Reference: clean-white-sun45-road.",
       "reference": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/white-sun45-road/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/white-sun45-road/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/white-sun45-road/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/white-sun45-road/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/white-sun45-road/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/white-sun45-road/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/white-sun45-road/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/white-sun45-road/right.jpg"
       }
     },
     {
       "id": "colour-blue-sun45-road",
       "views": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/blue-sun45-road/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/blue-sun45-road/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/blue-sun45-road/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/blue-sun45-road/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/blue-sun45-road/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/blue-sun45-road/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/blue-sun45-road/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/blue-sun45-road/right.jpg"
       },
       "build_sheet": {
         "model": "sedan",
@@ -172,19 +172,19 @@
       ],
       "note": "Same blue car, build sheet says red: scene 2's wrong colour, sun at 45 degrees, along the road. Reference: clean-white-sun45-road.",
       "reference": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/white-sun45-road/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/white-sun45-road/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/white-sun45-road/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/white-sun45-road/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/white-sun45-road/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/white-sun45-road/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/white-sun45-road/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/white-sun45-road/right.jpg"
       }
     },
     {
       "id": "clean-blue-sun60-default",
       "views": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/blue-sun60-default/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/blue-sun60-default/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/blue-sun60-default/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/blue-sun60-default/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/blue-sun60-default/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/blue-sun60-default/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/blue-sun60-default/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/blue-sun60-default/right.jpg"
       },
       "build_sheet": {
         "model": "sedan",
@@ -196,19 +196,19 @@
       ],
       "note": "Clean blue sedan on the gate, sun at 60 degrees, the map's azimuth. No damage; matches its sheet. Reference: clean-white-sun60-default.",
       "reference": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/white-sun60-default/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/white-sun60-default/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/white-sun60-default/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/white-sun60-default/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/white-sun60-default/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/white-sun60-default/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/white-sun60-default/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/white-sun60-default/right.jpg"
       }
     },
     {
       "id": "clean-white-sun15-default",
       "views": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/white-sun15-default/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/white-sun15-default/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/white-sun15-default/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/white-sun15-default/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/white-sun15-default/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/white-sun15-default/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/white-sun15-default/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/white-sun15-default/right.jpg"
       },
       "build_sheet": {
         "model": "sedan",
@@ -220,19 +220,19 @@
       ],
       "note": "Clean white sedan on the gate, sun at 15 degrees, the map's azimuth. No damage; matches its sheet. Reference: clean-grey-sun15-default.",
       "reference": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/grey-sun15-default/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/grey-sun15-default/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/grey-sun15-default/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/grey-sun15-default/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/grey-sun15-default/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/grey-sun15-default/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/grey-sun15-default/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/grey-sun15-default/right.jpg"
       }
     },
     {
       "id": "colour-white-sun15-default",
       "views": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/white-sun15-default/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/white-sun15-default/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/white-sun15-default/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/white-sun15-default/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/white-sun15-default/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/white-sun15-default/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/white-sun15-default/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/white-sun15-default/right.jpg"
       },
       "build_sheet": {
         "model": "sedan",
@@ -248,19 +248,19 @@
       ],
       "note": "Same white car, build sheet says black: scene 2's wrong colour, sun at 15 degrees, the map's azimuth. Reference: clean-grey-sun15-default.",
       "reference": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/grey-sun15-default/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/grey-sun15-default/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/grey-sun15-default/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/grey-sun15-default/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/grey-sun15-default/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/grey-sun15-default/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/grey-sun15-default/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/grey-sun15-default/right.jpg"
       }
     },
     {
       "id": "clean-white-sun15-road",
       "views": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/white-sun15-road/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/white-sun15-road/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/white-sun15-road/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/white-sun15-road/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/white-sun15-road/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/white-sun15-road/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/white-sun15-road/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/white-sun15-road/right.jpg"
       },
       "build_sheet": {
         "model": "sedan",
@@ -272,19 +272,19 @@
       ],
       "note": "Clean white sedan on the gate, sun at 15 degrees, along the road. No damage; matches its sheet. Reference: clean-grey-sun15-road.",
       "reference": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/grey-sun15-road/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/grey-sun15-road/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/grey-sun15-road/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/grey-sun15-road/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/grey-sun15-road/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/grey-sun15-road/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/grey-sun15-road/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/grey-sun15-road/right.jpg"
       }
     },
     {
       "id": "clean-white-sun30-road",
       "views": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/white-sun30-road/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/white-sun30-road/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/white-sun30-road/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/white-sun30-road/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/white-sun30-road/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/white-sun30-road/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/white-sun30-road/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/white-sun30-road/right.jpg"
       },
       "build_sheet": {
         "model": "sedan",
@@ -296,19 +296,19 @@
       ],
       "note": "Clean white sedan on the gate, sun at 30 degrees, along the road. No damage; matches its sheet. Reference: clean-grey-sun30-road.",
       "reference": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/grey-sun30-road/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/grey-sun30-road/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/grey-sun30-road/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/grey-sun30-road/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/grey-sun30-road/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/grey-sun30-road/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/grey-sun30-road/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/grey-sun30-road/right.jpg"
       }
     },
     {
       "id": "clean-white-sun45-default",
       "views": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/white-sun45-default/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/white-sun45-default/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/white-sun45-default/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/white-sun45-default/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/white-sun45-default/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/white-sun45-default/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/white-sun45-default/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/white-sun45-default/right.jpg"
       },
       "build_sheet": {
         "model": "sedan",
@@ -320,19 +320,19 @@
       ],
       "note": "Clean white sedan on the gate, sun at 45 degrees, the map's azimuth. No damage; matches its sheet. Reference: clean-grey-sun45-default.",
       "reference": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/grey-sun45-default/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/grey-sun45-default/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/grey-sun45-default/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/grey-sun45-default/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/grey-sun45-default/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/grey-sun45-default/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/grey-sun45-default/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/grey-sun45-default/right.jpg"
       }
     },
     {
       "id": "clean-white-sun45-road",
       "views": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/white-sun45-road/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/white-sun45-road/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/white-sun45-road/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/white-sun45-road/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/white-sun45-road/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/white-sun45-road/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/white-sun45-road/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/white-sun45-road/right.jpg"
       },
       "build_sheet": {
         "model": "sedan",
@@ -344,19 +344,19 @@
       ],
       "note": "Clean white sedan on the gate, sun at 45 degrees, along the road. No damage; matches its sheet. Reference: clean-grey-sun45-road.",
       "reference": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/grey-sun45-road/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/grey-sun45-road/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/grey-sun45-road/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/grey-sun45-road/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/grey-sun45-road/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/grey-sun45-road/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/grey-sun45-road/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/grey-sun45-road/right.jpg"
       }
     },
     {
       "id": "colour-white-sun45-road",
       "views": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/white-sun45-road/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/white-sun45-road/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/white-sun45-road/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/white-sun45-road/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/white-sun45-road/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/white-sun45-road/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/white-sun45-road/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/white-sun45-road/right.jpg"
       },
       "build_sheet": {
         "model": "sedan",
@@ -372,19 +372,19 @@
       ],
       "note": "Same white car, build sheet says black: scene 2's wrong colour, sun at 45 degrees, along the road. Reference: clean-grey-sun45-road.",
       "reference": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/grey-sun45-road/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/grey-sun45-road/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/grey-sun45-road/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/grey-sun45-road/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/grey-sun45-road/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/grey-sun45-road/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/grey-sun45-road/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/grey-sun45-road/right.jpg"
       }
     },
     {
       "id": "clean-white-sun60-default",
       "views": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/white-sun60-default/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/white-sun60-default/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/white-sun60-default/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/white-sun60-default/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/white-sun60-default/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/white-sun60-default/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/white-sun60-default/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/white-sun60-default/right.jpg"
       },
       "build_sheet": {
         "model": "sedan",
@@ -396,19 +396,19 @@
       ],
       "note": "Clean white sedan on the gate, sun at 60 degrees, the map's azimuth. No damage; matches its sheet. Reference: clean-grey-sun60-default.",
       "reference": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/grey-sun60-default/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/grey-sun60-default/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/grey-sun60-default/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/grey-sun60-default/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/grey-sun60-default/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/grey-sun60-default/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/grey-sun60-default/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/grey-sun60-default/right.jpg"
       }
     },
     {
       "id": "clean-grey-sun15-default",
       "views": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/grey-sun15-default/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/grey-sun15-default/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/grey-sun15-default/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/grey-sun15-default/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/grey-sun15-default/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/grey-sun15-default/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/grey-sun15-default/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/grey-sun15-default/right.jpg"
       },
       "build_sheet": {
         "model": "sedan",
@@ -420,19 +420,19 @@
       ],
       "note": "Clean grey sedan on the gate, sun at 15 degrees, the map's azimuth. No damage; matches its sheet. Reference: clean-black-sun15-default.",
       "reference": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/black-sun15-default/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/black-sun15-default/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/black-sun15-default/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/black-sun15-default/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/black-sun15-default/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/black-sun15-default/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/black-sun15-default/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/black-sun15-default/right.jpg"
       }
     },
     {
       "id": "colour-grey-sun15-default",
       "views": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/grey-sun15-default/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/grey-sun15-default/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/grey-sun15-default/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/grey-sun15-default/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/grey-sun15-default/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/grey-sun15-default/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/grey-sun15-default/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/grey-sun15-default/right.jpg"
       },
       "build_sheet": {
         "model": "sedan",
@@ -448,19 +448,19 @@
       ],
       "note": "Same grey car, build sheet says blue: scene 2's wrong colour, sun at 15 degrees, the map's azimuth. Reference: clean-black-sun15-default.",
       "reference": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/black-sun15-default/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/black-sun15-default/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/black-sun15-default/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/black-sun15-default/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/black-sun15-default/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/black-sun15-default/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/black-sun15-default/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/black-sun15-default/right.jpg"
       }
     },
     {
       "id": "clean-grey-sun15-road",
       "views": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/grey-sun15-road/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/grey-sun15-road/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/grey-sun15-road/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/grey-sun15-road/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/grey-sun15-road/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/grey-sun15-road/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/grey-sun15-road/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/grey-sun15-road/right.jpg"
       },
       "build_sheet": {
         "model": "sedan",
@@ -472,19 +472,19 @@
       ],
       "note": "Clean grey sedan on the gate, sun at 15 degrees, along the road. No damage; matches its sheet. Reference: clean-black-sun15-road.",
       "reference": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/black-sun15-road/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/black-sun15-road/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/black-sun15-road/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/black-sun15-road/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/black-sun15-road/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/black-sun15-road/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/black-sun15-road/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/black-sun15-road/right.jpg"
       }
     },
     {
       "id": "clean-grey-sun30-road",
       "views": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/grey-sun30-road/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/grey-sun30-road/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/grey-sun30-road/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/grey-sun30-road/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/grey-sun30-road/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/grey-sun30-road/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/grey-sun30-road/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/grey-sun30-road/right.jpg"
       },
       "build_sheet": {
         "model": "sedan",
@@ -496,19 +496,19 @@
       ],
       "note": "Clean grey sedan on the gate, sun at 30 degrees, along the road. No damage; matches its sheet. Reference: clean-black-sun30-road.",
       "reference": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/black-sun30-road/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/black-sun30-road/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/black-sun30-road/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/black-sun30-road/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/black-sun30-road/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/black-sun30-road/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/black-sun30-road/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/black-sun30-road/right.jpg"
       }
     },
     {
       "id": "clean-grey-sun45-default",
       "views": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/grey-sun45-default/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/grey-sun45-default/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/grey-sun45-default/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/grey-sun45-default/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/grey-sun45-default/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/grey-sun45-default/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/grey-sun45-default/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/grey-sun45-default/right.jpg"
       },
       "build_sheet": {
         "model": "sedan",
@@ -520,19 +520,19 @@
       ],
       "note": "Clean grey sedan on the gate, sun at 45 degrees, the map's azimuth. No damage; matches its sheet. Reference: clean-black-sun45-default.",
       "reference": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/black-sun45-default/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/black-sun45-default/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/black-sun45-default/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/black-sun45-default/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/black-sun45-default/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/black-sun45-default/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/black-sun45-default/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/black-sun45-default/right.jpg"
       }
     },
     {
       "id": "clean-grey-sun45-road",
       "views": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/grey-sun45-road/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/grey-sun45-road/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/grey-sun45-road/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/grey-sun45-road/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/grey-sun45-road/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/grey-sun45-road/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/grey-sun45-road/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/grey-sun45-road/right.jpg"
       },
       "build_sheet": {
         "model": "sedan",
@@ -544,19 +544,19 @@
       ],
       "note": "Clean grey sedan on the gate, sun at 45 degrees, along the road. No damage; matches its sheet. Reference: clean-black-sun45-road.",
       "reference": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/black-sun45-road/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/black-sun45-road/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/black-sun45-road/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/black-sun45-road/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/black-sun45-road/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/black-sun45-road/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/black-sun45-road/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/black-sun45-road/right.jpg"
       }
     },
     {
       "id": "colour-grey-sun45-road",
       "views": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/grey-sun45-road/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/grey-sun45-road/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/grey-sun45-road/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/grey-sun45-road/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/grey-sun45-road/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/grey-sun45-road/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/grey-sun45-road/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/grey-sun45-road/right.jpg"
       },
       "build_sheet": {
         "model": "sedan",
@@ -572,19 +572,19 @@
       ],
       "note": "Same grey car, build sheet says blue: scene 2's wrong colour, sun at 45 degrees, along the road. Reference: clean-black-sun45-road.",
       "reference": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/black-sun45-road/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/black-sun45-road/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/black-sun45-road/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/black-sun45-road/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/black-sun45-road/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/black-sun45-road/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/black-sun45-road/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/black-sun45-road/right.jpg"
       }
     },
     {
       "id": "clean-grey-sun60-default",
       "views": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/grey-sun60-default/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/grey-sun60-default/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/grey-sun60-default/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/grey-sun60-default/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/grey-sun60-default/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/grey-sun60-default/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/grey-sun60-default/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/grey-sun60-default/right.jpg"
       },
       "build_sheet": {
         "model": "sedan",
@@ -596,19 +596,19 @@
       ],
       "note": "Clean grey sedan on the gate, sun at 60 degrees, the map's azimuth. No damage; matches its sheet. Reference: clean-black-sun60-default.",
       "reference": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/black-sun60-default/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/black-sun60-default/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/black-sun60-default/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/black-sun60-default/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/black-sun60-default/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/black-sun60-default/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/black-sun60-default/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/black-sun60-default/right.jpg"
       }
     },
     {
       "id": "clean-black-sun15-default",
       "views": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/black-sun15-default/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/black-sun15-default/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/black-sun15-default/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/black-sun15-default/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/black-sun15-default/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/black-sun15-default/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/black-sun15-default/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/black-sun15-default/right.jpg"
       },
       "build_sheet": {
         "model": "sedan",
@@ -620,19 +620,19 @@
       ],
       "note": "Clean black sedan on the gate, sun at 15 degrees, the map's azimuth. No damage; matches its sheet. Reference: clean-red-sun15-default.",
       "reference": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/red-sun15-default/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/red-sun15-default/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/red-sun15-default/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/red-sun15-default/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/red-sun15-default/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/red-sun15-default/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/red-sun15-default/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/red-sun15-default/right.jpg"
       }
     },
     {
       "id": "colour-black-sun15-default",
       "views": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/black-sun15-default/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/black-sun15-default/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/black-sun15-default/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/black-sun15-default/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/black-sun15-default/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/black-sun15-default/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/black-sun15-default/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/black-sun15-default/right.jpg"
       },
       "build_sheet": {
         "model": "sedan",
@@ -648,19 +648,19 @@
       ],
       "note": "Same black car, build sheet says white: scene 2's wrong colour, sun at 15 degrees, the map's azimuth. Reference: clean-red-sun15-default.",
       "reference": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/red-sun15-default/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/red-sun15-default/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/red-sun15-default/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/red-sun15-default/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/red-sun15-default/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/red-sun15-default/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/red-sun15-default/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/red-sun15-default/right.jpg"
       }
     },
     {
       "id": "clean-black-sun15-road",
       "views": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/black-sun15-road/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/black-sun15-road/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/black-sun15-road/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/black-sun15-road/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/black-sun15-road/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/black-sun15-road/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/black-sun15-road/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/black-sun15-road/right.jpg"
       },
       "build_sheet": {
         "model": "sedan",
@@ -672,19 +672,19 @@
       ],
       "note": "Clean black sedan on the gate, sun at 15 degrees, along the road. No damage; matches its sheet. Reference: clean-red-sun15-road.",
       "reference": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/red-sun15-road/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/red-sun15-road/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/red-sun15-road/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/red-sun15-road/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/red-sun15-road/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/red-sun15-road/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/red-sun15-road/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/red-sun15-road/right.jpg"
       }
     },
     {
       "id": "clean-black-sun30-road",
       "views": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/black-sun30-road/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/black-sun30-road/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/black-sun30-road/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/black-sun30-road/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/black-sun30-road/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/black-sun30-road/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/black-sun30-road/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/black-sun30-road/right.jpg"
       },
       "build_sheet": {
         "model": "sedan",
@@ -696,19 +696,19 @@
       ],
       "note": "Clean black sedan on the gate, sun at 30 degrees, along the road. No damage; matches its sheet. Reference: clean-red-sun30-road.",
       "reference": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/red-sun30-road/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/red-sun30-road/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/red-sun30-road/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/red-sun30-road/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/red-sun30-road/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/red-sun30-road/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/red-sun30-road/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/red-sun30-road/right.jpg"
       }
     },
     {
       "id": "clean-black-sun45-default",
       "views": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/black-sun45-default/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/black-sun45-default/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/black-sun45-default/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/black-sun45-default/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/black-sun45-default/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/black-sun45-default/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/black-sun45-default/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/black-sun45-default/right.jpg"
       },
       "build_sheet": {
         "model": "sedan",
@@ -720,19 +720,19 @@
       ],
       "note": "Clean black sedan on the gate, sun at 45 degrees, the map's azimuth. No damage; matches its sheet. Reference: clean-red-sun45-default.",
       "reference": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/red-sun45-default/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/red-sun45-default/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/red-sun45-default/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/red-sun45-default/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/red-sun45-default/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/red-sun45-default/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/red-sun45-default/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/red-sun45-default/right.jpg"
       }
     },
     {
       "id": "clean-black-sun45-road",
       "views": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/black-sun45-road/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/black-sun45-road/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/black-sun45-road/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/black-sun45-road/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/black-sun45-road/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/black-sun45-road/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/black-sun45-road/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/black-sun45-road/right.jpg"
       },
       "build_sheet": {
         "model": "sedan",
@@ -744,19 +744,19 @@
       ],
       "note": "Clean black sedan on the gate, sun at 45 degrees, along the road. No damage; matches its sheet. Reference: clean-red-sun45-road.",
       "reference": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/red-sun45-road/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/red-sun45-road/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/red-sun45-road/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/red-sun45-road/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/red-sun45-road/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/red-sun45-road/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/red-sun45-road/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/red-sun45-road/right.jpg"
       }
     },
     {
       "id": "colour-black-sun45-road",
       "views": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/black-sun45-road/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/black-sun45-road/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/black-sun45-road/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/black-sun45-road/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/black-sun45-road/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/black-sun45-road/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/black-sun45-road/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/black-sun45-road/right.jpg"
       },
       "build_sheet": {
         "model": "sedan",
@@ -772,19 +772,19 @@
       ],
       "note": "Same black car, build sheet says white: scene 2's wrong colour, sun at 45 degrees, along the road. Reference: clean-red-sun45-road.",
       "reference": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/red-sun45-road/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/red-sun45-road/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/red-sun45-road/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/red-sun45-road/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/red-sun45-road/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/red-sun45-road/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/red-sun45-road/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/red-sun45-road/right.jpg"
       }
     },
     {
       "id": "clean-black-sun60-default",
       "views": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/black-sun60-default/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/black-sun60-default/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/black-sun60-default/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/black-sun60-default/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/black-sun60-default/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/black-sun60-default/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/black-sun60-default/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/black-sun60-default/right.jpg"
       },
       "build_sheet": {
         "model": "sedan",
@@ -796,19 +796,19 @@
       ],
       "note": "Clean black sedan on the gate, sun at 60 degrees, the map's azimuth. No damage; matches its sheet. Reference: clean-red-sun60-default.",
       "reference": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/red-sun60-default/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/red-sun60-default/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/red-sun60-default/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/red-sun60-default/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/red-sun60-default/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/red-sun60-default/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/red-sun60-default/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/red-sun60-default/right.jpg"
       }
     },
     {
       "id": "clean-red-sun15-default",
       "views": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/red-sun15-default/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/red-sun15-default/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/red-sun15-default/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/red-sun15-default/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/red-sun15-default/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/red-sun15-default/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/red-sun15-default/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/red-sun15-default/right.jpg"
       },
       "build_sheet": {
         "model": "sedan",
@@ -820,19 +820,19 @@
       ],
       "note": "Clean red sedan on the gate, sun at 15 degrees, the map's azimuth. No damage; matches its sheet. Reference: clean-blue-sun15-default.",
       "reference": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/blue-sun15-default/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/blue-sun15-default/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/blue-sun15-default/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/blue-sun15-default/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/blue-sun15-default/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/blue-sun15-default/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/blue-sun15-default/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/blue-sun15-default/right.jpg"
       }
     },
     {
       "id": "colour-red-sun15-default",
       "views": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/red-sun15-default/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/red-sun15-default/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/red-sun15-default/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/red-sun15-default/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/red-sun15-default/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/red-sun15-default/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/red-sun15-default/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/red-sun15-default/right.jpg"
       },
       "build_sheet": {
         "model": "sedan",
@@ -848,19 +848,19 @@
       ],
       "note": "Same red car, build sheet says grey: scene 2's wrong colour, sun at 15 degrees, the map's azimuth. Reference: clean-blue-sun15-default.",
       "reference": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/blue-sun15-default/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/blue-sun15-default/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/blue-sun15-default/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/blue-sun15-default/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/blue-sun15-default/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/blue-sun15-default/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/blue-sun15-default/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/blue-sun15-default/right.jpg"
       }
     },
     {
       "id": "clean-red-sun15-road",
       "views": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/red-sun15-road/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/red-sun15-road/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/red-sun15-road/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/red-sun15-road/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/red-sun15-road/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/red-sun15-road/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/red-sun15-road/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/red-sun15-road/right.jpg"
       },
       "build_sheet": {
         "model": "sedan",
@@ -872,19 +872,19 @@
       ],
       "note": "Clean red sedan on the gate, sun at 15 degrees, along the road. No damage; matches its sheet. Reference: clean-blue-sun15-road.",
       "reference": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/blue-sun15-road/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/blue-sun15-road/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/blue-sun15-road/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/blue-sun15-road/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/blue-sun15-road/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/blue-sun15-road/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/blue-sun15-road/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/blue-sun15-road/right.jpg"
       }
     },
     {
       "id": "clean-red-sun30-road",
       "views": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/red-sun30-road/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/red-sun30-road/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/red-sun30-road/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/red-sun30-road/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/red-sun30-road/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/red-sun30-road/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/red-sun30-road/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/red-sun30-road/right.jpg"
       },
       "build_sheet": {
         "model": "sedan",
@@ -896,19 +896,19 @@
       ],
       "note": "Clean red sedan on the gate, sun at 30 degrees, along the road. No damage; matches its sheet. Reference: clean-blue-sun30-road.",
       "reference": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/blue-sun30-road/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/blue-sun30-road/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/blue-sun30-road/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/blue-sun30-road/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/blue-sun30-road/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/blue-sun30-road/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/blue-sun30-road/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/blue-sun30-road/right.jpg"
       }
     },
     {
       "id": "clean-red-sun45-default",
       "views": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/red-sun45-default/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/red-sun45-default/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/red-sun45-default/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/red-sun45-default/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/red-sun45-default/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/red-sun45-default/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/red-sun45-default/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/red-sun45-default/right.jpg"
       },
       "build_sheet": {
         "model": "sedan",
@@ -920,19 +920,19 @@
       ],
       "note": "Clean red sedan on the gate, sun at 45 degrees, the map's azimuth. No damage; matches its sheet. Reference: clean-blue-sun45-default.",
       "reference": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/blue-sun45-default/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/blue-sun45-default/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/blue-sun45-default/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/blue-sun45-default/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/blue-sun45-default/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/blue-sun45-default/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/blue-sun45-default/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/blue-sun45-default/right.jpg"
       }
     },
     {
       "id": "clean-red-sun45-road",
       "views": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/red-sun45-road/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/red-sun45-road/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/red-sun45-road/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/red-sun45-road/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/red-sun45-road/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/red-sun45-road/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/red-sun45-road/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/red-sun45-road/right.jpg"
       },
       "build_sheet": {
         "model": "sedan",
@@ -944,19 +944,19 @@
       ],
       "note": "Clean red sedan on the gate, sun at 45 degrees, along the road. No damage; matches its sheet. Reference: clean-blue-sun45-road.",
       "reference": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/blue-sun45-road/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/blue-sun45-road/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/blue-sun45-road/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/blue-sun45-road/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/blue-sun45-road/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/blue-sun45-road/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/blue-sun45-road/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/blue-sun45-road/right.jpg"
       }
     },
     {
       "id": "colour-red-sun45-road",
       "views": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/red-sun45-road/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/red-sun45-road/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/red-sun45-road/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/red-sun45-road/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/red-sun45-road/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/red-sun45-road/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/red-sun45-road/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/red-sun45-road/right.jpg"
       },
       "build_sheet": {
         "model": "sedan",
@@ -972,19 +972,19 @@
       ],
       "note": "Same red car, build sheet says grey: scene 2's wrong colour, sun at 45 degrees, along the road. Reference: clean-blue-sun45-road.",
       "reference": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/blue-sun45-road/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/blue-sun45-road/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/blue-sun45-road/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/blue-sun45-road/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/blue-sun45-road/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/blue-sun45-road/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/blue-sun45-road/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/blue-sun45-road/right.jpg"
       }
     },
     {
       "id": "clean-red-sun60-default",
       "views": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/red-sun60-default/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/red-sun60-default/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/red-sun60-default/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/red-sun60-default/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/red-sun60-default/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/red-sun60-default/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/red-sun60-default/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/red-sun60-default/right.jpg"
       },
       "build_sheet": {
         "model": "sedan",
@@ -996,19 +996,19 @@
       ],
       "note": "Clean red sedan on the gate, sun at 60 degrees, the map's azimuth. No damage; matches its sheet. Reference: clean-blue-sun60-default.",
       "reference": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/blue-sun60-default/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/blue-sun60-default/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/blue-sun60-default/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/blue-sun60-default/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/blue-sun60-default/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/blue-sun60-default/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/blue-sun60-default/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/blue-sun60-default/right.jpg"
       }
     },
     {
       "id": "plant-VIN-P1",
       "views": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/plant/VIN-P1/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/plant/VIN-P1/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/plant/VIN-P1/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/plant/VIN-P1/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/plant/VIN-P1/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/plant/VIN-P1/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/plant/VIN-P1/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/plant/VIN-P1/right.jpg"
       },
       "build_sheet": {
         "model": "sedan",
@@ -1020,19 +1020,19 @@
       ],
       "note": "VIN-P1 from Qais's multi-car plant run (2026-10-10 00:47, sun 15 at the map's azimuth): a clean blue car that drove onto the gate mark. Reference: plant-VIN-P2.",
       "reference": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/plant/VIN-P2/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/plant/VIN-P2/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/plant/VIN-P2/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/plant/VIN-P2/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/plant/VIN-P2/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/plant/VIN-P2/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/plant/VIN-P2/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/plant/VIN-P2/right.jpg"
       }
     },
     {
       "id": "plant-VIN-P2",
       "views": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/plant/VIN-P2/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/plant/VIN-P2/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/plant/VIN-P2/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/plant/VIN-P2/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/plant/VIN-P2/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/plant/VIN-P2/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/plant/VIN-P2/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/plant/VIN-P2/right.jpg"
       },
       "build_sheet": {
         "model": "sedan",
@@ -1044,19 +1044,19 @@
       ],
       "note": "VIN-P2 from Qais's multi-car plant run (2026-10-10 00:47, sun 15 at the map's azimuth): a clean blue car that drove onto the gate mark. Reference: plant-VIN-P3.",
       "reference": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/plant/VIN-P3/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/plant/VIN-P3/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/plant/VIN-P3/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/plant/VIN-P3/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/plant/VIN-P3/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/plant/VIN-P3/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/plant/VIN-P3/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/plant/VIN-P3/right.jpg"
       }
     },
     {
       "id": "plant-VIN-P3",
       "views": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/plant/VIN-P3/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/plant/VIN-P3/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/plant/VIN-P3/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/plant/VIN-P3/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/plant/VIN-P3/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/plant/VIN-P3/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/plant/VIN-P3/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/plant/VIN-P3/right.jpg"
       },
       "build_sheet": {
         "model": "sedan",
@@ -1068,10 +1068,10 @@
       ],
       "note": "VIN-P3 from Qais's multi-car plant run (2026-10-10 00:47, sun 15 at the map's azimuth): a clean blue car that drove onto the gate mark. Reference: plant-VIN-P2.",
       "reference": {
-        "front": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/plant/VIN-P2/front.jpg",
-        "rear": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/plant/VIN-P2/rear.jpg",
-        "left": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/plant/VIN-P2/left.jpg",
-        "right": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v6-gate/plant/VIN-P2/right.jpg"
+        "front": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/plant/VIN-P2/front.jpg",
+        "rear": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/plant/VIN-P2/rear.jpg",
+        "left": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/plant/VIN-P2/left.jpg",
+        "right": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v6-gate/plant/VIN-P2/right.jpg"
       }
     }
   ]

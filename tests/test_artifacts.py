@@ -85,10 +85,10 @@ def test_only_gcs_stores_anything(kind):
 
 
 def test_gcs_derives_the_bucket_from_the_project():
-    store = make_artifacts("gcs", project="id-rd-ca-hanif-ali")
+    store = make_artifacts("gcs", project="id-rd-ca-qais-jabbar")
 
     assert isinstance(store, GcsArtifacts)
-    assert store.bucket_name == "marshal-artifacts-id-rd-ca-hanif-ali"
+    assert store.bucket_name == "marshal-artifacts-id-rd-ca-qais-jabbar"
 
 
 def test_an_explicit_bucket_wins():
