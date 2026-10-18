@@ -4,6 +4,16 @@ Gemini agents that run a car plant's yard, inspections and driving-system tests.
 an existing driving system (CARLA's BehaviorAgent in the hackathon) does, and Marshal reaches it only
 through a mission API. Design: [marshal_flow_design.md](marshal_flow_design.md).
 
+## Branches
+
+| Branch | What it is |
+| --- | --- |
+| **[`main`](https://github.com/Reynxzz/marshal-ai/tree/main)** | Marshal itself: the flows, Gemini, the rules, the CARLA plant and its scripts, the evaluations. |
+| **`faris-be`** (this branch) | **Backend**: the Marshal API (FastAPI, `src/marshal_api`) on Cloud Run, including the bridge that runs these flows with real Gemini on the browser plant's camera frames (`api/v1/sim_bridge.py`). Deploys with `.github/workflows/deploy-backend.yml`. |
+| **[`frontend-demo`](https://github.com/Reynxzz/marshal-ai/tree/frontend-demo)** | **Frontend**: the supervisor dashboard and the browser plant (Three.js on CARLA's road layout), served at **[marshal.cmid.cloud](https://marshal.cmid.cloud)**. Deploys to Cloud Run with `.github/workflows/deploy-cloudrun.yml`; infrastructure in `infra/gcp` (Terraform). |
+
+Work goes on a short-lived branch off the one it changes, and comes back through a pull request.
+
 ## The seven flows
 
 | # | Flow | Code | Gemini does | Code decides | Human decides |
