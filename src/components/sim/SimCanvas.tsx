@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { bus, type MarshalNote } from '#/lib/marshal/eventBus'
 import { focusAriaLabel, focusCaption, focusColour } from '#/lib/simview/focus'
 import { buildPlantLayout, type PlantLayout } from '#/lib/simview/plantMap'
+import type { CarLook } from '#/lib/simview/scene'
 import { readSimSnapshot } from '#/lib/simview/snapshot'
 import { createSimViewer, type SimViewer, type SimViewerFactory } from '#/lib/simview/viewer'
 import { getShiftBackend, shiftFocus, useShiftStore } from '#/stores/shift'
@@ -9,22 +10,50 @@ import { getShiftBackend, shiftFocus, useShiftStore } from '#/stores/shift'
 /** How long a Gemini / plant note stays on screen, ms. */
 export const NOTE_VISIBLE_MS = 6000
 
+/**
+ * Pill text: the note kind, then the text (flow notes already carry the prefix).
+ * @param note - Orchestrator note.
+ * @returns e.g. 'PLANT · P004 parked in Y5'.
+ */
+export function noteText(note: MarshalNote): string {
+  const prefix = `${note.kind.toUpperCase()} · `
+  return note.text.startsWith(prefix) ? note.text : prefix + note.text
+}
+
 /** Props for {@link SimCanvas}. */
 export type SimCanvasProps = {
   /** Viewer factory (tests inject one; defaults to the WebGL viewer). */
   createViewer?: SimViewerFactory
   /** Plant layout (defaults to the TEAM_PLAN named points). */
   layout?: PlantLayout
+  /**
+   * Draws the engine's dressed world and car model, with lamps read from the running backend
+   * (the scene the live cameras capture).
+   */
+  dressed?: boolean
 }
+
+/**
+ * Lamp state of a car from the running backend, when it reports lamps (the live engine).
+ * @param vin - Car VIN.
+ * @returns Lamps and faults, or null.
+ */
+function backendCarLook(vin: string): CarLook | null {
+  const engine = getShiftBackend() as Partial<LampSource> | null
+  if (!engine?.lampsOf || !engine.faultsOf) return null
+  return { lamps: engine.lampsOf(vin), faults: engine.faultsOf(vin) as CarLook['faults'] }
+}
+
+type LampSource = { lampsOf(vin: string): CarLook['lamps']; faultsOf(vin: string): string[] }
 
 /**
  * Live 3D plant view for the dashboard. Follows the selected car, or the car a decision waits on,
  * and shows every car moving otherwise. Client only: WebGL starts in an effect and a text
  * fallback replaces the canvas when it fails.
- * @param props - Optional viewer factory and layout.
+ * @param props - Optional viewer factory, layout and dressed world.
  * @returns The simulator view.
  */
-export function SimCanvas({ createViewer = createSimViewer, layout }: SimCanvasProps) {
+export function SimCanvas({ createViewer = createSimViewer, layout, dressed }: SimCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const overlayRef = useRef<HTMLDivElement>(null)
   const [failed, setFailed] = useState(false)
@@ -62,7 +91,9 @@ export function SimCanvas({ createViewer = createSimViewer, layout }: SimCanvasP
     if (!canvas || !overlay) return
     let viewer: SimViewer
     try {
-      viewer = createViewer(canvas, overlay, plant)
+      viewer = dressed
+        ? createViewer(canvas, overlay, plant, { dressed: true, carLook: backendCarLook })
+        : createViewer(canvas, overlay, plant)
     } catch {
       setFailed(true)
       return
@@ -95,7 +126,7 @@ export function SimCanvas({ createViewer = createSimViewer, layout }: SimCanvasP
       else window.removeEventListener('resize', resize)
       viewer.dispose()
     }
-  }, [createViewer, plant])
+  }, [createViewer, plant, dressed])
 
   const caption = focusCaption(focus, shift)
   const label = focusAriaLabel(focus, shift)
@@ -128,7 +159,7 @@ export function SimCanvas({ createViewer = createSimViewer, layout }: SimCanvasP
         )}
         {note ? (
           <p className={`md-sim-note ${note.kind}`} aria-live="polite">
-            {note.kind.toUpperCase()} · {note.text}
+            {noteText(note)}
           </p>
         ) : null}
       </div>

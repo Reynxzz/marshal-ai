@@ -16,6 +16,11 @@ export const CAR_GEOMETRY = {
   headingToleranceDeg: 8,
   /** Fore/aft tolerance for "parked" (not in TEAM_PLAN; half a primitive step of slack). */
   longitudinalTolerance_m: 0.5,
+  /**
+   * Fore/aft clearance to obstacles (TEAM_PLAN's 0.3m is a side clearance; row slots are 5.5m
+   * apart for 4.9m cars, so 0.3m at both ends left no slack at all next to a parked car).
+   */
+  endClearance_m: 0.1,
 } as const
 
 /** One candidate path from the planner. */
@@ -120,7 +125,7 @@ export function isParked(pose: Pose, slot: ParkingSlot): boolean {
 
 function toBox(obstacle: ObstacleBox, slot: ParkingSlot): Box {
   const local = toSlotFrame(obstacle, slot)
-  const hl = obstacle.length / 2 + CAR_GEOMETRY.sideClearance_m
+  const hl = obstacle.length / 2 + CAR_GEOMETRY.endClearance_m
   const hw = obstacle.width / 2 + CAR_GEOMETRY.sideClearance_m
   return {
     cx: local.x,

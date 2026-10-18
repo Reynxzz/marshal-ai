@@ -78,6 +78,8 @@ export const PULL_OVER_AIM_M = 4
 export const SQUARE_UP_RADIUS_M = 3
 /** Slot departure (TEAM_PLAN M4.3): leave from the lane point this far ahead. */
 export const PULL_OUT_M = 5
+/** A route starts at the car's last named point while the car is within this distance of it. */
+export const START_FROM_LOCATION_M = 45
 /** Slot-to-slot moves (TEAM_PLAN M4.4): direct when within these distances. */
 export const SLOT_MOVE_FORWARD_LIMIT_M = 40
 export const SLOT_MOVE_REVERSE_LIMIT_M = 30
@@ -191,6 +193,21 @@ type Listener = (event: any) => void
 export type EngineOptions = {
   /** Chase-camera clip for an assist case (M6.3/M6.5); [] when no rig is attached. */
   assistFrames?: (vin: string) => string[]
+  /**
+   * Plays parking control sequences out over sim time (each step lasts its `duration_s`, the
+   * safety stop probes every tick, reverse lamps follow the gear) instead of applying them at
+   * once. `execute` then resolves only as `tick` advances the clock.
+   */
+  animateParking?: boolean
+}
+
+/** A parking control sequence being played out over sim time (`animateParking`). */
+type ActiveControl = {
+  steps: ControlStep[]
+  index: number
+  elapsed: number
+  obstacles: ObstacleBox[]
+  done: (result: { pose: Pose; stopped: boolean }) => void
 }
 
 function routeLength(route: readonly PathPoint[]): number {
@@ -271,6 +288,8 @@ export class ThreeJsEngine implements DrivingSystem {
   private readonly props = new Map<string, PropState>()
   /** Optional chase-camera clip for assist cases (M6.3); [] without a camera rig. */
   private readonly assistFrames: (vin: string) => string[]
+  private readonly animateParking: boolean
+  private readonly controls = new Map<string, ActiveControl>()
   private readonly artifacts = new Map<string, Blob>()
   private clock = 0
   private statusClock = 0
@@ -284,6 +303,7 @@ export class ThreeJsEngine implements DrivingSystem {
     const pullOverNames: PointName[] = [...YARD_SLOTS, 'rework.electrical']
     this.pullOvers = pullOverNames.map((name) => graph.points[name])
     this.assistFrames = options.assistFrames ?? (() => [])
+    this.animateParking = options.animateParking === true
   }
 
   /** Sim time in seconds. */
@@ -398,6 +418,8 @@ export class ThreeJsEngine implements DrivingSystem {
    */
   despawn(vin: string): void {
     this.cars.delete(vin)
+    this.controls.get(vin)?.done({ pose: { x: 0, y: 0, yaw: 0 }, stopped: true })
+    this.controls.delete(vin)
   }
 
   /**
@@ -511,6 +533,28 @@ export class ThreeJsEngine implements DrivingSystem {
   }
 
   /**
+   * Spawned props, for the viewer and the camera scene.
+   * @returns Copies of every prop.
+   */
+  listProps(): PropState[] {
+    return [...this.props.values()].map((prop) => ({ ...prop }))
+  }
+
+  /**
+   * Every car with its pose and paint, for the camera scene.
+   * @returns VIN, pose (yaw degrees) and RGB 0..1 per car.
+   */
+  listCars(): { vin: string; x: number; y: number; yaw: number; rgb: [number, number, number] }[] {
+    return [...this.cars.values()].map((car) => ({
+      vin: car.vin,
+      x: car.x,
+      y: car.y,
+      yaw: (car.yaw * 180) / Math.PI,
+      rgb: [...car.rgb] as [number, number, number],
+    }))
+  }
+
+  /**
    * Obstacles around a parking slot (M7.2): vehicles and props, flat props filtered out.
    * @param vin - Car being parked (excluded from the result).
    * @param slot - Target slot.
@@ -530,6 +574,18 @@ export class ThreeJsEngine implements DrivingSystem {
     const car = this.cars.get(vin)
     if (!car) return { pose: { x: 0, y: 0, yaw: 0 }, stopped: false }
     const obstacles = this.nearbyObstacles(vin, car.x, car.y)
+    if (this.animateParking && steps.length > 0) {
+      this.controls.get(vin)?.done({ pose: this.getPositionXY(vin), stopped: true })
+      return new Promise((resolve) => {
+        this.controls.set(vin, {
+          steps: [...steps],
+          index: 0,
+          elapsed: 0,
+          obstacles,
+          done: resolve,
+        })
+      })
+    }
     let stopped = false
     for (const step of steps) {
       if (this.safetyStop(car, step, obstacles)) {
@@ -627,7 +683,11 @@ export class ThreeJsEngine implements DrivingSystem {
     while (left > 1e-9) {
       const step = Math.min(FIXED_STEP_S, left)
       left -= step
-      for (const car of [...this.cars.values()]) this.tickCar(car, step)
+      for (const car of [...this.cars.values()]) {
+        const control = this.controls.get(car.vin)
+        if (control) this.tickControl(car, control, step)
+        else this.tickCar(car, step)
+      }
     }
     this.statusClock += dt
     while (this.statusClock + 1e-9 >= STATUS_PERIOD_S) {
@@ -672,7 +732,7 @@ export class ThreeJsEngine implements DrivingSystem {
       car.yaw = yaw
     }
 
-    const start = this.nearestPoint(car.x, car.y)
+    const start = this.startPoint(car)
     const names: PointName[] = [start]
     let cursor: PointName = start
     for (const waypoint of waypoints) {
@@ -733,6 +793,19 @@ export class ThreeJsEngine implements DrivingSystem {
     car.mission = mission
     car.held = false
     car.holdLeft = null
+  }
+
+  /**
+   * Where a new route starts: the car's last named point while it is still near it (a car staged
+   * up to 36 m behind `line_end` can sit closer to a yard slot than to the line end), else the
+   * nearest named point.
+   */
+  private startPoint(car: EngineCar): PointName {
+    const last = this.graph.points[car.location as PointName]
+    if (last && Math.hypot(last.x - car.x, last.y - car.y) <= START_FROM_LOCATION_M) {
+      return car.location as PointName
+    }
+    return this.nearestPoint(car.x, car.y)
   }
 
   private nearestPoint(x: number, y: number): PointName {
@@ -1132,6 +1205,46 @@ export class ThreeJsEngine implements DrivingSystem {
     const px = car.x + probe.dx
     const py = car.y + probe.dy
     return obstacles.some((box) => distanceToBox(px, py, box) < SAFETY_CLEARANCE_M)
+  }
+
+  /**
+   * Plays one tick of a parking control sequence (`animateParking`): the current step's arc for
+   * `dt`, with the predictive safety stop probed every tick; resolves `execute` when the last
+   * step ends or the car stops for an obstacle.
+   */
+  private tickControl(car: EngineCar, control: ActiveControl, dt: number): void {
+    let left = dt
+    let stopped = false
+    while (left > 1e-9 && control.index < control.steps.length) {
+      const step = control.steps[control.index]
+      const remaining = { ...step, duration_s: step.duration_s - control.elapsed }
+      if (this.safetyStop(car, remaining, control.obstacles)) {
+        stopped = true
+        break
+      }
+      const slice = Math.min(left, remaining.duration_s)
+      const delta = controlStepDelta(car, { ...step, duration_s: slice })
+      car.x += delta.dx
+      car.y += delta.dy
+      car.yaw += delta.dyaw
+      car.speed_mps = step.speed_mps
+      car.lamps = { ...car.lamps, reverse: step.gear === 'R', brake_lights: false }
+      control.elapsed += slice
+      left -= slice
+      if (control.elapsed >= step.duration_s - 1e-9) {
+        control.index++
+        control.elapsed = 0
+      }
+    }
+    if (!stopped && control.index < control.steps.length) return
+    car.speed_mps = 0
+    car.lamps = { ...car.lamps, reverse: false }
+    this.controls.delete(car.vin)
+    const pose = this.getPositionXY(car.vin)
+    const log = this.parkingLog[car.vin] ?? []
+    log.push({ steps: control.steps.length, pose, stopped })
+    this.parkingLog[car.vin] = log
+    control.done({ pose, stopped })
   }
 
   /**

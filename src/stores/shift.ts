@@ -8,7 +8,12 @@ import type { TruthHintPort } from '#/lib/marshal/flows/context'
 import type { YardConstraints } from '#/lib/marshal/flows/yard'
 import { clearHazard, type HazardPreset, type HazardSite, stageHazard } from '#/lib/marshal/hazards'
 import { type CarSpec, createOrchestrator, type Orchestrator } from '#/lib/marshal/orchestrator'
-import { createInitialState, type MarshalState, type Truck } from '#/lib/marshal/state'
+import {
+  type CarStage,
+  createInitialState,
+  type MarshalState,
+  type Truck,
+} from '#/lib/marshal/state'
 import { type LampFault, ScriptedDrivingSystem } from '#/lib/marshal/testing/scriptedSystem'
 import type {
   AssistOption,
@@ -50,6 +55,11 @@ export type ShiftBlocker = {
   options: AssistOption[]
   /** Also place a worker next to the box (Gemini then recommends waiting). */
   withWorker?: boolean
+  /**
+   * Only while the car is in one of these stages (e.g. on the open road to the yard, so the
+   * blocker does not land among cars queued at the gate). Any stage when absent.
+   */
+  stages?: CarStage[]
 }
 
 /** Scene A: a hazard staged at a site; the route choice sees its description until cleared. */
@@ -112,6 +122,7 @@ export const DEFAULT_SCENARIO: ShiftScenario = {
       reason: 'Box and worker blocking the lane',
       options: ['wait_for_removal', 'pass_left_3kmh', 'reroute_lane_c'],
       withWorker: true,
+      stages: ['to_slot'],
     },
   ],
   hazards: [{ at: 60, clearAt: 180, site: 'finishing_corner', preset: 'forklift_unloading' }],
@@ -326,6 +337,7 @@ function runBlockers(state: MarshalState): void {
     const car = state.cars[blocker.vin]
     if (fired.has(case_id) || !car || now < blocker.at) continue
     if (car.stage === 'parked' || car.stage === 'shipped' || car.stage === 'waiting') continue
+    if (blocker.stages && !blocker.stages.includes(car.stage)) continue
     fired.add(case_id)
     const at = engine.getPositionXY(blocker.vin)
     const yaw = (at.yaw * Math.PI) / 180

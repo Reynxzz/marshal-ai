@@ -4,7 +4,13 @@
 import * as THREE from 'three'
 import { type CameraPose, followCamera, overviewCamera, stepCamera } from './camera'
 import type { PlantLayout } from './plantMap'
-import { createPlantScene, type LabelAnchor, NEAR_LABEL_M, type PlantScene } from './scene'
+import {
+  createPlantScene,
+  type LabelAnchor,
+  NEAR_LABEL_M,
+  type PlantScene,
+  type PlantSceneOptions,
+} from './scene'
 import type { SimSnapshot } from './snapshot'
 
 export type SimViewer = {
@@ -19,6 +25,7 @@ export type SimViewerFactory = (
   canvas: HTMLCanvasElement,
   overlay: HTMLElement,
   layout: PlantLayout,
+  options?: PlantSceneOptions,
 ) => SimViewer
 
 /**
@@ -48,13 +55,14 @@ function labelElement(overlay: HTMLElement, anchor: LabelAnchor): HTMLElement {
  * @param canvas - Canvas to render into.
  * @param overlay - Element (over the canvas) that receives the HTML labels.
  * @param layout - Plant layout.
+ * @param options - Scene options (the engine's dressed world and lamp state).
  * @returns Viewer.
  */
-export const createSimViewer: SimViewerFactory = (canvas, overlay, layout) => {
+export const createSimViewer: SimViewerFactory = (canvas, overlay, layout, options) => {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true })
   const dpr = typeof devicePixelRatio === 'number' ? Math.min(2, devicePixelRatio) : 1
   renderer.setPixelRatio(dpr)
-  const plant: PlantScene = createPlantScene(layout)
+  const plant: PlantScene = createPlantScene(layout, options)
   const camera = new THREE.PerspectiveCamera(50, 1, 0.5, 2000)
   const overview = overviewCamera(layout)
   let pose: CameraPose = overview

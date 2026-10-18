@@ -3,7 +3,14 @@
 // `yard.entry` where the parking flow takes over. A car held here because the yard was full is
 // offered a slot again as soon as one frees (see {@link retryHeldAtReport}).
 
-import { firstFreeSimSlot, freeSimSlots, heldAtReport, patchCar, slotToPoint } from '../state'
+import {
+  enterableSimSlot,
+  firstFreeSimSlot,
+  freeSimSlots,
+  heldAtReport,
+  patchCar,
+  slotToPoint,
+} from '../state'
 import type { RouteOption } from '../types'
 import type { FlowContext } from './context'
 
@@ -41,7 +48,8 @@ export async function handleReportArrival(ctx: FlowContext, vin: string): Promis
     invalidInput: choice.invalidInput,
   })
 
-  const slot = firstFreeSimSlot(ctx.state(), ctx.state().cars[vin]?.targetSlot)
+  const pick = ctx.parking.laneApproach ? enterableSimSlot : firstFreeSimSlot
+  const slot = pick(ctx.state(), ctx.state().cars[vin]?.targetSlot)
   if (!slot) {
     ctx.update((state) => patchCar(state, vin, { stage: 'held', held: YARD_FULL_TEXT }))
     ctx.decide(vin, 'YARD', YARD_FULL_TEXT, { exception: true })

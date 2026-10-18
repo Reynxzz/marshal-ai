@@ -410,6 +410,29 @@ export function firstFreeSimSlot(state: MarshalState, preferred?: string): strin
 }
 
 /**
+ * Free row-A slot for an engine that really drives the yard lane (the live three.js engine).
+ * Row-A slots sit nose to tail with 0.6 m of slack and cars enter from the yard entry (A1 end),
+ * so a slot can only be driven into while the slot behind it is free. The row fills from the far
+ * end inwards, like a car parking behind the last one ("Y7 behind Y8"): the deepest free slot
+ * whose rear neighbour is free wins. ({@link firstFreeSimSlot} spreads cars out, which leaves
+ * one-slot gaps a driven car cannot enter.) A walled-in slot is the last resort.
+ * @param state - Current state.
+ * @param preferred - Slot to use when it is free (e.g. a scenario's requested slot).
+ * @returns Slot id, or undefined when the sim yard is full.
+ */
+export function enterableSimSlot(state: MarshalState, preferred?: string): string | undefined {
+  const free = freeSimSlots(state)
+  if (preferred && free.includes(preferred)) return preferred
+  const taken = new Set(Object.values(state.cars).flatMap((car) => (car.slot ? [car.slot] : [])))
+  const occupied = (col: number) => {
+    const slot = `A${col}`
+    return (state.layout[slot] ?? null) !== null || taken.has(slot)
+  }
+  const enterable = free.filter((slot) => !occupied(Number(slot.slice(1)) - 1))
+  return (enterable.length > 0 ? enterable : free).at(-1)
+}
+
+/**
  * Cars held at the report point because the yard was full (held, no slot assigned).
  * @param state - Current state.
  * @returns VINs in spawn order.

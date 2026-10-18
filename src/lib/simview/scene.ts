@@ -3,6 +3,24 @@
 // Builds without a WebGL context, so it is testable in jsdom.
 
 import * as THREE from 'three'
+import {
+  type CarFault,
+  type CarLamps,
+  createCarMesh as createEngineCar,
+  updateCarMesh as placeEngineCar,
+  setCarFaults,
+  setCarLamps,
+} from '#/lib/simulator/actors/car'
+import {
+  buildCompound,
+  buildFence,
+  buildGateProps,
+  buildReworkProps,
+  buildYardCars,
+} from '#/lib/simulator/world/dress'
+import { addDuskLighting } from '#/lib/simulator/world/lighting'
+import { boundsOf, createLaneGraph } from '#/lib/simulator/world/plantMap'
+import { buildRoads } from '#/lib/simulator/world/roadBuilder'
 import { createCarMesh, updateCarMesh } from '#/render/cars'
 import type { CarSnapshot } from '#/sim/vehicle'
 import { focusColour } from './focus'
@@ -25,8 +43,24 @@ export type LabelAnchor = {
 /** Camera distance under which `near` labels (Y1..Y8) appear. */
 export const NEAR_LABEL_M = 70
 
+/** Lamp state of one car as the engine drives it (dressed scene). */
+export type CarLook = { lamps: CarLamps; faults: CarFault[] }
+
+/** Options for {@link createPlantScene}. */
+export type PlantSceneOptions = {
+  /**
+   * The engine's dressed world: lane-graph roads, fence, yard scenery, gate and rework props,
+   * dusk light, and the engine car model whose lamps follow `carLook` (what the cameras see).
+   */
+  dressed?: boolean
+  /** Lamp state per car for the dressed car model; lamps stay off when it returns null. */
+  carLook?: (vin: string) => CarLook | null
+}
+
 export type PlantScene = {
   scene: THREE.Scene
+  /** Shows or hides the focus beacon and highlight rings (hidden for camera frames). */
+  setOverlays(visible: boolean): void
   /** Syncs cars, props, trucks and highlights; `time` (seconds) animates the beacon. */
   sync(snapshot: SimSnapshot, time?: number): void
   /** Label anchors for the current frame (markers first, then the focused car). */
@@ -39,6 +73,7 @@ export type PlantScene = {
 }
 
 const BACKGROUND = 0x12171d
+const DUSK_SKY = 0x2a3442
 const ROAD_WIDTH = 5
 const AMBER = '#E39B2E'
 const BLUE = '#7FA7FF'
@@ -165,6 +200,14 @@ function buildTruck(group: THREE.Object3D, mat: Materials): void {
   add(group, new THREE.BoxGeometry(2, 2.2, 2.4), mat.truckCab, 3, 1.4, 0)
 }
 
+const OFF_LAMPS: CarLamps = {
+  headlights: false,
+  brake_lights: false,
+  reverse: false,
+  indicator_left: false,
+  indicator_right: false,
+}
+
 function carSnapshot(car: SimCar): CarSnapshot {
   // src/render/cars expects yaw in radians; its pose mapping matches toThree().
   return {
@@ -184,16 +227,22 @@ function carSnapshot(car: SimCar): CarSnapshot {
  * @param layout - Plant layout from `buildPlantLayout`.
  * @returns Scene with sync, labels and dispose.
  */
-export function createPlantScene(layout: PlantLayout): PlantScene {
+export function createPlantScene(layout: PlantLayout, options: PlantSceneOptions = {}): PlantScene {
+  const dressed = options.dressed === true
   const scene = new THREE.Scene()
-  scene.background = new THREE.Color(BACKGROUND)
-  scene.fog = new THREE.Fog(BACKGROUND, 260, 700)
+  scene.background = new THREE.Color(dressed ? DUSK_SKY : BACKGROUND)
+  scene.fog = new THREE.Fog(dressed ? DUSK_SKY : BACKGROUND, 260, 700)
   const mat = materials()
 
-  scene.add(new THREE.HemisphereLight(0xdfe6f0, 0x1b222b, 0.9))
-  const sun = new THREE.DirectionalLight(0xffffff, 1.6)
-  sun.position.set(layout.center.x + 60, 120, layout.center.y + 40)
-  scene.add(sun)
+  if (dressed) {
+    scene.add(new THREE.HemisphereLight(0xc9d4e6, 0x1b222b, 0.45))
+    addDuskLighting(scene, layout.center)
+  } else {
+    scene.add(new THREE.HemisphereLight(0xdfe6f0, 0x1b222b, 0.9))
+    const sun = new THREE.DirectionalLight(0xffffff, 1.6)
+    sun.position.set(layout.center.x + 60, 120, layout.center.y + 40)
+    scene.add(sun)
+  }
 
   const { bounds, center } = layout
   const ground = new THREE.Mesh(
@@ -206,7 +255,16 @@ export function createPlantScene(layout: PlantLayout): PlantScene {
 
   const map = new THREE.Group()
   scene.add(map)
-  for (const road of layout.roads) {
+  const graph = dressed ? createLaneGraph() : null
+  if (graph) {
+    map.add(buildRoads(graph))
+    map.add(buildFence(boundsOf(graph.points)))
+    map.add(buildYardCars(graph.points))
+    map.add(buildCompound(graph.points))
+    map.add(buildGateProps(graph.points))
+    map.add(buildReworkProps(graph.points))
+  }
+  for (const road of graph ? [] : layout.roads) {
     const { rotationY } = toThree(road.cx, road.cy, road.yaw)
     const strip = add(
       map,
@@ -263,6 +321,7 @@ export function createPlantScene(layout: PlantLayout): PlantScene {
   beacon.rotation.x = Math.PI
   beacon.visible = false
   let focusLabel: LabelAnchor | null = null
+  let overlays = true
 
   const syncCars = (list: SimCar[]): void => {
     const seen = new Set<string>()
@@ -270,15 +329,22 @@ export function createPlantScene(layout: PlantLayout): PlantScene {
       seen.add(car.vin)
       let entry = cars.get(car.vin)
       if (!entry) {
-        const group = createCarMesh(carSnapshot(car))
+        const group = dressed ? createEngineCar(car.colour) : createCarMesh(carSnapshot(car))
         const halo = ring(AMBER, 2.8, 3.4)
         group.add(halo)
         scene.add(group)
         entry = { group, halo }
         cars.set(car.vin, entry)
       }
-      updateCarMesh(entry.group, carSnapshot(car))
-      entry.halo.visible = car.highlight !== null
+      if (dressed) {
+        placeEngineCar(entry.group, car)
+        const look = options.carLook?.(car.vin)
+        setCarLamps(entry.group, look?.lamps ?? OFF_LAMPS)
+        setCarFaults(entry.group, new Set(look?.faults ?? []))
+      } else {
+        updateCarMesh(entry.group, carSnapshot(car))
+      }
+      entry.halo.visible = overlays && car.highlight !== null
       if (car.highlight) entry.halo.material.color.set(car.highlight === 'selected' ? BLUE : AMBER)
     }
     for (const [vin, entry] of cars) {
@@ -303,7 +369,7 @@ export function createPlantScene(layout: PlantLayout): PlantScene {
       entry.group.position.set(...position)
       entry.group.rotation.y = rotationY
       const halo = entry.group.getObjectByName('halo')
-      if (halo) halo.visible = prop.blocking
+      if (halo) halo.visible = overlays && prop.blocking
     }
     for (const [id, entry] of props) {
       if (seen.has(id)) continue
@@ -340,7 +406,7 @@ export function createPlantScene(layout: PlantLayout): PlantScene {
     const { focus, focusPose } = snapshot
     if (focus && focusPose) {
       const colour = focusColour(focus)
-      beacon.visible = true
+      beacon.visible = overlays
       beacon.material.color.set(colour)
       beacon.position.set(focusPose.x, 4.4 + Math.sin(time * 3) * 0.3, focusPose.y)
       focusLabel = {
@@ -383,8 +449,21 @@ export function createPlantScene(layout: PlantLayout): PlantScene {
     scene.clear()
   }
 
+  const setOverlays = (visible: boolean): void => {
+    overlays = visible
+    if (!visible) {
+      beacon.visible = false
+      for (const entry of cars.values()) entry.halo.visible = false
+      for (const entry of props.values()) {
+        const halo = entry.group.getObjectByName('halo')
+        if (halo) halo.visible = false
+      }
+    }
+  }
+
   return {
     scene,
+    setOverlays,
     sync,
     labels: () => (focusLabel ? [...markerLabels, focusLabel] : markerLabels),
     carIds: () => [...cars.keys()],

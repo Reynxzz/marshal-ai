@@ -200,6 +200,11 @@ export type ControlStep = {
 /** Parking execution port, implemented by the simulator's bicycle-model control loop. */
 export interface ParkingPort {
   /**
+   * True when the engine drives continuously in the yard lane, so the parking flow first drives
+   * the car up to the slot and only plans the last few metres (the live three.js engine).
+   */
+  readonly laneApproach?: boolean
+  /**
    * Lists obstacles within 15m of the slot.
    * @param vin - Car being parked (excluded from the result).
    * @param slot - Target slot.
