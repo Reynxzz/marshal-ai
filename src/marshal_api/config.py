@@ -28,7 +28,13 @@ class Settings(BaseSettings):
     db_url: str = "sqlite+aiosqlite:///./marshal.db"
 
     cors_origins: list[str] = Field(
-        default_factory=lambda: ["http://localhost:5173", "http://127.0.0.1:5173"]
+        default_factory=lambda: [
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+            "http://localhost:8080",
+        ]
     )
 
     # Demo defaults so the scaffolding answers before auth/tenant data exists.

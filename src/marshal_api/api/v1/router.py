@@ -15,6 +15,7 @@ from marshal_api.api.v1 import (
     plant,
     proposals,
     quality,
+    sim_bridge,
     yard,
 )
 from marshal_api.streaming import camera_proxy, sse
@@ -33,3 +34,4 @@ api_router.include_router(jobs.router)
 api_router.include_router(media.router)
 api_router.include_router(sse.router)
 api_router.include_router(camera_proxy.router)
+api_router.include_router(sim_bridge.router, prefix="/bridge", tags=["bridge"])
