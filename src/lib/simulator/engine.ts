@@ -58,6 +58,7 @@ import {
   type RoutineStepSpec,
   r12Steps,
 } from './actors/routine'
+import { carTarget, LIDAR, type LidarScan, lidarScan, propTarget, type ScanTarget } from './sensors'
 import { createLaneGraph, type LaneGraph } from './world/plantMap'
 import { sampleCenterline } from './world/roadBuilder'
 
@@ -183,6 +184,37 @@ type EngineCar = {
   avoidCase: string | null
   /** Closest distance to a prop during the pass-left maneuver. */
   avoidClosest: number
+  /** Front-wheel angle last commanded, radians (positive = left). */
+  steer: number
+  /** Longitudinal acceleration, m/s^2, smoothed over the fixed steps. */
+  accel_mps2: number
+  /** Yaw rate, rad/s, smoothed. */
+  yawRate: number
+  /** Distance driven since spawn, metres. */
+  odometer_m: number
+}
+
+/** What the car's own sensors and controller report (the dashboard HUD). */
+export type CarTelemetry = {
+  vin: string
+  speed_kmh: number
+  accel_mps2: number
+  steer_deg: number
+  heading_deg: number
+  yaw_rate_dps: number
+  /** Lateral acceleration v * yaw rate, in g. */
+  lateral_g: number
+  gear: 'P' | 'R' | 'N' | 'D'
+  odometer_m: number
+  /** What the controller is doing now, in words. */
+  mode: string
+  /** Car ahead in the lane: bumper gap and time to collision at the current closing speed. */
+  leader: { vin: string; gap_m: number; closing_mps: number; ttc_s: number | null } | null
+  /** Nearest prop in the lane corridor ahead. */
+  obstacle: { kind: string; ahead_m: number } | null
+  /** Current mission: next waypoint, metres left, ETA. */
+  route: { next: string; remaining_m: number; eta_s: number | null } | null
+  lamps: CarLamps
 }
 
 type AssistRecord = { vin: string; options: AssistOption[]; frames: string[] }
@@ -409,6 +441,10 @@ export class ThreeJsEngine implements DrivingSystem {
       avoidStart: null,
       avoidCase: null,
       avoidClosest: Number.POSITIVE_INFINITY,
+      steer: 0,
+      accel_mps2: 0,
+      yawRate: 0,
+      odometer_m: 0,
     })
   }
 
@@ -551,6 +587,108 @@ export class ThreeJsEngine implements DrivingSystem {
     if (!car || !mission || mission.route.length === 0) return []
     const rest = mission.route.slice(mission.routeIndex + 1).map(({ x, y }) => ({ x, y }))
     return [{ x: car.x, y: car.y }, ...rest]
+  }
+
+  /**
+   * The car's own telemetry for the dashboard HUD: what its sensors and controller report.
+   * @param vin - Car.
+   * @returns Telemetry, or null for an unknown car.
+   */
+  telemetryOf(vin: string): CarTelemetry | null {
+    const car = this.cars.get(vin)
+    if (!car) return null
+    const control = this.controls.get(vin)
+    const mission = car.mission
+    const leader = this.leaderOf(car)
+    const obstacle = this.nearestProp(car, LIDAR.range_m, OBSTACLE_LATERAL_M)
+    const reversing = car.lamps.reverse || mission?.reverse === true || car.avoidPhase === 'backup'
+    const gear: CarTelemetry['gear'] = reversing
+      ? 'R'
+      : mission || control || car.speed_mps > 0.05
+        ? 'D'
+        : 'P'
+    let gap: CarTelemetry['leader'] = null
+    if (leader) {
+      const bumper = Math.max(0, leader.gap - CAR_LENGTH_M)
+      const closing = car.speed_mps - leader.other.speed_mps
+      gap = {
+        vin: leader.other.vin,
+        gap_m: bumper,
+        closing_mps: closing,
+        ttc_s: closing > 0.1 ? bumper / closing : null,
+      }
+    }
+    let route: CarTelemetry['route'] = null
+    if (mission) {
+      const remaining = Math.max(0, mission.total_m - mission.travelled_m)
+      const cruise = (mission.cmd.max_speed_kmh ?? DEFAULT_SPEED_KMH) / 3.6
+      const pace = car.speed_mps > 1 ? car.speed_mps : cruise
+      route = {
+        next: mission.waypoints[Math.min(mission.waypointIndex, mission.waypoints.length - 1)],
+        remaining_m: remaining,
+        eta_s: pace > 0 ? remaining / pace : null,
+      }
+    }
+    const mode = control
+      ? 'Parking manoeuvre'
+      : car.waitingCase
+        ? `Waiting: ${car.waitingCase}`
+        : car.assistPending || car.stoppedForAssist
+          ? 'Stopped: asking for help'
+          : car.avoidPhase
+            ? 'Passing on the left'
+            : mission?.routine
+              ? `R-12 step ${mission.routine.steps[mission.routine.index]?.name ?? ''}`
+              : !mission
+                ? 'Parked'
+                : obstacle && obstacle.ahead < OBSTACLE_BASE_M * 2
+                  ? `Braking for ${obstacle.kind}`
+                  : leader && leader.gap < QUEUE_LOOKAHEAD_M
+                    ? 'Following'
+                    : 'Cruising'
+    return {
+      vin,
+      speed_kmh: car.speed_mps * 3.6,
+      accel_mps2: car.accel_mps2,
+      steer_deg: (car.steer * 180) / Math.PI,
+      heading_deg: ((((car.yaw * 180) / Math.PI) % 360) + 360) % 360,
+      yaw_rate_dps: (car.yawRate * 180) / Math.PI,
+      lateral_g: (car.speed_mps * car.yawRate) / 9.81,
+      gear,
+      odometer_m: car.odometer_m,
+      mode,
+      leader: gap,
+      obstacle: obstacle ? { kind: obstacle.kind, ahead_m: obstacle.ahead } : null,
+      route,
+      lamps: { ...car.lamps },
+    }
+  }
+
+  /**
+   * One revolution of a roof lidar on the car (sensors.ts): rays against the other cars and props.
+   * @param vin - Scanning car.
+   * @returns Returns, rays fired and the nearest return; empty for an unknown car.
+   */
+  scan(vin: string): LidarScan {
+    const car = this.cars.get(vin)
+    if (!car) return { hits: [], rays: 0, nearest: null }
+    const targets: ScanTarget[] = []
+    for (const other of this.cars.values()) {
+      if (other.vin !== vin) targets.push(carTarget(other.vin, other.x, other.y, other.yaw))
+    }
+    for (const prop of this.props.values()) {
+      targets.push(
+        propTarget(
+          prop.id,
+          prop.kind,
+          prop.x,
+          prop.y,
+          (prop.yaw * Math.PI) / 180,
+          PROP_FOOTPRINTS[prop.kind],
+        ),
+      )
+    }
+    return lidarScan(car, targets)
   }
 
   /**
@@ -697,9 +835,11 @@ export class ThreeJsEngine implements DrivingSystem {
       const step = Math.min(FIXED_STEP_S, left)
       left -= step
       for (const car of [...this.cars.values()]) {
+        const before = { x: car.x, y: car.y, yaw: car.yaw, speed: car.speed_mps }
         const control = this.controls.get(car.vin)
         if (control) this.tickControl(car, control, step)
         else this.tickCar(car, step)
+        this.measure(car, before, step)
       }
     }
     this.statusClock += dt
@@ -1020,6 +1160,7 @@ export class ThreeJsEngine implements DrivingSystem {
       }
     }
     const steer = purePursuitSteer(car, lookahead)
+    car.steer = steer
     const next = stepVehicle(car, steer, speed, dt)
     mission.travelled_m += Math.hypot(next.x - car.x, next.y - car.y)
     car.x = next.x
@@ -1135,20 +1276,54 @@ export class ThreeJsEngine implements DrivingSystem {
    * pull-over points are ignored (TEAM_PLAN M4.1 shoulder tolerance).
    */
   private leaderGap(car: EngineCar): number | null {
-    const fx = Math.cos(car.yaw)
-    const fy = Math.sin(car.yaw)
-    let nearest: number | null = null
+    return this.leaderOf(car)?.gap ?? null
+  }
+
+  /** The car ahead in the lane (queuing, M4.1): centre-to-centre gap and the car itself. */
+  private leaderOf(car: EngineCar): { gap: number; other: EngineCar } | null {
+    let nearest: { gap: number; other: EngineCar } | null = null
     for (const other of this.cars.values()) {
       if (other.vin === car.vin) continue
       if (!other.mission && (other.speed_mps !== 0 || this.pullOverAt(other.x, other.y))) continue
-      const dx = other.x - car.x
-      const dy = other.y - car.y
-      const ahead = dx * fx + dy * fy
-      if (ahead <= 0 || ahead > QUEUE_LOOKAHEAD_M) continue
-      if (Math.abs(dx * fy - dy * fx) > QUEUE_LATERAL_M) continue
-      if (nearest === null || ahead < nearest) nearest = ahead
+      const ahead = this.inFront(car, other)
+      if (ahead === null) continue
+      // Right of way: two cars that each have the other in front (straight legs crossing, e.g. back
+      // from rework while another leaves the report point) would wait for each other for ever. The
+      // car that came first (lower VIN) goes; the other one waits for it.
+      if (other.mission && this.inFront(other, car) !== null && car.vin < other.vin) continue
+      if (nearest === null || ahead < nearest.gap) nearest = { gap: ahead, other }
     }
     return nearest
+  }
+
+  /** How far `other` is ahead of `car` inside its queuing corridor, or null when it is not. */
+  private inFront(car: EngineCar, other: EngineCar): number | null {
+    const fx = Math.cos(car.yaw)
+    const fy = Math.sin(car.yaw)
+    const dx = other.x - car.x
+    const dy = other.y - car.y
+    const ahead = dx * fx + dy * fy
+    if (ahead <= 0 || ahead > QUEUE_LOOKAHEAD_M) return null
+    if (Math.abs(dx * fy - dy * fx) > QUEUE_LATERAL_M) return null
+    return ahead
+  }
+
+  /** Updates a car's measured motion after a fixed step: acceleration, yaw rate, odometer. */
+  private measure(
+    car: EngineCar,
+    before: { x: number; y: number; yaw: number; speed: number },
+    dt: number,
+  ): void {
+    const moved = Math.hypot(car.x - before.x, car.y - before.y)
+    car.odometer_m += moved
+    let turn = car.yaw - before.yaw
+    while (turn > Math.PI) turn -= Math.PI * 2
+    while (turn < -Math.PI) turn += Math.PI * 2
+    // Exponential smoothing over ~0.3 s, as a vehicle bus reports filtered signals.
+    const k = 0.35
+    car.accel_mps2 += k * ((car.speed_mps - before.speed) / dt - car.accel_mps2)
+    car.yawRate += k * (turn / dt - car.yawRate)
+    if (moved < 1e-6 && car.speed_mps === 0) car.steer *= 0.9
   }
 
   /**

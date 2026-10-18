@@ -59,6 +59,38 @@ describe('live backend', () => {
   }, 60_000)
 })
 
+describe('right of way', () => {
+  it('finishes the shift when AI answers arrive late (no two cars waiting on each other)', async () => {
+    // With answers 0.5 s late the car back from rework met the one leaving the report point where
+    // those two straight legs cross; each had the other in front and both waited for ever.
+    let now = 0
+    const waiting: { at: number; resolve: () => void }[] = []
+    const base = createOfflineMarshalAi()
+    const ai = Object.fromEntries(
+      Object.entries(base).map(([name, call]) => [
+        name,
+        async (input: unknown) => {
+          await new Promise<void>((resolve) => waiting.push({ at: now + 0.5, resolve }))
+          return (call as (value: unknown) => unknown)(input)
+        },
+      ]),
+    ) as unknown as ReturnType<typeof createOfflineMarshalAi>
+    const store = useShiftStore.getState()
+    store.setPauseWhenNeeded(false)
+    store.configure({ ai, backend: () => createLiveBackend() })
+    for (let t = 0; t < 2400 && useShiftStore.getState().shift.progress < 1; t++) {
+      useShiftStore.getState().advance(0.25)
+      now += 0.25
+      for (const item of waiting.filter((entry) => entry.at <= now)) {
+        item.resolve()
+        waiting.splice(waiting.indexOf(item), 1)
+      }
+      await flush()
+    }
+    expect(useShiftStore.getState().shift.progress).toBe(1)
+  }, 60_000)
+})
+
 describe('engine additions for the live backend', () => {
   it('starts a staged car from the line end, not from a closer yard slot', () => {
     const engine = new ThreeJsEngine()

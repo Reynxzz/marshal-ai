@@ -1,11 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { bus, type MarshalNote } from '#/lib/marshal/eventBus'
+import { FIXED_STEP_S } from '#/lib/simulator/actors/driver'
+import type { CarTelemetry } from '#/lib/simulator/engine'
+import { LIDAR, type LidarScan } from '#/lib/simulator/sensors'
 import { focusAriaLabel, focusCaption, focusColour } from '#/lib/simview/focus'
 import { buildPlantLayout, type PlantLayout } from '#/lib/simview/plantMap'
 import type { CarLook } from '#/lib/simview/scene'
 import { readSimSnapshot } from '#/lib/simview/snapshot'
 import { createSimViewer, type SimViewer, type SimViewerFactory } from '#/lib/simview/viewer'
 import { getShiftBackend, shiftFocus, useShiftStore } from '#/stores/shift'
+import { createHud, type HudInput } from './hud'
 
 /** How long a Gemini / plant note stays on screen, ms. */
 export const NOTE_VISIBLE_MS = 6000
@@ -46,11 +50,57 @@ type LampSource = { lampsOf(vin: string): CarLook['lamps']; faultsOf(vin: string
  * @param vin - Car VIN.
  * @returns Path points from the car forward, or none.
  */
+type SensorSource = {
+  telemetryOf(vin: string): CarTelemetry | null
+  scan(vin: string): LidarScan
+  listCars(): { vin: string; x: number; y: number; yaw: number }[]
+}
+
+function sensorBackend(): SensorSource | null {
+  const engine = getShiftBackend() as Partial<SensorSource> | null
+  return engine?.telemetryOf && engine.scan && engine.listCars ? (engine as SensorSource) : null
+}
+
 function backendCarPath(vin: string): { x: number; y: number }[] {
   const engine = getShiftBackend() as {
     routeAhead?: (vin: string) => { x: number; y: number }[]
   } | null
   return engine?.routeAhead?.(vin) ?? []
+}
+
+/**
+ * The HUD's numbers from the engine: the followed car's telemetry and lidar, or plant totals.
+ * @param sensors - The running engine, when it has sensors.
+ * @param vin - Followed car, if any.
+ * @param scan - Its latest lidar revolution.
+ * @param timeScale - Playback speed.
+ * @param fps - Measured render rate.
+ * @returns HUD input.
+ */
+function hudInput(
+  sensors: SensorSource | null,
+  vin: string | null,
+  scan: LidarScan | null,
+  timeScale: number,
+  fps: number,
+): HudInput {
+  const cars = sensors?.listCars() ?? []
+  const all = cars.map((car) => sensors?.telemetryOf(car.vin)).filter((t) => t != null)
+  const moving = all.filter((t) => t.speed_kmh > 0.5)
+  const telemetry = vin ? (sensors?.telemetryOf(vin) ?? null) : null
+  const pose = vin ? (cars.find((car) => car.vin === vin) ?? null) : null
+  return {
+    telemetry,
+    scan,
+    pose: pose ? { x: pose.x, y: pose.y, yaw: (pose.yaw * Math.PI) / 180 } : null,
+    plant: {
+      cars: cars.length,
+      moving: moving.length,
+      avgKmh: moving.length ? moving.reduce((sum, t) => sum + t.speed_kmh, 0) / moving.length : 0,
+      odometerKm: all.reduce((sum, t) => sum + t.odometer_m, 0) / 1000,
+    },
+    sim: { stepHz: Math.round(1 / FIXED_STEP_S), timeScale, fps },
+  }
 }
 
 /**
@@ -99,11 +149,14 @@ export function SimCanvas({ createViewer = createSimViewer, layout }: SimCanvasP
     const overlay = overlayRef.current
     if (!canvas || !overlay) return
     let viewer: SimViewer
+    // Latest lidar revolution of the followed car, refreshed at the sensor's rate.
+    let scan: { vin: string; result: LidarScan } | null = null
     try {
       viewer = createViewer(canvas, overlay, plant, {
         style: 'tesla',
         carLook: backendCarLook,
         carPath: backendCarPath,
+        carScan: (vin) => (scan?.vin === vin ? scan.result.hits : []),
       })
     } catch {
       setFailed(true)
@@ -119,13 +172,24 @@ export function SimCanvas({ createViewer = createSimViewer, layout }: SimCanvasP
     if (observer) observer.observe(container)
     else window.addEventListener('resize', resize)
 
+    const hud = createHud(container)
     let raf = 0
     let last: number | null = null
+    let sinceSensor = Number.POSITIVE_INFINITY
+    let fps = 60
     const loop = (now: number): void => {
       const dt = last === null ? 0 : Math.min(0.1, Math.max(0, (now - last) / 1000))
       last = now
+      if (dt > 0) fps += 0.1 * (1 / dt - fps)
       const store = useShiftStore.getState()
       const current = shiftFocus(store)
+      sinceSensor += dt
+      const sensors = sensorBackend()
+      if (sinceSensor >= 1 / LIDAR.hz) {
+        sinceSensor = 0
+        scan = sensors && current ? { vin: current.vin, result: sensors.scan(current.vin) } : null
+        hud.update(hudInput(sensors, current?.vin ?? null, scan?.result ?? null, store.speed, fps))
+      }
       viewer.frame(readSimSnapshot(getShiftBackend(), store.shift, current), dt)
       raf = requestAnimationFrame(loop)
     }
@@ -133,6 +197,7 @@ export function SimCanvas({ createViewer = createSimViewer, layout }: SimCanvasP
 
     return () => {
       cancelAnimationFrame(raf)
+      hud.dispose()
       if (observer) observer.disconnect()
       else window.removeEventListener('resize', resize)
       viewer.dispose()

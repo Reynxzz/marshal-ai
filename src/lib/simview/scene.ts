@@ -29,11 +29,13 @@ import type { SimCar, SimProp, SimPropKind, SimSnapshot } from './snapshot'
 import {
   buildTeslaMap,
   clipPath,
+  createLidarPoints,
   createRibbon,
   createTeslaCar,
   setTeslaFocus,
   TESLA,
   TESLA_FOG,
+  updateLidarPoints,
   updateRibbon,
 } from './teslaLook'
 
@@ -72,6 +74,8 @@ export type PlantSceneOptions = {
   style?: 'tesla'
   /** The route still ahead of a car (CARLA frame, from the car forward); for the ribbon. */
   carPath?: (vin: string) => { x: number; y: number }[]
+  /** The followed car's latest lidar returns (CARLA frame, z = beam height), drawn as points. */
+  carScan?: (vin: string) => readonly { x: number; y: number; z: number; d: number }[]
 }
 
 export type PlantScene = {
@@ -361,6 +365,8 @@ export function createPlantScene(layout: PlantLayout, options: PlantSceneOptions
   beacon.visible = false
   const ribbon = createRibbon()
   scene.add(ribbon)
+  const lidar = createLidarPoints()
+  scene.add(lidar)
   let focusLabel: LabelAnchor | null = null
   let overlays = true
 
@@ -461,6 +467,7 @@ export function createPlantScene(layout: PlantLayout, options: PlantSceneOptions
       beacon.material.color.set(colour)
       const path = tesla && overlays ? (options.carPath?.(focus.vin) ?? []) : []
       updateRibbon(ribbon, clipPath(path))
+      updateLidarPoints(lidar, tesla && overlays ? (options.carScan?.(focus.vin) ?? []) : [])
       beacon.position.set(focusPose.x, 4.4 + Math.sin(time * 3) * 0.3, focusPose.y)
       focusLabel = {
         id: `focus-${focus.vin}`,
@@ -472,6 +479,7 @@ export function createPlantScene(layout: PlantLayout, options: PlantSceneOptions
     } else {
       beacon.visible = false
       ribbon.visible = false
+      lidar.visible = false
       focusLabel = null
     }
   }
@@ -508,6 +516,7 @@ export function createPlantScene(layout: PlantLayout, options: PlantSceneOptions
     if (!visible) {
       beacon.visible = false
       ribbon.visible = false
+      lidar.visible = false
       for (const entry of cars.values()) entry.halo.visible = false
       for (const entry of props.values()) {
         const halo = entry.group.getObjectByName('halo')

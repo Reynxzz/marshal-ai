@@ -493,3 +493,69 @@ export function clipPath(
   }
   return out
 }
+
+// --- Lidar returns -----------------------------------------------------------------------------
+
+/** Lidar point colours by range: red close, amber mid, blue far (metres). */
+const LIDAR_RAMP: [number, [number, number, number]][] = [
+  [0, [1, 0.24, 0.16]],
+  [8, [1, 0.72, 0.15]],
+  [20, [0.1, 0.71, 1]],
+  [40, [0.35, 0.45, 0.95]],
+]
+
+function rampColour(d: number): [number, number, number] {
+  for (let i = 1; i < LIDAR_RAMP.length; i++) {
+    const [d1, c1] = LIDAR_RAMP[i]
+    const [d0, c0] = LIDAR_RAMP[i - 1]
+    if (d <= d1) {
+      const t = (d - d0) / (d1 - d0)
+      return [c0[0] + (c1[0] - c0[0]) * t, c0[1] + (c1[1] - c0[1]) * t, c0[2] + (c1[2] - c0[2]) * t]
+    }
+  }
+  return LIDAR_RAMP[LIDAR_RAMP.length - 1][1]
+}
+
+/**
+ * The lidar point cloud of the followed car, drawn as coloured dots.
+ * @returns Points object to update with {@link updateLidarPoints}.
+ */
+export function createLidarPoints(): THREE.Points {
+  const material = new THREE.PointsMaterial({
+    size: 0.22,
+    vertexColors: true,
+    sizeAttenuation: true,
+  })
+  const points = new THREE.Points(new THREE.BufferGeometry(), material)
+  points.name = 'lidar'
+  points.visible = false
+  return points
+}
+
+/**
+ * Replaces the point cloud (CARLA frame hits; z is the beam height).
+ * @param points - From {@link createLidarPoints}.
+ * @param hits - Lidar returns; none hides the cloud.
+ */
+export function updateLidarPoints(
+  points: THREE.Points,
+  hits: readonly { x: number; y: number; z: number; d: number }[],
+): void {
+  if (hits.length === 0) {
+    points.visible = false
+    return
+  }
+  const positions: number[] = []
+  const colours: number[] = []
+  for (const hit of hits) {
+    // A hair above the floor, so ground returns are not hidden in the road surface.
+    positions.push(hit.x, Math.max(hit.z, 0.07), hit.y)
+    colours.push(...rampColour(hit.d))
+  }
+  const geometry = new THREE.BufferGeometry()
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
+  geometry.setAttribute('color', new THREE.Float32BufferAttribute(colours, 3))
+  points.geometry.dispose()
+  points.geometry = geometry
+  points.visible = true
+}

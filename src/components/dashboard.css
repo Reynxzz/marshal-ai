@@ -329,7 +329,7 @@
 
 .md-sim-stage {
   position: relative;
-  height: 380px;
+  height: 460px;
   border-radius: 8px;
   overflow: hidden;
   background: var(--md-bg);
@@ -938,4 +938,160 @@
 .marshal-dash select:focus-visible {
   outline: 2px solid var(--md-blue-light);
   outline-offset: 2px;
+}
+
+/* HUD over the 3D view (components/sim/hud.ts): Tesla-screen cards on the pale plant. */
+.md-hud {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  font: 500 11px var(--md-font-sans, system-ui, sans-serif);
+  color: #1d2228;
+}
+
+.md-hud-card {
+  position: absolute;
+  top: 10px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.84);
+  box-shadow: 0 2px 10px rgba(20, 30, 45, 0.12);
+  backdrop-filter: blur(6px);
+}
+
+.md-hud-drive {
+  left: 10px;
+  width: 196px;
+}
+
+.md-hud-sense {
+  right: 10px;
+  width: 262px;
+}
+
+.md-hud-sense.idle {
+  display: none;
+}
+
+.md-hud-gears {
+  display: flex;
+  gap: 8px;
+  font: 600 12px var(--md-font-mono);
+  color: #a7adb6;
+}
+
+.md-hud-gear.on {
+  color: #2f86ff;
+}
+
+.md-hud-speed {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.md-hud-speed-value {
+  font: 600 38px / 1 var(--md-font-sans, system-ui, sans-serif);
+  letter-spacing: -1px;
+  font-variant-numeric: tabular-nums;
+}
+
+.md-hud-speed-unit,
+.md-hud-label {
+  color: #6b7380;
+}
+
+.md-hud-vin {
+  margin: 2px 0 6px;
+  font: 600 11px var(--md-font-mono);
+  color: #2f86ff;
+}
+
+.md-hud-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 10px;
+}
+
+.md-hud-cell {
+  display: flex;
+  flex-direction: column;
+}
+
+.md-hud-value {
+  font: 600 12px var(--md-font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.md-hud-mode {
+  margin-top: 6px;
+  padding-top: 5px;
+  border-top: 1px solid rgba(30, 40, 55, 0.1);
+  font-weight: 600;
+  color: #1b7f4b;
+}
+
+.md-hud-mode[data-kind="warn"] {
+  color: #c06a00;
+}
+
+.md-hud-title {
+  margin-bottom: 4px;
+  font: 600 10px var(--md-font-mono);
+  color: #2f86ff;
+}
+
+.md-hud-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 1px 0;
+}
+
+.md-hud-row .md-hud-value {
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.md-hud-lamps {
+  display: flex;
+  gap: 5px;
+  margin-top: 5px;
+}
+
+.md-hud-lamp {
+  padding: 1px 5px;
+  border-radius: 4px;
+  font: 600 9px var(--md-font-mono);
+  color: #a7adb6;
+  background: rgba(30, 40, 55, 0.06);
+}
+
+.md-hud-lamp.on {
+  color: #fff;
+  background: #2f86ff;
+}
+
+.md-hud-lamp.brake.on {
+  background: #e5392b;
+}
+
+.md-hud-lamp.amber.on {
+  background: #f0a020;
+}
+
+.md-hud-sim {
+  position: absolute;
+  left: 50%;
+  top: 10px;
+  transform: translateX(-50%);
+  padding: 3px 9px;
+  border-radius: 10px;
+  font: 500 10px var(--md-font-mono);
+  color: #4a5361;
+  background: rgba(255, 255, 255, 0.7);
+  white-space: nowrap;
 }

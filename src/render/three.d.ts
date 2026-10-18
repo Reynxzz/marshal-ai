@@ -49,4 +49,7 @@ declare module 'three' {
   export const ExtrudeGeometry: any
   export const CircleGeometry: any
   export const Float32BufferAttribute: any
+  export type Points = any
+  export const Points: any
+  export const PointsMaterial: any
 }
