@@ -6,7 +6,7 @@
 
 import { offlineLamp, UNVERIFIED } from '../../serverFns/logic'
 import { fitFrames } from '../frames'
-import { patchCar } from '../state'
+import { colourToRgb, patchCar } from '../state'
 import type { TrackStepEvent } from '../types'
 import type { FlowContext, MissionRecord } from './context'
 
@@ -100,12 +100,17 @@ export function handleReworkDone(ctx: FlowContext, vin: string): void {
   const car = ctx.state().cars[vin]
   if (!car) return
   ctx.update((state) => patchCar(state, vin, { location: 'rework.electrical' }))
-  if (car.reworkReason !== 'lamp') {
-    const why =
-      car.reworkReason === 'inspection'
-        ? 'Held in the rework bay: AI check unavailable, a person inspects the car'
-        : 'Held in the rework bay for body / paint repair'
+  if (car.reworkReason === 'inspection') {
+    const why = 'Held in the rework bay: AI check unavailable, a person inspects the car'
     ctx.decide(vin, 'PLANT', why, { exception: true })
+    return
+  }
+  if (car.reworkReason === 'gate') {
+    // The paint bay: repainted in the build-sheet colour, then back through the gate for a fresh
+    // check (it used to stay in the bay for the rest of the shift).
+    ctx.repaints.set(vin, ctx.now() + REPAINT_S)
+    const minutes = Math.round(REPAINT_S / 60)
+    ctx.decide(vin, 'PLANT', `In the paint bay: repainting ${car.expectedColour} (${minutes} min)`)
     return
   }
 
@@ -119,4 +124,26 @@ export function handleReworkDone(ctx: FlowContext, vin: string): void {
   )
   ctx.update((state) => patchCar(state, vin, { stage: 'test_track' }))
   ctx.go(vin, ['test_track'], 'track', { routine: 'R-12', routine_steps: steps })
+}
+
+/** Sim seconds the paint bay takes to repaint a wrong-colour car (compressed for the demo). */
+export const REPAINT_S = 120
+
+/**
+ * Sends every repainted car back to the gate: called on each orchestrator tick.
+ * @param ctx - Flow context.
+ */
+export function completeRepaints(ctx: FlowContext): void {
+  if (ctx.repaints.size === 0) return
+  const now = ctx.now()
+  for (const [vin, readyAt] of [...ctx.repaints]) {
+    if (now < readyAt) continue
+    ctx.repaints.delete(vin)
+    const car = ctx.state().cars[vin]
+    if (!car || car.stage !== 'rework') continue
+    ctx.ds.repaint?.(vin, colourToRgb(car.expectedColour))
+    ctx.update((state) => patchCar(state, vin, { colour: car.expectedColour, stage: 'to_gate' }))
+    ctx.decide(vin, 'PLANT', `Repainted ${car.expectedColour}; back to the gate for a re-check`)
+    ctx.go(vin, ['inspection_gate'], 'gate')
+  }
 }

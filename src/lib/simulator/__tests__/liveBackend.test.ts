@@ -79,8 +79,9 @@ describe('live backend', () => {
       await flush()
     }
     const { cars, layout } = useShiftStore.getState().shift
-    expect(cars.P003.stage).toBe('rework')
-    for (const vin of ['P001', 'P002', 'P004', 'P005']) {
+    // P003 failed the gate on colour: repainted, re-checked, then parked like the rest.
+    expect(cars.P003.colour).toBe(cars.P003.expectedColour)
+    for (const vin of ['P001', 'P002', 'P003', 'P004', 'P005']) {
       expect(cars[vin].stage).toBe('parked')
       const slot = cars[vin].slot ?? ''
       expect(layout[slot]).toBe(vin)

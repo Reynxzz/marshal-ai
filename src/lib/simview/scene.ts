@@ -434,6 +434,14 @@ export function createPlantScene(layout: PlantLayout, options: PlantSceneOptions
       }
       if (dressed || tesla) {
         placeEngineCar(entry.group, car)
+        // The camera's real car takes its paint from the engine each frame (a repaint shows).
+        const body = (
+          entry.group.userData.parts as { body?: THREE.MeshStandardMaterial } | undefined
+        )?.body
+        if (dressed && body && car.colour && body.userData.paint !== car.colour) {
+          body.color.set(car.colour)
+          body.userData.paint = car.colour
+        }
         const look = options.carLook?.(car.vin)
         setCarLamps(entry.group, look?.lamps ?? OFF_LAMPS)
         setCarFaults(entry.group, new Set(look?.faults ?? []))

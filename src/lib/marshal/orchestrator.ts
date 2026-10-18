@@ -8,7 +8,7 @@ import { type EventBus, type MarshalEventMap, bus as sharedBus } from './eventBu
 import { autoChooseOpen, chooseAssist, handleAssistRequest } from './flows/assist'
 import type { FlowContext, MissionPurpose, MissionRecord, TruthHintPort } from './flows/context'
 import { handleGateArrival } from './flows/gate'
-import { handleReworkDone, handleTrackStep } from './flows/lamp'
+import { completeRepaints, handleReworkDone, handleTrackStep } from './flows/lamp'
 import { runParking } from './flows/parking'
 import { handleReportArrival, retryHeldAtReport } from './flows/route'
 import {
@@ -239,12 +239,14 @@ export function createOrchestrator(options: OrchestratorOptions): Orchestrator {
     },
     parkingAttempts: new Map(),
     parkingCases: new Set(),
+    repaints: new Map(),
     yard: { queue: [], active: null },
   }
 
   const tickTime = () => {
     const now = clock()
     if (now !== state.simTime) update((current) => ({ ...current, simTime: now }))
+    completeRepaints(ctx)
   }
 
   const onStatus = (event: StatusEvent) => {

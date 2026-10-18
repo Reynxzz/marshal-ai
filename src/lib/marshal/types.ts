@@ -112,6 +112,10 @@ export interface DrivingSystem {
   despawn(vin: string): void
   setFault(vin: string, faults: Set<'headlights' | 'brake_lights' | 'indicators'>): void
   repair(vin: string, defects: string[]): void
+  /** The yard crew: a car set down on a named point, stopped, its mission ended. */
+  place?(vin: string, at: string): void
+  /** The paint bay: a wrong-colour car painted its build-sheet colour. */
+  repaint?(vin: string, colour: [number, number, number]): void
   getPositionXY(vin: string): { x: number; y: number; yaw: number }
   getTransform(point: string): { x: number; y: number; yaw: number }
   /** base64 JPEG[]. */

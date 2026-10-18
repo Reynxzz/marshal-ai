@@ -504,6 +504,30 @@ export class ScriptedDrivingSystem
   }
 
   /**
+   * Sets a car down on a named point, stopped and without a mission (the yard crew parking a car
+   * by hand when the planner finds no way into its slot).
+   * @param vin - Car VIN.
+   * @param at - Named point, e.g. 'yard.Y5'.
+   */
+  place(vin: string, at: string): void {
+    const car = this.cars.get(vin)
+    if (!car) return
+    const spot = point(at)
+    Object.assign(car, { x: spot.x, y: spot.y, yaw: spot.yaw, speed_kmh: 0, mission: null })
+    Object.assign(car, { location: at, stoppedForAssist: false, waitingCase: null })
+  }
+
+  /**
+   * Paints a car another colour (the paint bay's repair of a wrong colour).
+   * @param vin - Car VIN.
+   * @param colour - New RGB colour (0-1).
+   */
+  repaint(vin: string, colour: [number, number, number]): void {
+    const car = this.cars.get(vin)
+    if (car) car.rgb = [...colour] as [number, number, number]
+  }
+
+  /**
    * Clears the listed faults.
    * @param vin - Car VIN.
    * @param defects - Fault names to clear.
@@ -759,7 +783,16 @@ export class ScriptedDrivingSystem
     this.clock += dt
     for (const car of [...this.cars.values()]) this.tickCar(car, dt)
     this.untangle()
+    // Cars with no mission report once a second too, as the three.js engine's do: the
+    // orchestrator's clock (the paint bay's timer) runs on status events.
+    this.idleClock += dt
+    if (this.idleClock + 1e-9 >= 1) {
+      this.idleClock = 0
+      for (const car of this.cars.values()) if (!car.mission) this.emitStatus(car)
+    }
   }
+
+  private idleClock = 0
 
   /**
    * Breaks waiting cycles (two cars head-on on a two-way road, or cars that each block the

@@ -97,6 +97,8 @@ export type FlowContext = {
   parkingAttempts: Map<string, number>
   /** Assist cases raised by the parking flow. */
   parkingCases: Set<string>
+  /** Cars in the paint bay: VIN -> sim time the repaint is done. */
+  repaints: Map<string, number>
   /** Yard re-plan dispatch queue. */
   yard: { queue: OrderedMove[]; active: OrderedMove | null }
 }

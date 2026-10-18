@@ -227,7 +227,8 @@ const DONE_STAGES: ReadonlySet<CarStage> = new Set(['parked', 'held', 'shipped']
 
 function carDone(car: CarState): boolean {
   if (DONE_STAGES.has(car.stage) || car.held !== undefined) return true
-  return car.stage === 'rework' && car.reworkReason !== 'lamp'
+  // Held for a person (the AI check was unavailable); a wrong colour is repainted and re-checked.
+  return car.stage === 'rework' && car.reworkReason === 'inspection'
 }
 
 /**

@@ -136,7 +136,7 @@ describe('fail-closed offline checks and shift completion', () => {
 })
 
 describe('Scene A: route choice and gate failure', () => {
-  it('routes via lane_c around a staged hazard; wrong colour goes to rework', async () => {
+  it('routes via lane_c around a staged hazard; wrong colour is repainted, re-checked and parked', async () => {
     const { ds, orch, missionsOf, feedText } = setup()
     const hazard = stageHazard(ds, 'finishing_corner', 'forklift_unloading')
     orch.setHazard(hazard.description)
@@ -148,8 +148,7 @@ describe('Scene A: route choice and gate failure', () => {
     const done = await runUntil(
       ds,
       orch.getState,
-      (s) =>
-        s.cars['VIN-B1'].stage === 'parked' && s.cars['VIN-R1'].location === 'rework.electrical',
+      (s) => s.cars['VIN-B1'].stage === 'parked' && s.cars['VIN-R1'].stage === 'parked',
     )
     expect(done).toBe(true)
 
@@ -157,13 +156,21 @@ describe('Scene A: route choice and gate failure', () => {
     expect(yardMission?.waypoints).toEqual(['lane_c', 'yard.entry'])
     expect(feedText('VIN-B1').some((line) => line.startsWith('GEMINI Route via lane_c'))).toBe(true)
 
+    // The wrong colour: rework, the paint bay, back through the gate, then the usual way to the yard.
     const red = orch.getState().cars['VIN-R1']
-    expect(red.stage).toBe('rework')
     expect(red.reworkReason).toBe('gate')
-    expect(missionsOf('VIN-R1').at(-1)?.waypoints).toEqual(['rework.electrical'])
-    const gateFail = 'GEMINI Gate FAIL: colour_mismatch'
-    expect(feedText('VIN-R1').some((line) => line.startsWith(gateFail))).toBe(true)
-    expect(orch.getState().kpis).toMatchObject({ offLine: 2, inYard: 1, rework: 1 })
+    expect(red.colour).toBe('blue')
+    expect(missionsOf('VIN-R1').map((m) => m.waypoints[0])).toContain('rework.electrical')
+    const feed = feedText('VIN-R1')
+    const order = [
+      feed.findIndex((line) => line.startsWith('GEMINI Gate FAIL: colour_mismatch')),
+      feed.findIndex((line) => line.startsWith('PLANT In the paint bay: repainting blue')),
+      feed.findIndex((line) => line.startsWith('PLANT Repainted blue; back to the gate')),
+      feed.findIndex((line) => line.startsWith('GEMINI Gate PASS: blue as built')),
+    ]
+    expect(order.every((index) => index >= 0)).toBe(true)
+    expect([...order].sort((x, y) => x - y)).toEqual(order)
+    expect(orch.getState().kpis).toMatchObject({ offLine: 2, inYard: 2, rework: 1 })
     expect(orch.getState().progress).toBe(1)
   })
 })
