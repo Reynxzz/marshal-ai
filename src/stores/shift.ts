@@ -223,8 +223,8 @@ let skipUntil = 0
 let fired = new Set<string>()
 /** Assist case id -> prop ids to clear once the case is decided. */
 let blockerProps = new Map<string, string[]>()
-/** Assist case id -> where its box stands. */
-let blockerSpots = new Map<string, { x: number; y: number }>()
+/** Assist case id -> where its box stands and its heading direction. */
+let blockerSpots = new Map<string, { x: number; y: number; fx: number; fy: number }>()
 /** Assist case id -> sim second the case was first seen decided. */
 let blockerDecided = new Map<string, number>()
 /** Hazard index -> staged prop ids. */
@@ -341,9 +341,11 @@ function runBlockers(state: MarshalState): void {
     fired.add(case_id)
     const at = engine.getPositionXY(blocker.vin)
     const yaw = (at.yaw * Math.PI) / 180
+    const fx = Math.cos(yaw)
+    const fy = Math.sin(yaw)
     const ahead = (metres: number, side = 0) => ({
-      x: at.x + metres * Math.cos(yaw) - side * Math.sin(yaw),
-      y: at.y + metres * Math.sin(yaw) + side * Math.cos(yaw),
+      x: at.x + metres * fx - side * fy,
+      y: at.y + metres * fy + side * fx,
     })
     const ids = [`blk-${blocker.vin}-box`]
     const box = ahead(6)
@@ -354,7 +356,7 @@ function runBlockers(state: MarshalState): void {
       engine.spawnProp(ids[1], 'worker', worker.x, worker.y, at.yaw + 90)
     }
     blockerProps.set(case_id, ids)
-    blockerSpots.set(case_id, box)
+    blockerSpots.set(case_id, { x: box.x, y: box.y, fx, fy })
     engine.raiseAssist(blocker.vin, case_id, blocker.reason, [...blocker.options])
   }
   // The yard crew clears a blocker once the case is decided: after CREW_CLEAR_S when the car
@@ -367,7 +369,9 @@ function runBlockers(state: MarshalState): void {
     const spot = blockerSpots.get(case_id)
     const car = engine.getPositionXY(item.vin)
     const gone = car.x === 0 && car.y === 0 && car.yaw === 0
-    const past = !spot || gone || Math.hypot(car.x - spot.x, car.y - spot.y) > CREW_PASSED_M
+    const distance = spot ? Math.hypot(car.x - spot.x, car.y - spot.y) : 0
+    const along = spot ? (car.x - spot.x) * spot.fx + (car.y - spot.y) * spot.fy : 0
+    const past = !spot || gone || (distance > CREW_PASSED_M && along > 0)
     const waited = now - decidedAt
     const cleared =
       item.chosen === 'wait_for_removal'
@@ -376,6 +380,8 @@ function runBlockers(state: MarshalState): void {
     if (!cleared) continue
     for (const id of ids) engine.removeProp(id)
     blockerProps.delete(case_id)
+    blockerSpots.delete(case_id)
+    blockerDecided.delete(case_id)
   }
   runHazards(engine, now)
   runLateTrucks(now)
