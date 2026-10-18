@@ -77,4 +77,6 @@ extra=()
 [[ "${MARSHAL_PLANT_EVENTS:-0}" == "1" ]] && extra+=(--events)
 [[ -n "${MARSHAL_PLANT_INCIDENT_VIN:-}" ]] && extra+=(--incident-vin "$MARSHAL_PLANT_INCIDENT_VIN")
 [[ "${MARSHAL_PLANT_NO_INCIDENT:-0}" == "1" ]] && extra+=(--no-incident)
+# MARSHAL_PLANT_STAGE_HAZARD=1: and put it in the world beside the road, for the film
+[[ "${MARSHAL_PLANT_STAGE_HAZARD:-0}" != 0 ]] && extra+=(--stage-hazards)
 python3 scripts/demo_carla_plant.py --cars "$CARS" --steps "$STEPS" --wrong-colour "$WRONG" "${extra[@]}"

@@ -265,7 +265,8 @@ def main(argv: list[str] | None = None) -> None:
         from marshal_ai.config import settings
         from marshal_ai.driving.parking import GeminiParker
         from marshal_ai.llm import GeminiLLM
-        decide = GeminiParker(GeminiLLM(args.model or settings.model), args.mode).decide
+        decide = GeminiParker(GeminiLLM(args.model or settings.model, decision_model=settings.decision_model,
+                  task_models=settings.task_models), args.mode).decide
     else:
         decide = planner_decide
     chosen = [c for c in cases() if not args.only or c.name in args.only.split(",")]

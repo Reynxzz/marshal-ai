@@ -22,9 +22,25 @@ if os.getenv("MARSHAL_SYSTEM_CERTS", "1") != "0":
         pass
 
 
+def parse_task_models(text: str) -> dict[str, str]:
+    """"visual.=gemini-2.5-flash,track.step=gemini-2.5-pro" -> {"visual.": ..., "track.step": ...}"""
+    pairs = (item.split("=", 1) for item in text.split(",") if "=" in item)
+    return {k.strip(): v.strip() for k, v in pairs if k.strip() and v.strip()}
+
+
 @dataclass(frozen=True)
 class Settings:
-    model: str = field(default_factory=lambda: os.getenv("MARSHAL_MODEL", "gemini-2.5-flash"))
+    model: str = field(default_factory=lambda: os.getenv("MARSHAL_MODEL", "gemini-3.8-flash"))
+    # The model for decisions (llm.Decision), if not MARSHAL_MODEL. Gemini 3 returns no
+    # log-probabilities, so on it a decision's probability is 1 for its answer; a 2.5 model keeps
+    # honest probabilities for the lamp check, the gate's screens, routes and parking.
+    decision_model: str | None = field(default_factory=lambda: os.getenv(
+        "MARSHAL_DECISION_MODEL", "gemini-2.5-flash") or None)
+    # Tasks (or prefixes ending in ".") that go to another model than MARSHAL_MODEL, as
+    # "visual.=gemini-2.5-flash,track.=gemini-2.5-flash"; "" for none. The gate, the damage check
+    # and the lamp check stay on 2.5: more accurate and about twice as fast there (llm.py).
+    task_models: dict = field(default_factory=lambda: parse_task_models(os.getenv(
+        "MARSHAL_TASK_MODELS", "visual.=gemini-2.5-flash,track.=gemini-2.5-flash")))
     bus: str = field(default_factory=lambda: os.getenv("MARSHAL_BUS", "memory"))
     store: str = field(default_factory=lambda: os.getenv("MARSHAL_STORE", "memory"))
     driving: str = field(default_factory=lambda: os.getenv("MARSHAL_DRIVING", "fake"))

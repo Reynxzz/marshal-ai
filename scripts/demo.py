@@ -59,7 +59,8 @@ async def main(live: bool) -> None:
     settings = Settings(bus="memory", store="memory", driving="fake", llm="offline", lab="sim")
     llm = offline_llm()
     if live:
-        llm = RoutedLLM(default=GeminiLLM(settings.model),
+        llm = RoutedLLM(default=GeminiLLM(settings.model, decision_model=settings.decision_model,
+                  task_models=settings.task_models),
                         routes={"visual.": llm, "track.": llm, "assist.": llm})
     rt = build_runtime(settings, llm=llm)
     app = MarshalApp(rt)

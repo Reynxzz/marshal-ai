@@ -25,6 +25,7 @@ import json
 import logging
 import threading
 import urllib.error
+import urllib.parse
 import urllib.request
 from collections import deque
 from dataclasses import dataclass, field
@@ -248,8 +249,45 @@ def snapshot(app: Any) -> dict:
         "runs": rows(TestRun, ("run_id", "scenario_id", "variant", "passed")),
         "pending": [{"id": p.proposal_id, "kind": p.kind, "summary": p.summary}
                     for p in rt.pending()],
+        "open_cases": open_cases(app),
         "kpis": kpis,
     }
+
+
+def open_cases(app: Any) -> list[dict]:
+    """Assistance cases still waiting for a person, with Gemini's card, for the approval pane."""
+    try:
+        cases = app.assistance.open_cases()
+    except Exception:
+        return []
+    return [{"case_id": c.case_id, "vin": c.vin, "location": c.location, "situation": c.situation,
+             "options": c.options, "ranking": c.ranking, "recommended": c.recommended,
+             "confidence": c.confidence, "people": c.people_or_moving_equipment,
+             "objects": c.objects, "escalated": c.escalated} for c in cases]
+
+
+async def apply_decision(app: Any, body: dict) -> dict:
+    """A supervisor's decision from the dashboard, through the same calls the flows use.
+
+    {"case_id", "choice", "by"} resolves an assistance case; {"proposal_id", "approve", "by"}
+    approves or rejects a pending proposal of any kind (rework, replan, review).
+    """
+    by = str(body.get("by") or "").strip()
+    if not by:
+        raise ValueError("who is deciding? 'by' is required")
+    if body.get("case_id"):
+        case = await app.assistance.decide(str(body["case_id"]), str(body["choice"]), by)
+        return {"case_id": case.case_id, "choice": case.choice, "resolved_by": case.resolved_by}
+    pid, approve = str(body["proposal_id"]), bool(body.get("approve"))
+    kind = next((p.kind for p in app.rt.pending() if p.proposal_id == pid), None)
+    if kind == "rework":
+        return await app.router.decide(pid, confirm=approve, by=by)
+    if kind == "replan":
+        return await app.yard.decide(pid, approve=approve, by=by)
+    if kind == "review":
+        result = await app.visual.decide_review(pid, confirm_defect=approve, by=by)
+        return {"proposal_id": pid, "verdict": result.verdict.value}
+    raise KeyError(f"no pending proposal {pid}")
 
 
 # --------------------------------------------------------------------------- #
@@ -282,6 +320,22 @@ th,td{text-align:left;padding:5px 12px;border-bottom:1px solid #1d2126}
 th{color:#6b7280;font-weight:500}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:0}
 .empty{padding:10px 12px;color:#6b7280;font-size:12px}
+.case{padding:12px;border-bottom:1px solid #1d2126}
+.case .hd{font-weight:600}.case .sit{color:#c9cdd2;margin:6px 0}
+.frame{position:relative;margin:8px 0}.frame img{border-radius:6px}
+.box{position:absolute;border:2px solid #e0b341;border-radius:2px}
+.box.person{border-color:#f2645a}.box span{position:absolute;top:-18px;left:0;font-size:11px;
+  background:#000a;padding:0 4px;white-space:nowrap}
+.opts{display:flex;flex-direction:column;gap:6px;margin-top:8px}
+.opt{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 10px;
+  border:1px solid #2c3138;border-radius:6px;background:#1b2026;color:#e6e8ea;cursor:pointer;text-align:left}
+.opt.rec{border-color:#5ac27a;background:#18261d}.opt small{color:#8b9199}
+.opt:hover{border-color:#8b9199}.pill{font-size:11px;padding:1px 6px;border-radius:9px;background:#2c3138}
+.pill.hi{background:#4a1f1d;color:#f2a49e}.pill.lo{background:#1e3a26;color:#8fe0a5}
+.who{display:flex;gap:6px;align-items:center;padding:8px 12px;color:#8b9199;font-size:12px}
+.who input{background:#101215;border:1px solid #2c3138;color:#e6e8ea;border-radius:4px;padding:3px 6px}
+.prop{display:flex;justify-content:space-between;gap:8px;padding:8px 12px;border-bottom:1px solid #1d2126}
+.prop button{margin-left:6px}
 </style></head><body>
 <header><b>Marshal</b><span id="meta">connecting…</span></header>
 <main>
@@ -290,7 +344,9 @@ th{color:#6b7280;font-weight:500}
   <section><h2>Cars</h2><div id="cars"></div></section>
   <section><h2>Test lab</h2><div id="lab"></div></section>
   <section><h2>Reports and rework</h2><div id="reports"></div></section>
-  <section><h2>Waiting for a human</h2><div id="pending"></div></section>
+  <section><h2>Waiting for a human</h2>
+    <div class="who">deciding as <input id="by" value="supervisor-ana" size="16"></div>
+    <div id="cases"></div><div id="pending"></div></section>
 </main>
 <script>
 const feed = document.getElementById('feed');
@@ -313,6 +369,36 @@ function table(rows,cols){
 const es=new EventSource('/events');
 es.onmessage=ev=>addEvents(JSON.parse(ev.data));
 es.onerror=()=>{document.getElementById('meta').textContent='event stream lost — reload'};
+function caseCard(c){
+  const risk={};for(const r of (c.ranking||[]))risk[r.option]=r;
+  const objs=(c.objects||[]).filter(o=>o.box_2d);
+  const frame=objs.length?objs[0].frame:0;
+  const boxes=objs.filter(o=>o.frame===frame).map(o=>{const [y0,x0,y1,x1]=o.box_2d;
+    return '<div class="box '+esc(o.kind)+'" style="left:'+x0/10+'%;top:'+y0/10+'%;width:'+(x1-x0)/10+
+      '%;height:'+(y1-y0)/10+'%"><span>'+esc(o.label)+(o.distance_m?' · '+o.distance_m+' m':'')+'</span></div>'}).join('');
+  const opts=(c.options||[]).map(o=>{const r=risk[o]||{};const rec=o===c.recommended;
+    return '<button class="opt'+(rec?' rec':'')+'" data-case="'+esc(c.case_id)+'" data-choice="'+esc(o)+'">'+
+      '<span>'+esc(o.replace(/_/g,' '))+(rec?' <small>· Gemini recommends'+(c.confidence!=null?' ('+c.confidence.toFixed(2)+')':'')+'</small>':'')+
+      '</span><span class="pill '+(r.risk==='high'?'hi':r.risk==='low'?'lo':'')+'">'+esc(r.risk||'')+' risk</span></button>'}).join('');
+  return '<div class="case"><div class="hd">'+esc(c.case_id)+' · '+esc(c.vin)+' · '+esc(c.location)+
+    (c.escalated?' · <span class="pill hi">escalated</span>':'')+'</div>'+
+    '<div class="frame"><img src="/case/'+encodeURIComponent(c.case_id)+'/'+frame+'.jpg" alt="">'+boxes+'</div>'+
+    '<div class="sit">'+esc(c.situation)+'</div>'+
+    (c.people?'<span class="pill hi">people or moving equipment</span>':'')+
+    '<div class="opts">'+opts+'</div></div>';
+}
+document.addEventListener('click',ev=>{
+  const b=ev.target.closest('button[data-case],button[data-proposal]');
+  if(!b) return;
+  decide(b.dataset.case?{case_id:b.dataset.case,choice:b.dataset.choice}
+                       :{proposal_id:b.dataset.proposal,approve:b.dataset.approve==='1'});
+});
+async function decide(body){
+  body.by=document.getElementById('by').value;
+  const r=await fetch('/decide',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  if(!r.ok) alert(await r.text());
+  poll();
+}
 async function poll(){
   try{
     const s=await (await fetch('/state')).json();
@@ -323,7 +409,12 @@ async function poll(){
       '<div class="grid2"><div>'+table(s.scenarios,['id','status'])+'</div>'+
       '<div>'+table(s.runs,['variant','passed'])+'</div></div>';
     document.getElementById('reports').innerHTML=table(s.reports,['vin','verdict','rework_bay']);
-    document.getElementById('pending').innerHTML=table(s.pending,['kind','summary']);
+    document.getElementById('cases').innerHTML=(s.open_cases||[]).map(caseCard).join('');
+    document.getElementById('pending').innerHTML=(s.pending||[]).map(p=>
+      '<div class="prop"><div><b>'+esc(p.kind)+'</b> '+esc(p.summary)+'</div><div>'+
+      '<button data-proposal="'+esc(p.id)+'" data-approve="1">Approve</button>'+
+      '<button data-proposal="'+esc(p.id)+'" data-approve="0">Reject</button></div></div>').join('')
+      || ((s.open_cases||[]).length?'':'<div class="empty">nothing waiting</div>');
   }catch(e){}
   setTimeout(poll,2000);
 }
@@ -340,6 +431,7 @@ class DashboardServer(ThreadingHTTPServer):
         self.app = app
         self.events = events
         self.camera_url = camera_url
+        self.loop = None                 # the asyncio loop the plant runs on, for decisions
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -366,8 +458,50 @@ class Handler(BaseHTTPRequestHandler):
             self._events()
         elif path in ("/camera.mjpg", "/snapshot.jpg"):
             self._camera(path)
+        elif path.startswith("/case/") and path.endswith(".jpg"):
+            self._case_frame(path)
         else:
             self.send_error(HTTPStatus.NOT_FOUND)
+
+    def do_POST(self) -> None:                   # noqa: N802
+        """A supervisor's decision: run it on the app's loop, as the flows would."""
+        import asyncio
+
+        if self.path.split("?", 1)[0] != "/decide":
+            self.send_error(HTTPStatus.NOT_FOUND)
+            return
+        try:
+            body = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}")
+            loop = getattr(self.server, "loop", None)
+            if loop is None:
+                raise RuntimeError("no plant loop to decide on (start with --demo or --run-plant)")
+            result = asyncio.run_coroutine_threadsafe(apply_decision(self.server.app, body), loop).result(30)
+        except (KeyError, ValueError, RuntimeError) as exc:
+            msg = str(exc).encode()
+            self.send_response(HTTPStatus.BAD_REQUEST)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Content-Length", str(len(msg)))
+            self.end_headers()
+            self.wfile.write(msg)
+            return
+        what = (f"chose {body.get('choice')} for {body.get('case_id')}" if body.get("case_id")
+                else f"{'approved' if body.get('approve') else 'rejected'} {body.get('proposal_id')}")
+        self.server.events.publish(2 if body.get("case_id") else 5, "Dashboard", f"{body.get('by')} {what}",
+                                   _fmt(result), "good")
+        self._bytes(json.dumps(result, default=str).encode(), "application/json")
+
+    def _case_frame(self, path: str) -> None:
+        """A frame of an assistance case's clip, from the driving system, for the approval pane."""
+        try:
+            _, _, case_id, name = path.split("/", 3)
+            media = self.server.app.rt.driving.assist_media(urllib.parse.unquote(case_id))
+            data = media[int(name[:-4])].data
+        except Exception:
+            data = None
+        if not data:
+            self.send_error(HTTPStatus.NOT_FOUND)
+            return
+        self._bytes(data, "image/jpeg")
 
     def _bytes(self, body: bytes, content_type: str) -> None:
         self.send_response(HTTPStatus.OK)
@@ -444,6 +578,8 @@ def parser() -> argparse.ArgumentParser:
                          "MARSHAL_BUS=gcp the flows can run anywhere.")
     ap.add_argument("--plant-speed", type=float, default=1.0,
                     help="simulated seconds per real second when --run-plant is set")
+    ap.add_argument("--manual", action="store_true",
+                    help="with --demo: leave each assistance case for a person to decide on the page")
     ap.add_argument("--demo", action="store_true",
                     help="also drive the beats that need a trigger (stuck car, scenario "
                          "generation, adversarial search, release gate) so all seven flows "
@@ -451,7 +587,7 @@ def parser() -> argparse.ArgumentParser:
     return ap
 
 
-async def _demo_round(app: Any, events: EventLog) -> None:
+async def _demo_round(app: Any, events: EventLog, manual: bool = False) -> None:
     """The scripted beats from scripts/demo.py, so flows 2, 6 and 7 also show up."""
     import asyncio
 
@@ -479,9 +615,15 @@ async def _demo_round(app: Any, events: EventLog) -> None:
     if case is not None:
         events.publish(2, "Assistance desk", f"Card for {vin}: {case.situation}",
                        f"recommended {case.recommended} ({case.confidence:.0%})", "warn")
-        await app.assistance.decide(case_id, case.recommended, supervisor)
-        events.publish(2, "Assistance desk", f"{supervisor} chose {case.recommended}",
-                       "case sent to the test lab", "good")
+        if manual:                       # a person decides on the dashboard; wait for them
+            for _ in range(600):
+                if rt.store.get(AssistanceCase, case_id).resolved_by:
+                    break
+                await asyncio.sleep(1.0)
+        else:
+            await app.assistance.decide(case_id, case.recommended, supervisor)
+            events.publish(2, "Assistance desk", f"{supervisor} chose {case.recommended}",
+                           "case sent to the test lab", "good")
 
     # flow 6: plain language becomes a validated scenario
     request = ("A worker steps out from behind a parked forklift at dusk while a car turns "
@@ -518,17 +660,20 @@ async def _demo_round(app: Any, events: EventLog) -> None:
                        else "good")
 
 
-def _start_demo(app: Any, events: EventLog, period_s: float = 120.0) -> None:
+def _start_demo(app: Any, events: EventLog, period_s: float = 120.0, manual: bool = False,
+                server: Any = None) -> None:
     import asyncio
 
     def run() -> None:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
+        if server is not None:
+            server.loop = loop           # decisions from the dashboard run here, with the demo
 
         async def pump() -> None:
             while True:
                 try:
-                    await _demo_round(app, events)
+                    await _demo_round(app, events, manual)
                 except Exception as exc:
                     events.publish(0, "dashboard", "Demo round failed", str(exc)[:200], "bad")
                 await asyncio.sleep(period_s)
@@ -541,13 +686,15 @@ def _start_demo(app: Any, events: EventLog, period_s: float = 120.0) -> None:
     threading.Thread(target=run, name="marshal-demo", daemon=True).start()
 
 
-def _start_plant(app: Any, events: EventLog, speed: float) -> None:
+def _start_plant(app: Any, events: EventLog, speed: float, server: Any = None) -> None:
     """Drive the fake plant on a background loop so flow 1 keeps producing decisions."""
     import asyncio
 
     def run() -> None:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
+        if server is not None and getattr(server, "loop", None) is None:
+            server.loop = loop
 
         async def pump() -> None:
             while True:
@@ -579,6 +726,7 @@ def main(argv: list[str] | None = None) -> int:
 
     events = EventLog()
     attach(app, events)
+    server = DashboardServer((args.bind, args.http_port), Handler, app, events, args.camera_url)
     events.publish(0, "dashboard", "Dashboard started",
                    f"llm={app.rt.settings.llm} driving={app.rt.settings.driving} "
                    f"store={app.rt.settings.store} bus={app.rt.settings.bus}")
@@ -589,7 +737,7 @@ def main(argv: list[str] | None = None) -> int:
                            f"--run-plant drives the fake plant only, "
                            f"driving={app.rt.settings.driving}", "warn")
         else:
-            _start_plant(app, events, args.plant_speed)
+            _start_plant(app, events, args.plant_speed, server)
             events.publish(0, "dashboard", "Plant running",
                            f"{args.plant_speed}x simulated time")
     elif app.rt.settings.bus == "memory":
@@ -602,11 +750,10 @@ def main(argv: list[str] | None = None) -> int:
             events.publish(0, "dashboard", "Demo skipped",
                            "--demo drives the fake plant only", "warn")
         else:
-            _start_demo(app, events)
+            _start_demo(app, events, manual=args.manual, server=server)
             events.publish(0, "dashboard", "Demo loop running",
                            "stuck car, scenario generation, adversarial search, release gate")
 
-    server = DashboardServer((args.bind, args.http_port), Handler, app, events, args.camera_url)
     log.info("dashboard on http://%s:%d (camera proxied from %s)",
              args.bind, args.http_port, args.camera_url)
     try:

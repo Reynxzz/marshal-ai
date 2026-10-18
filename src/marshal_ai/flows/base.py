@@ -54,7 +54,7 @@ async def ask(rt: "Runtime", task: str, prompt: str, schema: type[T],
         await asyncio.wait({other})
         return other.result()
     for other in pending:                               # its thread runs on; the answer is not needed
-        other.add_done_callback(lambda t: t.exception())
+        other.add_done_callback(lambda t: t.cancelled() or t.exception())
     return winner.result()
 
 

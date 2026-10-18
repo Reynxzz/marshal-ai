@@ -48,6 +48,8 @@ def main(argv: list[str] | None = None) -> int:
         # additional_data=True also keeps lights and kinematics, so headlights show in the replay.
         # MARSHAL_RECORD_LIGHTS=0 leaves them out: on a fresh host, recording the dressed plant world
         # (about 700 props) with them segfaulted the server in 3 of 4 starts, and never without.
+        # Starting the recorder before the dressing avoids the crash, but the replayer then stalls
+        # recreating the dressing's meshes and never spawns the cars, so the films come out empty.
         client.start_recorder(path, os.environ.get("MARSHAL_RECORD_LIGHTS", "1") != "0")
         # recording time 0 on the simulator's clock, so decisions noted during the run can be
         # placed in the film (scripts/film_notes.py)

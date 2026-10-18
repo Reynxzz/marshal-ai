@@ -1219,11 +1219,15 @@ class CarlaDrivingSystem:
         return pose, obstacles
 
     def _still_moving(self, actor) -> bool:
-        """A car that will be somewhere else soon: driving, or one of ours still parking or on a mission."""
+        """A car that will be out of the way soon: driving now, or one of ours still parking.
+
+        Not one that merely has somewhere to go: VIN-P5, queued in the lane behind VIN-P4 for a later
+        slot, counted as moving, and P4 waited ten times for a car that was itself waiting for P4.
+        """
         if not actor.type_id.startswith("vehicle."):
             return False
         other = next((o for o in self.vehicles.values() if o.actor.id == actor.id), None)
-        if other is not None and (other.parking is not None or other.remaining):
+        if other is not None and other.parking is not None:
             return True
         velocity = actor.get_velocity()
         return math.hypot(velocity.x, velocity.y) > 0.3

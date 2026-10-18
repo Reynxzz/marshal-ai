@@ -56,6 +56,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--limit", type=int, default=None, help="only the first N cases of each flow")
     ap.add_argument("--runs", type=int, default=3, help="runs per case")
     ap.add_argument("--model", default=None, help="Gemini model (default: MARSHAL_MODEL)")
+    ap.add_argument("--decision-model", default=None,
+                    help="model for decisions (default: MARSHAL_DECISION_MODEL, else --model)")
     ap.add_argument("--thinking-budget", type=int, default=None,
                     help="tokens the model may think for (default: the model's own)")
     ap.add_argument("--media-resolution", choices=("low", "medium", "high"), default=None,
@@ -78,10 +80,15 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  {flow} {case_id} run {run}: {answer} ({outcome.get('seconds', '-')} s)",
               file=sys.stderr, flush=True)
 
-    llm = GeminiLLM(model, thinking_budget=args.thinking_budget, media_resolution=args.media_resolution)
+    # --model alone measures that one model on everything; without it, the configured mix
+    decision_model = args.decision_model or (None if args.model else settings.decision_model)
+    task_models = {} if args.model else settings.task_models
+    llm = GeminiLLM(model, thinking_budget=args.thinking_budget, media_resolution=args.media_resolution,
+                    decision_model=decision_model, task_models=task_models)
     report = asyncio.run(evaluate(dataset, base, llm, flows, args.runs,
                                   progress=progress))
-    report.update(model=model, thinking_budget=args.thinking_budget, commit=_commit(),
+    report.update(model=model, decision_model=decision_model or model, task_models=task_models,
+                  thinking_budget=args.thinking_budget, commit=_commit(),
                   media_resolution=args.media_resolution)
     args.out.mkdir(parents=True, exist_ok=True)
     out = args.out / f"{dataset.name}-{datetime.now():%Y%m%d-%H%M%S}.json"

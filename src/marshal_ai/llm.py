@@ -109,6 +109,30 @@ TASK_SINGLE_IMAGE_RESOLUTION = {"track.step": "high", "track.decide": "high"}
 # experiments: in the moves mode, 1024 tokens made it slower (3.5 s a move) and no better.
 DECISION_THINKING = {"drive.park": int(__import__("os").getenv("MARSHAL_PARK_THINKING", "0"))}
 
+# Gemini 3 models on Vertex AI are served from the global endpoint only (gemini-3.8-flash: 404 in
+# us-central1, 2026-10-17), and they return no log-probabilities (400 "Logprobs is not supported
+# for this model"). A decision on such a model is its answer alone, at probability 1, unless
+# MARSHAL_DECISION_MODEL sends decisions to a model that has them.
+#
+# Marshal mixes the two (config.Settings, 2026-10-17). gemini-3.8-flash answers the reasoning tasks -
+# the assistance card, reports, scenarios, the test lab - and boxed the object on v7-assist at IoU
+# 0.95, first-try scenarios 1.0 (from 0.75). gemini-2.5-flash keeps the gate, the damage check, the
+# lamp check and every decision: on 3.8 the gate fell to 0.84 accuracy with 15% false alarms (dents
+# seen on clean grey cars) at 13 s median against 5 s, damage found 93% -> 83%, and a decision has
+# no probability to hold back a doubtful car with. 3.8 always thinks (budget 0 still thinks ~50
+# tokens; thinking_level "minimal" is refused, "low" was slower than the budgets here), about 3 s a
+# call at least against 0.8 s for 2.5. Every Gemini 3 model tried refuses logprobs.
+def _location(model: str) -> str | None:
+    """Vertex AI location for this model: MARSHAL_GEMINI_LOCATION, else global for Gemini 3, else
+    GOOGLE_CLOUD_LOCATION (the client's own default)."""
+    import os
+    return os.getenv("MARSHAL_GEMINI_LOCATION") or ("global" if model.startswith("gemini-3") else None)
+
+
+def has_logprobs(model: str) -> bool:
+    return not model.startswith("gemini-3")
+
+
 TASK_THINKING_BUDGET = {"assist.locate": 0, "assist.assess": 0, "visual.defects": GATE_THINKING,
                         "visual.variant": GATE_THINKING, "visual.verify": GATE_THINKING}
 
@@ -117,10 +141,15 @@ class GeminiLLM:
     """google-genai client; reads Vertex AI or API key settings from the environment."""
 
     def __init__(self, model: str, temperature: float = 0.0, seed: int | None = 7,
-                 thinking_budget: int | None = None, media_resolution: str | None = None):
+                 thinking_budget: int | None = None, media_resolution: str | None = None,
+                 decision_model: str | None = None, task_models: dict[str, str] | None = None):
         # temperature 0 and a fixed seed: the same plant situation gets (nearly) the same answer,
         # so demos and release decisions are repeatable
         self.model = model
+        # the model that answers decisions (llm.Decision); None: the same model
+        self.decision_model = decision_model or model
+        # task name or prefix ("visual.") -> the model for those tasks; the longest match wins
+        self.task_models = dict(task_models or {})
         self.temperature = temperature
         self.seed = seed
         # None leaves the model's own default. Flash thinks by default and flash-lite does not;
@@ -132,18 +161,27 @@ class GeminiLLM:
 
     @property
     def client(self):
-        """One client per thread.
+        return self.client_for(self.model)
+
+    def model_for(self, task: str) -> str:
+        """The model a (non-decision) task goes to: a task_models entry, else the client's model."""
+        hits = [k for k in self.task_models if task == k or (k.endswith(".") and task.startswith(k))]
+        return self.task_models[max(hits, key=len)] if hits else self.model
+
+    def client_for(self, model: str):
+        """One client per thread and location.
 
         `ask` runs each call with asyncio.to_thread, and flow 3 issues five at once (four views
         plus the variant check). Sharing a single google-genai client across those threads ended
         with "Cannot send a request, as the client has been closed" - its underlying httpx client
         is not safe to share that way. A client per thread costs little and removes the race.
         """
-        client = getattr(self._local, "client", None)
-        if client is None:
+        clients = self._local.__dict__.setdefault("clients", {})
+        location = _location(model)
+        if location not in clients:
             from google import genai
-            client = self._local.client = genai.Client()
-        return client
+            clients[location] = genai.Client(**({"location": location} if location else {}))
+        return clients[location]
 
     # No lock: flow 3's five questions (four views and the variant check) run at once, so the gate
     # takes about its slowest call rather than their sum - 12 s instead of 33 s on
@@ -188,8 +226,9 @@ class GeminiLLM:
             media_resolution=(getattr(types.MediaResolution, f"MEDIA_RESOLUTION_{resolution.upper()}")
                               if resolution else None),
         )
-        response = self.client.models.generate_content(
-            model=self.model,
+        model = self.model_for(task)
+        response = self.client_for(model).models.generate_content(
+            model=model,
             contents=[types.Content(role="user", parts=parts)],
             config=config,
         )
@@ -220,12 +259,40 @@ class GeminiLLM:
         return parts
 
     def _decide(self, task, prompt, schema, media, system):
-        """One option number back, constrained to the options; probabilities from its logprobs."""
+        """One option number back, constrained to the options; probabilities from its logprobs.
+
+        With logprobs the question is asked once per rotation of the option order, all at once, and
+        the probabilities averaged (the L0 idea in nokia-applied-research/AnyJev): a model leans
+        towards whichever option is listed first or numbered 1, and each option taking each place
+        cancels that lean. MARSHAL_DECISION_ROTATIONS caps the rotations; off (1) by default. On
+        gemini-2.5-flash, 2026-10-17, with up to 4: the gate kept its answers (v6-gate 0.977, no false
+        alarm) at 11.6 s median against about 5 s, as each screen became two calls in flight; route
+        choice fell from 18 to 16 of 20 ("people where both ways meet" went to p=0.64 and the wrong
+        way); the lamp check left fewer cars unsure (13% against 23%) but failed a healthy one once;
+        parking was unchanged (8 of 12). Without logprobs each rotation would answer at probability
+        1, so it is asked once.
+        """
+        options = schema.OPTIONS
+        model = self.decision_model
+        n = len(options)
+        rotations = rotation_shifts(n, decision_rotations()) if has_logprobs(model) else [0]
+        if len(rotations) == 1:
+            return schema(**self._decide_once(task, prompt, options, rotations[0], media, system))
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=len(rotations)) as pool:
+            outs = list(pool.map(lambda k: self._decide_once(task, prompt, options, k, media, system),
+                                 rotations))
+        return schema(**average_decisions(outs, options))
+
+    def _decide_once(self, task, prompt, options, shift, media, system) -> dict:
+        """The decision with the options listed starting from options[shift]."""
         from google.genai import types
 
-        options = schema.OPTIONS
-        numbers = [str(i + 1) for i in range(len(options))]
-        listed = "\n".join(f"{n} = {o}" for n, o in zip(numbers, options))
+        model = self.decision_model
+        logprobs = has_logprobs(model)
+        order = tuple(options[(shift + i) % len(options)] for i in range(len(options)))
+        numbers = [str(i + 1) for i in range(len(order))]
+        listed = "\n".join(f"{n} = {o}" for n, o in zip(numbers, order))
         resolution = self.media_resolution if media else None
         if resolution is None and media and len(media) == 1:
             resolution = TASK_SINGLE_IMAGE_RESOLUTION.get(task)
@@ -234,8 +301,8 @@ class GeminiLLM:
             seed=self.seed,
             response_mime_type="text/x.enum",
             response_schema={"type": "STRING", "enum": numbers},
-            response_logprobs=True,
-            logprobs=min(len(numbers), 20),
+            response_logprobs=True if logprobs else None,
+            logprobs=min(len(numbers), 20) if logprobs else None,
             # a decision is the answer itself: thinking would cost the time this is meant to save,
             # except for a task that has to plan ahead (DECISION_THINKING)
             thinking_config=types.ThinkingConfig(thinking_budget=DECISION_THINKING.get(task, 0)),
@@ -243,13 +310,30 @@ class GeminiLLM:
             media_resolution=(getattr(types.MediaResolution, f"MEDIA_RESOLUTION_{resolution.upper()}")
                               if resolution else None),
         )
-        response = self.client.models.generate_content(
-            model=self.model,
+        response = self.client_for(model).models.generate_content(
+            model=model,
             contents=[types.Content(role="user", parts=self._parts(
                 f"{prompt}\n\nOptions:\n{listed}\nAnswer with the number of one option.", media))],
             config=config,
         )
-        return schema(**decision_from_response(response, numbers, options))
+        return decision_from_response(response, numbers, order)
+
+
+def decision_rotations() -> int:
+    import os
+    return max(1, int(os.getenv("MARSHAL_DECISION_ROTATIONS", "1")))
+
+
+def rotation_shifts(n: int, cap: int) -> list[int]:
+    """Which rotations of n options to ask: all of them up to the cap, else spread evenly."""
+    k = min(n, cap)
+    return sorted({round(i * n / k) % n for i in range(k)})
+
+
+def average_decisions(outs: list[dict], options: tuple[str, ...]) -> dict:
+    """The mean probability of each option over the rotations; the choice is the likeliest."""
+    probs = {o: sum(out["probs"].get(o, 0.0) for out in outs) / len(outs) for o in options}
+    return {"choice": max(options, key=lambda o: probs[o]), "probs": probs}
 
 
 def decision_from_response(response, numbers: list[str], options: tuple[str, ...]) -> dict:

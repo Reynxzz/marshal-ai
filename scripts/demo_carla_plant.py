@@ -30,6 +30,7 @@ import asyncio
 import json
 import logging
 import math
+import os
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -91,6 +92,8 @@ def parser() -> argparse.ArgumentParser:
                     help="report a hazard at a zone or map point, e.g. 'finishing_corner:forklift "
                          "unloading pallets': cars bound for the yard then ask Gemini which way to take "
                          "(flows/route.py). Repeatable.")
+    ap.add_argument("--stage-hazards", action="store_true",
+                    help="also put each hazard in the world, beside the road (a truck unloading, a worker)")
     ap.add_argument("--no-supervisor", action="store_true",
                     help="leave reviews and rework proposals pending; cars wait where they are")
     ap.add_argument("--manifest", type=Path, default=None,
@@ -189,6 +192,99 @@ def set_sun(rt, altitude: float, attempts: int = 10) -> float:
         if abs(applied - altitude) <= 0.5:
             return applied
     raise RuntimeError(f"sun altitude did not apply: asked {altitude}, server reports {applied}")
+
+
+HAZARD_ROLE = "marshal-hazard"
+
+
+def record_evidence(llm, folder) -> None:
+    """Keep what Gemini was given and what it answered, call by call, for the film's panels.
+
+    MARSHAL_EVIDENCE_DIR: each call writes NNNN-task.json (prompt, system, answer, wall time) and its
+    images beside it. Wraps the one client every flow shares, so gate, lamps, routes, parking and the
+    yard all land here. Read-only: the call and its answer are unchanged.
+    """
+    import itertools
+    import re
+    from pathlib import Path
+
+    folder = Path(folder)
+    folder.mkdir(parents=True, exist_ok=True)
+    original, counter = llm.generate, itertools.count(1)
+
+    def generate(task, prompt, schema=None, media=None, system=""):
+        result = original(task, prompt, schema, media, system)
+        try:
+            base = f"{next(counter):04d}-{task}"
+            images = []
+            for k, m in enumerate(media or []):
+                if m.data:
+                    ext = {"image/png": "png", "image/jpeg": "jpg", "video/mp4": "mp4"}.get(m.mime, "bin")
+                    name = f"{base}-{k}-{re.sub(r'[^a-z0-9]+', '-', (m.label or 'media').lower()).strip('-')}.{ext}"
+                    (folder / name).write_bytes(m.data)
+                    images.append({"file": name, "label": m.label})
+            answer = result.model_dump() if hasattr(result, "model_dump") else result
+            (folder / f"{base}.json").write_text(json.dumps(
+                {"task": task, "t": time.time(), "prompt": prompt, "system": system, "images": images,
+                 "answer": answer}, default=str, indent=1))
+        except Exception as exc:                  # the film must never stop the plant
+            logging.getLogger("marshal").warning("could not keep evidence for %s: %s", task, exc)
+        return result
+
+    llm.generate = generate
+
+
+def stage_hazard(rt, place: str) -> int:
+    """Put what a reported hazard looks like beside the road, so the film shows why cars avoid it.
+
+    A lorry unloading on the paving, boxes at its tail, a worker at the kerb and a warning sign before
+    it. Beside the lane, not in it: the rework bays are reached by CARLA's own road plan, which may
+    take this corner, and the stand-in brakes for anything in its path. CARLA has no forklift, and
+    its delivery truck (carlacola) carries a real brand's logo, so it is a plain lorry. Returns how
+    many actors went in; an earlier run's are removed first.
+    """
+    import carla
+
+    world = rt.driving.world
+    for actor in world.get_actors():
+        if actor.attributes.get("role_name") == HAZARD_ROLE:
+            actor.destroy()
+    points = sorted(p for p in rt.map.points if p == place or p.startswith(place + "."))
+    points = [p for p in points if rt.map.points[p].carla]
+    if not points:
+        return 0
+    at = rt.driving.transform(points[len(points) // 2])
+    lib = world.get_blueprint_library()
+    yaw = math.radians(at.rotation.yaw)
+    fwd, right = (math.cos(yaw), math.sin(yaw)), (-math.sin(yaw), math.cos(yaw))   # CARLA: y to the right
+
+    def where(ahead: float, side: float, z: float = 0.3, turn: float = 0.0):
+        loc = carla.Location(at.location.x + fwd[0] * ahead + right[0] * side,
+                             at.location.y + fwd[1] * ahead + right[1] * side, at.location.z + z)
+        return carla.Transform(loc, carla.Rotation(yaw=at.rotation.yaw + turn))
+
+    staged = 0
+    for blueprint, pose in (("vehicle.carlamotors.european_hgv", where(0.0, 5.5, 0.5)),
+                            ("static.prop.box01", where(-4.2, 4.6)), ("static.prop.box02", where(-4.8, 5.6)),
+                            ("static.prop.box03", where(-4.4, 6.5)), ("static.prop.creasedbox02", where(-5.6, 4.9)),
+                            ("static.prop.warningconstruction", where(-12.0, 3.4, turn=180.0)),
+                            ("static.prop.trafficcone01", where(-7.0, 3.3)), ("static.prop.trafficcone01", where(3.0, 3.3)),
+                            ("walker.pedestrian.0030", where(-3.0, 3.6, 1.0, turn=90.0))):
+        found = lib.filter(blueprint)
+        if not found:
+            continue
+        bp = found[0]
+        if bp.has_attribute("role_name"):
+            bp.set_attribute("role_name", HAZARD_ROLE)
+        if bp.has_attribute("is_invincible"):
+            bp.set_attribute("is_invincible", "true")
+        actor = world.try_spawn_actor(bp, pose)
+        if actor is not None:
+            staged += 1
+            if blueprint.startswith("vehicle."):         # parked: it settles onto its wheels, braked
+                actor.apply_control(carla.VehicleControl(hand_brake=True, brake=1.0))
+                actor.set_light_state(carla.VehicleLightState(carla.VehicleLightState.Position))
+    return staged
 
 
 def clear_records(rt, vins: list[str], prefix: str | None = None) -> None:
@@ -370,6 +466,8 @@ async def run(args) -> dict:
     rt.driving.park_note = lambda text: note(rt.driving.world, text, "gemini")
     if type(rt.llm).__name__ != "GeminiLLM":
         raise RuntimeError(f"expected GeminiLLM, got {type(rt.llm).__name__}")
+    if os.environ.get("MARSHAL_EVIDENCE_DIR"):
+        record_evidence(rt.llm, os.environ["MARSHAL_EVIDENCE_DIR"])
 
     car_specs = manifest["cars"] if manifest else []
     vins = [car["vin"] for car in car_specs] if manifest else [f"{args.prefix}{i + 1}" for i in range(args.cars)]
@@ -409,6 +507,8 @@ async def run(args) -> dict:
         place, what = spec.split(":", 1)
         rt.plant.hazards[place.strip()] = what.strip()
         note(rt.driving.world, f"Reported at {place.strip()}: {what.strip()}", "plant")
+        if args.stage_hazards:
+            emit({"type": "plant.hazard_staged", "place": place.strip(), "actors": stage_hazard(rt, place.strip())})
 
     # The routine each car runs, when the router does not say otherwise.
     steps = parse_steps(args.steps)
