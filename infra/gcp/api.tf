@@ -177,3 +177,11 @@ resource "google_service_account_iam_member" "deployer_act_as_api" {
   role               = "roles/iam.serviceAccountUser"
   member             = google_service_account.deployer.member
 }
+
+# Signed media URLs (media_service.generate_signed_url): on Cloud Run there is no private key, so
+# the API signs through the IAM signBlob API as itself. Scoped to this one service account.
+resource "google_service_account_iam_member" "api_sign_self" {
+  service_account_id = google_service_account.api.name
+  role               = "roles/iam.serviceAccountTokenCreator"
+  member             = google_service_account.api.member
+}
