@@ -10,10 +10,6 @@ import {
   CAR_WIDTH_M,
   type EngineCar,
 } from '#/lib/simulator/actors/car'
-import { applyCarlaPose } from '#/lib/simulator/coords'
-import { buildCompound, yardSceneryCarPositions } from '#/lib/simulator/world/dress'
-import type { LaneGraph } from '#/lib/simulator/world/plantMap'
-import { ROAD_WIDTH_M } from '#/lib/simulator/world/roadBuilder'
 import type { PlantLayout, PlantMarker } from './plantMap'
 import { toThree } from './plantMap'
 
@@ -93,57 +89,6 @@ function zone(
   if (open !== 'front') strip(group, line, LINE_M, width, length / 2, 0, 0, 0.035)
 }
 
-function isSlotEdge(from: string, to: string): boolean {
-  return from.startsWith('yard.Y') || to.startsWith('yard.Y')
-}
-
-/**
- * Roads as light tarmac with white edge lines and a yellow double centre line (the plant's lanes
- * carry both directions). Centre lines stop short of each junction so crossings stay clean.
- */
-function buildTeslaRoads(graph: LaneGraph): THREE.Group {
-  const group = new THREE.Group()
-  group.name = 'roads'
-  const road = basic(TESLA.road)
-  const white = basic(TESLA.marking)
-  const yellow = basic(TESLA.yellow)
-  const seen = new Set<string>()
-  for (const lane of graph.edges) {
-    const key = [lane.from, lane.to].sort().join('|')
-    if (seen.has(key) || isSlotEdge(lane.from, lane.to)) continue
-    seen.add(key)
-    const from = graph.points[lane.from]
-    const to = graph.points[lane.to]
-    const yaw = Math.atan2(to.y - from.y, to.x - from.x)
-    const midX = (from.x + to.x) / 2
-    const midY = (from.y + to.y) / 2
-    strip(group, road, lane.length + ROAD_WIDTH_M, ROAD_WIDTH_M + 1, midX, midY, yaw, 0.01)
-    const nx = -Math.sin(yaw)
-    const ny = Math.cos(yaw)
-    const edge = (ROAD_WIDTH_M + 1) / 2 - 0.25
-    for (const side of [-1, 1]) {
-      strip(
-        group,
-        white,
-        lane.length,
-        LINE_M,
-        midX + nx * edge * side,
-        midY + ny * edge * side,
-        yaw,
-        0.02,
-      )
-    }
-    const centre = lane.length - ROAD_WIDTH_M * 1.6
-    if (centre > 1) {
-      for (const side of [-1, 1]) {
-        const off = 0.12 * side
-        strip(group, yellow, centre, LINE_M * 0.8, midX + nx * off, midY + ny * off, yaw, 0.025)
-      }
-    }
-  }
-  return group
-}
-
 function buildMarkerTesla(parent: THREE.Object3D, marker: PlantMarker, mat: TeslaMaterials): void {
   const { position, rotationY } = toThree(marker.x, marker.y, marker.yaw)
   const [x, , z] = position
@@ -190,14 +135,14 @@ type TeslaMaterials = {
 }
 
 /**
- * The plant in the Tesla look: ground, lanes, yard lot with slot outlines, zones, white massing.
- * @param layout - Plant layout (markers, bounds).
- * @param graph - Lane graph the engine drives.
- * @returns Group named `tesla-map`.
+ * The plant's markings in the Tesla look: yard slot outlines and the test-track and rework zones.
+ * Roads and buildings come from plantWorld.ts.
+ * @param layout - Plant layout (markers).
+ * @returns Group named `tesla-markers`.
  */
-export function buildTeslaMap(layout: PlantLayout, graph: LaneGraph): THREE.Group {
+export function buildTeslaMarkers(layout: PlantLayout): THREE.Group {
   const group = new THREE.Group()
-  group.name = 'tesla-map'
+  group.name = 'tesla-markers'
   const mat: TeslaMaterials = {
     white: basic(TESLA.marking),
     yellow: basic(TESLA.yellow),
@@ -205,35 +150,10 @@ export function buildTeslaMap(layout: PlantLayout, graph: LaneGraph): THREE.Grou
     massing: new THREE.MeshLambertMaterial({ color: TESLA.massing }),
     lot: basic(TESLA.lot),
   }
-  group.add(buildTeslaRoads(graph))
-
-  // The yard is a lot, not a road per slot: one pad under the slots and the scenery row.
-  const slots = layout.markers.filter((marker) => marker.kind === 'slot')
-  const scenery = yardSceneryCarPositions(graph.points)
-  if (slots.length > 0) {
-    const xs = [...slots.map((s) => s.x), ...scenery.map((s) => s.x)]
-    const ys = [...slots.map((s) => s.y), ...scenery.map((s) => s.y)]
-    const minX = Math.min(...xs) - 4
-    const maxX = Math.max(...xs) + 4
-    const minY = Math.min(...ys) - 6
-    const maxY = Math.max(...ys) + 6
-    strip(group, mat.lot, maxX - minX, maxY - minY, (minX + maxX) / 2, (minY + maxY) / 2, 0, 0.008)
-  }
-  for (const marker of layout.markers) buildMarkerTesla(group, marker, mat)
-
-  // Buildings as plain white blocks.
-  const compound = buildCompound(graph.points)
-  compound.traverse((node: THREE.Object3D) => {
-    const mesh = node as THREE.Mesh
-    if (mesh.isMesh) mesh.material = mat.massing
-  })
-  group.add(compound)
-
-  // Parked scenery cars in the yard row: the same grey cars as the plant's own.
-  for (const pose of scenery) {
-    const car = createTeslaCar()
-    applyCarlaPose(car, pose)
-    group.add(car)
+  for (const marker of layout.markers) {
+    if (marker.kind === 'slot' || marker.kind === 'rework' || marker.kind === 'track') {
+      buildMarkerTesla(group, marker, mat)
+    }
   }
   return group
 }

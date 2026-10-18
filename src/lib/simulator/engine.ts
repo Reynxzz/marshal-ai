@@ -60,14 +60,20 @@ import {
 } from './actors/routine'
 import { carTarget, LIDAR, type LidarScan, lidarScan, propTarget, type ScanTarget } from './sensors'
 import { createLaneGraph, type LaneGraph } from './world/plantMap'
-import { sampleCenterline } from './world/roadBuilder'
+import { FINISHING_CORNER_POSE } from './world/plantRoads'
 
 /** Default mission speed (TEAM_PLAN: max 10 km/h in the plant). */
 export const DEFAULT_SPEED_KMH = 10
 /** Status event period, seconds (TEAM_PLAN M2.5: 1 Hz). */
 export const STATUS_PERIOD_S = 1
 /** Final mission waypoints that need the pull-over approach (TEAM_PLAN M2.4/M4.2). */
-export const PRECISE_WAYPOINTS: ReadonlySet<string> = new Set([...YARD_SLOTS, 'rework.electrical'])
+// yard.entry squares up too: it is 2 m past the south-west bend, so a car stopping at the arrival
+// radius would still be on the bend, at an angle, for the yard approach that starts from it.
+export const PRECISE_WAYPOINTS: ReadonlySet<string> = new Set([
+  ...YARD_SLOTS,
+  'rework.electrical',
+  'yard.entry',
+])
 
 /** Queuing (TEAM_PLAN M4.1): centre-to-centre gap standing, plus a rolling headway. */
 export const QUEUE_GAP_M = 6
@@ -514,6 +520,11 @@ export class ThreeJsEngine implements DrivingSystem {
    * @returns Point pose; throws for unknown points.
    */
   getTransform(name: string): { x: number; y: number; yaw: number } {
+    // The finishing corner is a stretch of road, not a named point: its mid-point in the lane.
+    if (name === 'finishing_corner') {
+      const { x, y, heading } = FINISHING_CORNER_POSE
+      return { x, y, yaw: (heading * 180) / Math.PI }
+    }
     const point = this.point(name)
     return { x: point.x, y: point.y, yaw: point.yaw }
   }
@@ -894,7 +905,7 @@ export class ThreeJsEngine implements DrivingSystem {
     }
     const route: PathPoint[] = []
     for (let index = 0; index < names.length - 1; index++) {
-      const samples = sampleCenterline(this.point(names[index]), this.point(names[index + 1]))
+      const samples = this.graph.path(names[index], names[index + 1])
       for (let sample = index === 0 ? 0 : 1; sample < samples.length; sample++) {
         route.push(samples[sample])
       }
@@ -1254,7 +1265,7 @@ export class ThreeJsEngine implements DrivingSystem {
       names.push(...this.graph.route('lane_c', destination).slice(1))
       const route: PathPoint[] = []
       for (let index = 0; index < names.length - 1; index++) {
-        const samples = sampleCenterline(this.point(names[index]), this.point(names[index + 1]))
+        const samples = this.graph.path(names[index], names[index + 1])
         for (let sample = index === 0 ? 0 : 1; sample < samples.length; sample++) {
           route.push(samples[sample])
         }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { POINTS } from '#/lib/marshal/points'
+import { POINTS, type PointName } from '#/lib/marshal/points'
 import { PLANT_SEGMENTS } from '#/lib/simview/plantMap'
 import { boundsOf, createLaneGraph, type LaneSegment } from '../world/plantMap'
 
@@ -10,13 +10,37 @@ describe('lane graph', () => {
     expect(graph.validate()).toEqual([])
   })
 
-  it('contains every leg the dashboard viewer draws', () => {
+  it('can drive every leg the plain viewer draws (one way, round the loop where needed)', () => {
     for (const [from, to] of PLANT_SEGMENTS) {
-      const edge = graph.edges.find(
-        (item) => (item.from === from && item.to === to) || (item.from === to && item.to === from),
-      )
-      expect(edge, `${from} -> ${to}`).toBeDefined()
+      const route = graph.route(from as PointName, to as PointName)
+      expect(route.at(-1), `${from} -> ${to}`).toBe(to)
     }
+  })
+
+  it('follows the CARLA loop: each leg starts and ends on its points, in 1 m steps', () => {
+    for (const edge of graph.edges) {
+      const path = graph.path(edge.from, edge.to)
+      const a = POINTS[edge.from]
+      const b = POINTS[edge.to]
+      expect(Math.hypot(path[0].x - a.x, path[0].y - a.y)).toBeLessThan(1e-6)
+      const end = path[path.length - 1]
+      expect(Math.hypot(end.x - b.x, end.y - b.y)).toBeLessThan(1e-6)
+      for (let i = 1; i < path.length; i++) {
+        expect(Math.hypot(path[i].x - path[i - 1].x, path[i].y - path[i - 1].y)).toBeLessThan(1.6)
+      }
+    }
+    // The finishing corner is the north-east bend, not a straight line across the plant.
+    const corner = graph.path('report_point', 'finishing')
+    expect(Math.max(...corner.map((p) => p.x))).toBeGreaterThan(145)
+    // One way: a reworked car comes back to the test track round the loop, past the yard.
+    expect(graph.route('rework.electrical', 'test_track')).toEqual([
+      'rework.electrical',
+      'test_track',
+    ])
+    expect(Math.min(...graph.path('rework.electrical', 'test_track').map((p) => p.x))).toBeLessThan(
+      -25,
+    )
+    expect(() => graph.path('test_track', 'inspection_gate')).toThrow(/no lane leg/)
   })
 
   it('measures straight-line distances and neighbours', () => {

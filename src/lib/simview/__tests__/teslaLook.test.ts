@@ -1,10 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { setCarLamps } from '#/lib/simulator/actors/car'
-import { createLaneGraph } from '#/lib/simulator/world/plantMap'
 import { buildPlantLayout } from '../plantMap'
 import { createPlantScene } from '../scene'
 import {
-  buildTeslaMap,
+  buildTeslaMarkers,
   clipPath,
   createRibbon,
   createTeslaCar,
@@ -62,7 +61,7 @@ describe('tesla look', () => {
 
   it('builds the map and a scene in the Tesla look without WebGL', () => {
     const layout = buildPlantLayout()
-    expect(buildTeslaMap(layout, createLaneGraph()).children.length).toBeGreaterThan(3)
+    expect(buildTeslaMarkers(layout).children.length).toBeGreaterThan(3)
     const plant = createPlantScene(layout, {
       style: 'tesla',
       carPath: () => [

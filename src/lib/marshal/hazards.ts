@@ -34,6 +34,20 @@ export type StagedHazard = {
 
 const SITE_POINT: Record<HazardSite, string> = { finishing_corner: 'finishing' }
 
+/**
+ * Where a site is on this driving system: the engine on CARLA's road loop knows the corner itself
+ * (a stretch of road before `finishing`, which lane C joins after); otherwise the site's point.
+ */
+function siteTransform(ds: DrivingSystem, at: HazardSite): { x: number; y: number; yaw: number } {
+  try {
+    const own = ds.getTransform(at)
+    if (own && Number.isFinite(own.x) && (own.x !== 0 || own.y !== 0)) return own
+  } catch {
+    // not a site this driving system knows by name
+  }
+  return ds.getTransform(SITE_POINT[at])
+}
+
 /** Preset layouts: lorry, 2 boxes, sign (as a cone), 3 cones and a worker. */
 export const HAZARD_PRESETS: Record<HazardPreset, { props: HazardProp[]; description: string }> = {
   forklift_unloading: {
@@ -59,7 +73,7 @@ export const HAZARD_PRESETS: Record<HazardPreset, { props: HazardProp[]; descrip
  * @returns Spawned prop ids and a description for the route choice.
  */
 export function stageHazard(ds: DrivingSystem, at: HazardSite, preset: HazardPreset): StagedHazard {
-  const origin = ds.getTransform(SITE_POINT[at])
+  const origin = siteTransform(ds, at)
   const yaw = (origin.yaw * Math.PI) / 180
   const c = Math.cos(yaw)
   const s = Math.sin(yaw)

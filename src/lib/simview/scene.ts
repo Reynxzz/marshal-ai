@@ -10,19 +10,12 @@ import {
   setCarFaults,
   setCarLamps,
 } from '#/lib/simulator/actors/car'
-import {
-  buildCompound,
-  buildFence,
-  buildGateProps,
-  buildReworkProps,
-  buildYardCars,
-} from '#/lib/simulator/world/dress'
-import { boundsOf, createLaneGraph } from '#/lib/simulator/world/plantMap'
-import { buildRoads } from '#/lib/simulator/world/roadBuilder'
+import { buildFence, FENCE_MARGIN_M } from '#/lib/simulator/world/dress'
 import { createCarMesh, updateCarMesh } from '#/render/cars'
 import type { CarSnapshot } from '#/sim/vehicle'
 import { focusColour } from './focus'
 import { DOCK_POSE, type PlantLayout, type PlantMarker, toThree } from './plantMap'
+import { buildPlantSite, buildRoadNetwork, SITE_BOUNDS } from './plantWorld'
 import {
   addDaylight,
   buildCarton,
@@ -35,7 +28,7 @@ import {
 } from './realLook'
 import type { SimCar, SimProp, SimPropKind, SimSnapshot } from './snapshot'
 import {
-  buildTeslaMap,
+  buildTeslaMarkers,
   clipPath,
   createLidarPoints,
   createRibbon,
@@ -297,33 +290,49 @@ export function createPlantScene(layout: PlantLayout, options: PlantSceneOptions
   }
 
   const { bounds, center } = layout
-  // Tesla look: a floor well past the fog's far end, so it fades into the haze with no edge.
+  // Tesla look: a floor well past the fog's far end, so it fades into the haze with no edge. The
+  // camera world's floor covers the whole site (plantWorld.ts) with a margin.
+  const site = {
+    w: SITE_BOUNDS.maxX - SITE_BOUNDS.minX + 240,
+    h: SITE_BOUNDS.maxY - SITE_BOUNDS.minY + 240,
+    x: (SITE_BOUNDS.minX + SITE_BOUNDS.maxX) / 2,
+    y: (SITE_BOUNDS.minY + SITE_BOUNDS.maxY) / 2,
+  }
   const ground = new THREE.Mesh(
     tesla
       ? new THREE.PlaneGeometry(4000, 4000, 40, 40)
-      : new THREE.PlaneGeometry(bounds.maxX - bounds.minX + 160, bounds.maxY - bounds.minY + 160),
+      : dressed
+        ? new THREE.PlaneGeometry(site.w, site.h)
+        : new THREE.PlaneGeometry(bounds.maxX - bounds.minX + 160, bounds.maxY - bounds.minY + 160),
     mat.ground,
   )
   ground.rotation.x = -Math.PI / 2
   // Sunk a little in the Tesla look: the roads and markings sit centimetres above it, too close to
   // win the depth test from the overview's distance otherwise.
-  ground.position.set(center.x, tesla ? -0.12 : 0, center.y)
+  if (dressed) ground.position.set(site.x, -0.02, site.y)
+  else ground.position.set(center.x, tesla ? -0.12 : 0, center.y)
   scene.add(ground)
 
   const map = new THREE.Group()
   scene.add(map)
-  const graph = dressed || tesla ? createLaneGraph() : null
-  if (tesla && graph) {
-    map.add(buildTeslaMap(layout, graph))
-  } else if (graph) {
-    map.add(buildRoads(graph))
-    map.add(buildFence(boundsOf(graph.points)))
-    map.add(buildYardCars(graph.points))
-    map.add(buildCompound(graph.points))
-    map.add(buildGateProps(graph.points))
-    map.add(buildReworkProps(graph.points))
+  const world = dressed || tesla
+  if (tesla || dressed) {
+    // CARLA's road loop and the plant around it (plantWorld.ts), in the look of each view.
+    const style = tesla ? 'tesla' : 'real'
+    map.add(buildRoadNetwork(style))
+    map.add(buildPlantSite(style))
+    if (tesla) map.add(buildTeslaMarkers(layout))
+    else
+      map.add(
+        buildFence({
+          minX: SITE_BOUNDS.minX + FENCE_MARGIN_M,
+          maxX: SITE_BOUNDS.maxX - FENCE_MARGIN_M,
+          minY: SITE_BOUNDS.minY + FENCE_MARGIN_M,
+          maxY: SITE_BOUNDS.maxY - FENCE_MARGIN_M,
+        }),
+      )
   }
-  for (const road of graph ? [] : layout.roads) {
+  for (const road of world ? [] : layout.roads) {
     const { rotationY } = toThree(road.cx, road.cy, road.yaw)
     const strip = add(
       map,
@@ -351,7 +360,7 @@ export function createPlantScene(layout: PlantLayout, options: PlantSceneOptions
   // The camera world (dressed) shows what is physically there: no marker posts at named points.
   if (!tesla) {
     for (const marker of layout.markers) {
-      if (dressed && !['gate', 'track', 'rework', 'slot', 'dock'].includes(marker.kind)) continue
+      if (dressed && !['track', 'rework', 'slot'].includes(marker.kind)) continue
       buildMarker(map, marker, mat)
     }
   }
@@ -366,10 +375,7 @@ export function createPlantScene(layout: PlantLayout, options: PlantSceneOptions
       mat.track.color.set(0xffffff)
       mat.track.needsUpdate = true
     }
-    surfaceTextures(map.getObjectByName('roads'), ground, [
-      bounds.maxX - bounds.minX + 160,
-      bounds.maxY - bounds.minY + 160,
-    ])
+    surfaceTextures(undefined, ground, [site.w, site.h])
   }
 
   const shared = new Set<THREE.Material>(Object.values(mat))

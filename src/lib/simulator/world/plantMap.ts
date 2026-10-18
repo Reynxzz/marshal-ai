@@ -2,35 +2,25 @@
 // flows drive, plus graph validation. Pure data: no three.js. Coordinates come from the Marshal
 // contract (src/lib/marshal/points.ts), so they cannot drift from the TEAM_PLAN table.
 
-import { type NamedPoint, POINTS, type PointName, YARD_SLOTS } from '#/lib/marshal/points'
+import { type NamedPoint, POINTS, type PointName } from '#/lib/marshal/points'
+import { PLANT_LEGS, type Pt, pathLength } from './plantRoads'
 
-/** One lane leg between two named points. */
+/** One directed lane leg between two named points. */
 export type LaneSegment = readonly [PointName, PointName]
 
 /**
- * Legs the flows send cars along: the line corridor, both routes around the report point, the
- * rework return and the yard row. Matches the legs the dashboard viewer draws (plus the rework
- * return from `test_track` the lamp flow needs).
+ * Legs the flows send cars along, one way, as CARLA's plant loop runs (world/plantRoads.ts): the
+ * line corridor, the finishing corner past the rework bays or lane C across the middle, the yard
+ * row, and back round to the line end.
  */
-export const LANE_SEGMENTS: readonly LaneSegment[] = [
-  ['line_end', 'buffer_zone_b'],
-  ['buffer_zone_b', 'inspection_gate'],
-  ['inspection_gate', 'test_track'],
-  ['test_track', 'report_point'],
-  ['inspection_gate', 'rework.electrical'],
-  ['test_track', 'rework.electrical'],
-  ['rework.electrical', 'test_track'],
-  ['report_point', 'finishing'],
-  ['finishing', 'yard.entry'],
-  ['report_point', 'lane_c'],
-  ['lane_c', 'yard.entry'],
-  ...YARD_SLOTS.map((slot) => ['yard.entry', slot] as const),
-]
+export const LANE_SEGMENTS: readonly LaneSegment[] = PLANT_LEGS.map((leg) => [leg.from, leg.to])
+
+const LEG_PATHS = new Map(PLANT_LEGS.map((leg) => [`${leg.from}>${leg.to}`, leg.path]))
 
 /** Loading dock pose (illustrative, not a named point in the TEAM_PLAN table). */
 export const LOADING_DOCK_POSE: NamedPoint = { x: -46, y: -48.75, yaw: 90 }
 
-/** One undirected lane edge with its straight-line length in metres. */
+/** One directed lane edge with the length of the path driven along it, metres. */
 export type LaneEdge = { from: PointName; to: PointName; length: number }
 
 /** Axis-aligned bounds of the named points, CARLA frame. */
@@ -40,8 +30,13 @@ export type PlantBounds = { minX: number; maxX: number; minY: number; maxY: numb
 export type LaneGraph = {
   points: Record<PointName, NamedPoint>
   edges: LaneEdge[]
-  /** Neighbour names of a point, both directions. */
+  /** Points reachable from a point in one leg (the lanes are one-way). */
   neighbors(name: PointName): PointName[]
+  /**
+   * The path a car drives along a leg, sampled every ~1 m from `from` to `to` (straight between
+   * the points for legs the plant roads do not define).
+   */
+  path(from: PointName, to: PointName): Pt[]
   /** Straight-line distance between two named points, metres. */
   distance(from: PointName, to: PointName): number
   /**
@@ -53,6 +48,15 @@ export type LaneGraph = {
   route(from: PointName, to: PointName): PointName[]
   /** Graph problems: broken references, zero-length legs, unreachable points. */
   validate(): string[]
+}
+
+/** A straight leg sampled every metre (legs the plant roads do not define). */
+function straight(a: NamedPoint, b: NamedPoint): Pt[] {
+  const steps = Math.max(1, Math.ceil(lengthOf(a, b)))
+  return Array.from({ length: steps + 1 }, (_, i) => ({
+    x: a.x + ((b.x - a.x) * i) / steps,
+    y: a.y + ((b.y - a.y) * i) / steps,
+  }))
 }
 
 function lengthOf(a: NamedPoint, b: NamedPoint): number {
@@ -71,11 +75,25 @@ export function createLaneGraph(
 ): LaneGraph {
   const edges: LaneEdge[] = []
   const adjacency = new Map<PointName, PointName[]>()
+  const lengths = new Map<string, number>()
+  const paths = new Map<string, Pt[]>()
   const problems: string[] = []
   const link = (from: PointName, to: PointName): void => {
     const list = adjacency.get(from) ?? []
     list.push(to)
     adjacency.set(from, list)
+  }
+  const legPath = (from: PointName, to: PointName): Pt[] => {
+    const key = `${from}>${to}`
+    let path = paths.get(key)
+    if (!path) {
+      const make = points === POINTS ? LEG_PATHS.get(key) : undefined
+      const a = points[from]
+      const b = points[to]
+      path = make ? make() : straight(a, b)
+      paths.set(key, path)
+    }
+    return path
   }
   for (const [from, to] of segments) {
     const a = points[from]
@@ -84,14 +102,14 @@ export function createLaneGraph(
       problems.push(`lane leg references an unknown point: ${from} -> ${to}`)
       continue
     }
-    const length = lengthOf(a, b)
-    if (length <= 0) {
+    if (lengthOf(a, b) <= 0) {
       problems.push(`lane leg has zero length: ${from} -> ${to}`)
       continue
     }
+    const length = pathLength(legPath(from, to))
     edges.push({ from, to, length })
+    lengths.set(`${from}>${to}`, length)
     link(from, to)
-    link(to, from)
   }
   const pointsOf = (name: PointName): NamedPoint => {
     const point = points[name]
@@ -119,7 +137,7 @@ export function createLaneGraph(
       visited.add(current)
       for (const next of adjacency.get(current) ?? []) {
         if (visited.has(next)) continue
-        const candidate = best + lengthOf(points[current], points[next])
+        const candidate = best + (lengths.get(`${current}>${next}`) ?? Number.POSITIVE_INFINITY)
         if (candidate < (dist.get(next) ?? Number.POSITIVE_INFINITY)) {
           dist.set(next, candidate)
           prev.set(next, current)
@@ -141,6 +159,10 @@ export function createLaneGraph(
     points,
     edges,
     neighbors: (name) => [...(adjacency.get(name) ?? [])],
+    path: (from, to) => {
+      if (!adjacency.get(from)?.includes(to)) throw new Error(`no lane leg ${from} -> ${to}`)
+      return legPath(from, to)
+    },
     distance: (from, to) => lengthOf(pointsOf(from), pointsOf(to)),
     route,
     validate() {
