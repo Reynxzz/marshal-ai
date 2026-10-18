@@ -1,46 +1,80 @@
-"""FastAPI Bridge router connecting Three.js simulation to marshal-ai domain services,
-Gemini models, and GCP Firestore / EventBus.
+"""Bridge from the Three.js plant (marshal-fe) to marshal_ai's own Gemini flows.
+
+The browser simulator sends its camera frames and telemetry here; each endpoint runs the same flow the
+CARLA plant runs and answers in the simulator's shapes (src/lib/marshal/types.ts in marshal-fe):
+
+    POST /bridge/gate    VisualInspector.inspect   decision screens, defects, build-sheet match, references
+    POST /bridge/lamp    FunctionalChecker          camera vs telemetry, against a passed car's frame
+    POST /bridge/assist  AssistanceDesk             assessment + boxes, the desk's rules enforced in code
+    POST /bridge/route   route.choose decision      one token, a probability per way
+    POST /bridge/yard    yard re-plan               moves checked against the layout before they go back
+
+Records go through marshal_ai's store (Firestore with MARSHAL_STORE=gcp, every put also a BigQuery
+history row with MARSHAL_HISTORY=bq), evidence frames through its artifacts (GCS with
+MARSHAL_ARTIFACTS=gcs), and each result is published on the API's event bus (Pub/Sub with
+MARSHAL_BUS=gcp), so the Control Tower and /events see the simulator's cars like the CARLA ones.
+
+Parking is not bridged: its candidate paths come from the simulator's own A* (marshal-fe
+src/lib/marshal/parking/astar.ts), so the simulator asks Gemini for it itself.
+
+There is no rule-based answer here. Without Gemini (MARSHAL_LLM=offline), or when a call fails, an
+endpoint answers 503 and the simulator falls back to its own deterministic offline answer, which it
+marks degraded - an answer from this bridge is always Gemini's.
 """
 
 from __future__ import annotations
 
+import asyncio
+import base64
+import binascii
+import dataclasses
 import logging
+import re
+import time
+from contextlib import contextmanager
+from contextvars import ContextVar
+from types import SimpleNamespace
 from typing import Any, Literal
-from pydantic import BaseModel, Field
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
 
-from marshal_ai.events import EventBus, Topic
-from marshal_ai.records import (
-    AssistanceCase,
-    BuildSheet,
-    Car,
-    CarState,
-    ChecklistItem,
-    InspectionResult,
-    Verdict,
-    ZoneFinding,
-)
-from marshal_ai.store import Store
-from marshal_api.core.deps import (
-    get_event_bus,
-    get_settings,
-    get_store,
-)
+from marshal_ai.config import settings as ai_settings
+from marshal_ai.driving import AssistRequest
+from marshal_ai.events import Topic, make_bus
+from marshal_ai.fakeworld import GATE_VIEWS
+from marshal_ai.flows import route as route_flow
+from marshal_ai.flows.assistance import AssistanceDesk
+from marshal_ai.flows.base import ask
+from marshal_ai.flows.functional import ROUTINE, FunctionalChecker
+from marshal_ai.flows.visual import PASS_CONFIDENCE, VisualInspector
+from marshal_ai.llm import Media, decision_schema
+from marshal_ai.records import BuildSheet, Car, CarState, InspectionResult, Verdict
+from marshal_ai.driving.routines import routine_steps
+from marshal_ai.runtime import Runtime, build_runtime
+from marshal_api.bridge import get_event_bus
+from marshal_api.config import get_settings
 
 log = logging.getLogger("marshal.bridge.threejs")
 
 router = APIRouter()
 
+VIEWS = ("front", "rear", "left", "right")
+# The simulator's car; the build sheet's model is part of the gate's match check.
+SIM_MODEL = "sedan"
+# Where the simulator's evidence goes in the bucket, apart from the CARLA plant's.
+EVIDENCE_PREFIX = "gs://marshal/threejs"
+
 
 # -------------------------------------------------------------------------------------------------
-# Request & Response Schemas (aligned with Three.js src/lib/marshal/schemas.ts)
+# Requests (marshal-fe src/lib/marshal/schemas.ts; size limits are enforced there)
 # -------------------------------------------------------------------------------------------------
 
 class GateInputPayload(BaseModel):
     vin: str
     expectedColour: str
     frames: dict[str, str | None]
+    # the simulator's offline truth; never sent to Gemini
     hints: dict[str, str] | None = None
 
 
@@ -54,18 +88,11 @@ class LampInputPayload(BaseModel):
 
 class AssistInputPayload(BaseModel):
     case_id: str
-    vin: str | None = "VIN-UNKNOWN"
+    vin: str | None = None
     reason: str
     options: list[str]
     frames: list[str] = Field(default_factory=list)
     hint: str | None = None
-
-
-class ParkingInputPayload(BaseModel):
-    vin: str
-    pose: dict[str, float]
-    obstacles: list[dict[str, Any]] = Field(default_factory=list)
-    slot: dict[str, Any]
 
 
 class RouteInputPayload(BaseModel):
@@ -84,278 +111,430 @@ class GenericAiTaskPayload(BaseModel):
 
 
 # -------------------------------------------------------------------------------------------------
-# Helpers
+# The flows behind the bridge
 # -------------------------------------------------------------------------------------------------
 
-def _safe_store_put(store: Store, record: Any) -> None:
+class _FrameDesk(AssistanceDesk):
+    """The assistance desk, reading the clip the simulator sent instead of a driving system's."""
+
+    def __init__(self, app):
+        super().__init__(app)
+        self.frames: dict[str, list[Media]] = {}
+
+    def clip(self, request: AssistRequest) -> list[Media]:
+        return self.frames.pop(request.case_id, [])
+
+
+# The Gemini calls made during this request, as (task, answered). The flows fall back to a safe answer
+# when a call fails (a REVIEW, a wait); the bridge answers 503 instead, so the simulator's own fallback
+# is used and is marked degraded. asyncio.to_thread and gather copy the context, so the list is shared.
+_calls: ContextVar[list[tuple[str, bool]] | None] = ContextVar("bridge_calls", default=None)
+
+# Decision screens: when one fails the flow asks the same question in full, so it is not a fallback.
+RETRIED_IN_FULL = ("visual.screen", "visual.match", "track.decide")
+
+
+class _Watched:
+    """The runtime's LLM, noting each call and whether it answered in the request's `_calls`."""
+
+    def __init__(self, llm):
+        self.llm = llm
+
+    def __getattr__(self, name):          # handlers etc., as flows.base.use_decisions reads them
+        return getattr(self.llm, name)
+
+    def generate(self, task, prompt, schema=None, media=None, system=""):
+        calls = _calls.get()
+        try:
+            out = self.llm.generate(task, prompt, schema, media, system)
+        except Exception:
+            if calls is not None:
+                calls.append((task, False))
+            raise
+        if calls is not None:
+            calls.append((task, True))
+        return out
+
+
+def fell_back(calls: list[tuple[str, bool]]) -> list[str]:
+    """Tasks with more failed calls than answered ones. The gate asks a slow view twice (flows.base
+    hedging) and takes whichever answers, so one failure beside an answer is not a fallback."""
+    net: dict[str, int] = {}
+    for task, answered in calls:
+        if task not in RETRIED_IN_FULL:
+            net[task] = net.get(task, 0) + (-1 if answered else 1)
+    return sorted(task for task, n in net.items() if n > 0)
+
+
+@contextmanager
+def gemini_only(name: str):
+    """Runs a flow; 503 when it had to fall back on a failed Gemini call."""
+    calls: list[tuple[str, bool]] = []
+    token = _calls.set(calls)
     try:
-        store.put(record)
+        yield
+    except HTTPException:
+        raise
     except Exception as exc:
-        log.warning(f"Failed to persist record to store ({type(record).__name__}): {exc}")
+        raise _unavailable(name, exc) from exc
+    finally:
+        _calls.reset(token)
+    failed = fell_back(calls)
+    if failed:
+        log.warning("%s: Gemini failed on %s; the simulator answers offline", name, failed)
+        raise HTTPException(503, f"{name}: Gemini unavailable ({', '.join(failed)})")
 
 
-async def _safe_publish(event_bus: EventBus, topic: Topic, event: Any) -> None:
+class BridgeFlows:
+    """marshal_ai's flows on a runtime of their own: Gemini, store, artifacts, bus.
+
+    Only the flow objects are built, not a MarshalApp: an app subscribes to the plant's topics, and on
+    Pub/Sub it would then also act on the CARLA plant's events. These flows only publish.
+    """
+
+    def __init__(self, rt: Runtime):
+        if not isinstance(rt.llm, _Watched):
+            rt.llm = _Watched(rt.llm)
+        self.rt = rt
+        shell = SimpleNamespace(rt=rt)
+        # each keeps the latest passed car per camera and step: the reference the next is compared to
+        self.visual = VisualInspector(shell)
+        self.functional = FunctionalChecker(shell)
+        self.desk = _FrameDesk(shell)
+
+
+_flows: BridgeFlows | None = None
+
+
+def build_bridge_flows() -> BridgeFlows:
+    """The bridge's runtime from marshal_ai's settings, on the fake driving system (nothing is driven)."""
+    s = dataclasses.replace(ai_settings, driving="fake", parking="standin")
+    if s.llm != "gemini":
+        raise HTTPException(503, "the bridge answers with Gemini only (MARSHAL_LLM=gemini)")
+    # The in-process demo plant (MARSHAL_RUN_PLANT=1) is subscribed to the API's bus and would take the
+    # simulator's results for its own cars, so the bridge then publishes on a bus of its own.
+    bus = make_bus("memory") if get_settings().run_plant else get_event_bus()
+    return BridgeFlows(build_runtime(s, bus=bus))
+
+
+def get_bridge_flows() -> BridgeFlows:
+    global _flows
+    if _flows is None:
+        _flows = build_bridge_flows()
+    return _flows
+
+
+def _frame(data: str) -> bytes:
+    """A base64 JPEG (optionally a data: URL) as bytes."""
+    if data.startswith("data:"):
+        data = data.split(",", 1)[-1]
     try:
-        await event_bus.publish(topic, event)
+        return base64.b64decode(data, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise HTTPException(422, f"frame is not base64: {exc}") from exc
+
+
+async def _evidence(rt: Runtime, uri: str, data: bytes) -> str:
+    """The frame in the artifacts store (GCS with MARSHAL_ARTIFACTS=gcs); its URI either way."""
+    try:
+        return await asyncio.to_thread(rt.artifacts.put, uri, data, "image/jpeg")
+    except Exception as exc:          # the verdict does not depend on the upload
+        log.warning("evidence upload failed for %s: %s: %s", uri, type(exc).__name__, exc)
+        return uri
+
+
+def _ensure_car(rt: Runtime, vin: str, colour: str | None = None) -> Car:
+    """The simulator's car in the store, created on first sight; a new build-sheet colour is kept."""
+    car = rt.store.get(Car, vin)
+    if car is None:
+        car = Car(vin=vin, build_sheet=BuildSheet(model=SIM_MODEL, colour=colour or "unknown"),
+                  state=CarState.INSPECTION_GATE, location="inspection_gate", updated_at=rt.clock())
+        rt.store.put(car)
+    elif colour and car.build_sheet.colour != colour:
+        car = car.model_copy(update={"build_sheet": car.build_sheet.model_copy(update={"colour": colour}),
+                                     "updated_at": rt.clock()})
+        rt.store.put(car)
+    return car
+
+
+async def _status(rt: Runtime, kind: str, flow: int, title: str, detail: str, **extra) -> None:
+    """A line for the dashboards and /events, in the shape flows/route.py announces decisions in."""
+    try:
+        await rt.bus.publish(Topic.VEHICLE_STATUS, {"type": kind, "flow": flow, "source": "threejs",
+                                                    "title": title, "detail": detail, "level": "info",
+                                                    **extra})
     except Exception as exc:
-        log.warning(f"Failed to publish event to bus on topic {topic}: {exc}")
+        log.warning("publish %s failed: %s: %s", kind, type(exc).__name__, exc)
+
+
+def _unavailable(task: str, exc: Exception) -> HTTPException:
+    log.warning("%s: Gemini unavailable (%s: %s)", task, type(exc).__name__, str(exc)[:200])
+    return HTTPException(503, f"{task}: Gemini unavailable ({type(exc).__name__})")
 
 
 # -------------------------------------------------------------------------------------------------
-# Endpoints
+# Gate (flow 3)
 # -------------------------------------------------------------------------------------------------
 
-@router.post("/gate")
-async def evaluate_gate_photos(
-    data: GateInputPayload,
-    store: Store = Depends(get_store),
-    event_bus: EventBus = Depends(get_event_bus),
-) -> dict[str, Any]:
-    """Evaluates 4 gate photos for colour match & damage. Writes to Firestore 'inspection_results'."""
-    expected = data.expectedColour.strip().lower()
-    hints = data.hints or {}
-    
-    # Check hint first (offline / deterministic ground truth)
-    colour_seen = expected
-    faults: list[str] = []
-    
-    for view, hint_text in hints.items():
-        if not hint_text:
-            continue
-        for part in hint_text.split(";"):
-            if "=" in part:
-                k, v = [x.strip().lower() for x in part.split("=", 1)]
-                if k == "colour":
-                    colour_seen = v
-                elif k == "damage" and v not in {"", "0", "no", "none", "false", "off", "clear", "ok"}:
-                    faults.append(f"{v}:{view}")
+_SHOWS = re.compile(r"car shows (?P<seen>.+?) \(\d")
 
-    colour_match = (colour_seen == expected or expected in colour_seen)
-    pass_verdict = colour_match and len(faults) == 0
-    confidence = 0.95
 
-    defects = [{"zone": f.split(":")[1] if ":" in f else "body", "kind": f.split(":")[0], "confidence": 0.92} for f in faults]
-    if not colour_match:
-        defects.append({"zone": "whole_car", "kind": "wrong_colour", "confidence": 0.98, "detail": f"Seen {colour_seen}, expected {expected}"})
+def gate_answer(result: InspectionResult, expected: str) -> dict[str, Any]:
+    """An InspectionResult as the simulator's GateResult.
 
-    # Persist to Firestore / Store
-    verdict = Verdict.PASS if pass_verdict else Verdict.FAIL
-    findings = [
-        ZoneFinding(
-            zone=d["zone"],
-            type=d["kind"],
-            confidence=d["confidence"],
-            observation=d.get("detail", f"Defect detected in {d['zone']}"),
-        )
-        for d in defects
-    ]
-    
-    inspection = InspectionResult(
-        vin=data.vin,
-        kind="visual",
-        verdict=verdict,
-        findings=findings,
-        observations=[f"Gate check: colour={colour_seen} (expected {expected}), pass={pass_verdict}"],
-    )
-    _safe_store_put(store, inspection)
-
-    car = Car(
-        vin=data.vin,
-        build_sheet=BuildSheet(model="Sedan", colour=expected),
-        state=CarState.INSPECTION_GATE if pass_verdict else CarState.REWORK,
-        location="inspection_gate",
-    )
-    _safe_store_put(store, car)
-
+    Faults read `type:view` ("dent:left"), and "colour_mismatch" for the colour. A REVIEW is not a
+    pass: the simulator holds the car, as the gate holds it for a person. Confidence is the strongest
+    finding's on a failure, and the bar every view cleared on a pass.
+    """
+    view_of = {zone: view for view, zones in GATE_VIEWS.items() for zone in zones}
+    faults = [f"{f.type}:{view_of.get(f.zone, f.zone)}" for f in result.findings]
+    colour = expected
+    for m in result.mismatch_findings:
+        if m.type == "wrong_colour":
+            faults.insert(0, "colour_mismatch")
+            seen = _SHOWS.search(m.observation or "")
+            colour = seen["seen"].strip().lower() if seen else "unknown"
+        else:
+            faults.append(m.type)
+    scores = [f.confidence for f in result.findings + result.mismatch_findings]
+    if result.verdict == Verdict.REVIEW and not faults:
+        faults.append("review_uncertain")
     return {
-        "vin": data.vin,
-        "pass": pass_verdict,
-        "colourMatch": colour_match,
-        "confidence": confidence,
-        "defects": defects,
+        "pass": result.verdict == Verdict.PASS,
+        "colour": colour,
+        "confidence": round(max(scores) if scores else PASS_CONFIDENCE, 3),
+        "faults": faults,
         "degraded": False,
     }
+
+
+@router.post("/gate")
+async def evaluate_gate_photos(data: GateInputPayload,
+                               flows: BridgeFlows = Depends(get_bridge_flows)) -> dict[str, Any]:
+    """The gate check on the simulator's four views (VisualInspector.inspect)."""
+    rt = flows.rt
+    expected = data.expectedColour.strip().lower()
+    frames = {view: _frame(f) for view, f in data.frames.items() if view in VIEWS and f}
+    if not frames:
+        raise HTTPException(422, "no gate frames: the simulator answers this one offline")
+    _ensure_car(rt, data.vin, expected)
+    uris = await asyncio.gather(*(_evidence(rt, f"{EVIDENCE_PREFIX}/gate/{data.vin}/{view}.jpg", raw)
+                                  for view, raw in frames.items()))
+    images = [Media(mime="image/jpeg", data=raw, uri=uri, label=f"{view} gate camera")
+              for (view, raw), uri in zip(frames.items(), uris)]
+    with gemini_only("gate"):
+        result = await flows.visual.inspect(data.vin, images=images, check_variant=True)
+    return gate_answer(result, expected)
+
+
+# -------------------------------------------------------------------------------------------------
+# Lamp check (flow 4)
+# -------------------------------------------------------------------------------------------------
+
+def _record_step(rt: Runtime, vin: str, item) -> InspectionResult:
+    """The step in the car's functional record, replacing an earlier answer for the same step.
+
+    The simulator asks one step at a time, so the verdict is of the steps asked so far; the car's
+    state is the simulator's to move.
+    """
+    previous = rt.store.get(InspectionResult, f"{vin}:functional")
+    items = [i for i in (previous.checklist if previous else []) if i.step != item.step] + [item]
+    items.sort(key=lambda i: i.step)
+    if any(i.telemetry_ok is False or i.camera_ok is False for i in items):
+        verdict = Verdict.FAIL
+    elif any(i.camera_ok is None and i.camera_applicable for i in items):
+        verdict = Verdict.REVIEW
+    else:
+        verdict = Verdict.PASS
+    result = InspectionResult(vin=vin, kind="functional", verdict=verdict, checklist=items,
+                              created_at=rt.clock())
+    rt.store.put(result)
+    return result
 
 
 @router.post("/lamp")
-async def evaluate_lamp_evidence(
-    data: LampInputPayload,
-    store: Store = Depends(get_store),
-    event_bus: EventBus = Depends(get_event_bus),
-) -> dict[str, Any]:
-    """Evaluates functional lamp check (R-12 routine). Writes to Firestore 'inspection_results'."""
-    step = data.step.strip().lower()
-    hint = (data.hint or "").strip().lower()
-    
-    telemetry_val = bool(data.telemetry.get(step, True))
-    camera_val = telemetry_val
-    if "off" in hint or "dead" in hint or "fault" in hint:
-        camera_val = False
-
-    pass_verdict = telemetry_val and camera_val
-    confidence = 0.96
-
-    evidence = [{
-        "lamp": step,
-        "telemetry": telemetry_val,
-        "camera": camera_val,
-        "confidence": confidence,
-    }]
-
-    # Persist to Firestore / Store
-    inspection = InspectionResult(
-        vin=data.vin,
-        kind="functional",
-        verdict=Verdict.PASS if pass_verdict else Verdict.FAIL,
-        checklist=[
-            ChecklistItem(
-                step=1,
-                name=step,
-                telemetry_ok=telemetry_val,
-                camera_ok=camera_val,
-                observation=f"Functional check for {step}: camera_ok={camera_val}, telemetry_ok={telemetry_val}",
-            )
-        ],
-    )
-    _safe_store_put(store, inspection)
-
+async def evaluate_lamp_evidence(data: LampInputPayload,
+                                 flows: BridgeFlows = Depends(get_bridge_flows)) -> dict[str, Any]:
+    """One R-12 lamp step from the simulator's evidence frames (FunctionalChecker.judge_clip)."""
+    rt = flows.rt
+    steps = {s.name: s for s in routine_steps(ROUTINE)}
+    step = steps.get(data.step.strip().lower())
+    if step is None:
+        raise HTTPException(422, f"unknown {ROUTINE} step {data.step!r}")
+    frames = [f for f in data.frames if f]
+    if not frames:
+        raise HTTPException(422, "no evidence frames: the simulator answers this one offline")
+    # the newest frame: the lamp steps judged here are confirmable from a still (routines.py)
+    raw = _frame(frames[-1])
+    _ensure_car(rt, data.vin)
+    uri = await _evidence(rt, f"{EVIDENCE_PREFIX}/track/{data.vin}/step{step.step}_{step.name}.jpg", raw)
+    clip = Media(mime="image/jpeg", data=raw, uri=uri, label="track camera")
+    with gemini_only("lamp"):
+        item = await flows.functional.judge_clip(data.vin, step.step, clip, dict(data.telemetry))
+    item = item.model_copy(update={"telemetry": dict(data.telemetry)})
+    result = _record_step(rt, data.vin, item)
+    await rt.bus.publish(Topic.INSPECTION_RESULTS, result)
+    observed = {True: "ON", False: "OFF", None: "UNVERIFIED"}[item.camera_ok]
     return {
-        "vin": data.vin,
-        "pass": pass_verdict,
-        "confidence": confidence,
-        "evidence": evidence,
+        "expected": "ON" if item.telemetry_ok else "OFF",
+        "observed": observed,
+        "pass": bool(item.telemetry_ok and item.camera_ok),
         "degraded": False,
     }
+
+
+# -------------------------------------------------------------------------------------------------
+# Remote assistance (flow 2)
+# -------------------------------------------------------------------------------------------------
+
+def assist_answer(case, options: list[str]) -> dict[str, Any]:
+    """An AssistanceCase as the simulator's AssistAnalysis; boxes 0-1000 [ymin, xmin, ymax, xmax] to 0-1."""
+    boxes = []
+    for o in case.objects:
+        box = o.get("box_2d")
+        if not box:
+            continue
+        ymin, xmin, ymax, xmax = (v / 1000 for v in box)
+        boxes.append({"label": o.get("label", ""), "x": xmin, "y": ymin, "w": xmax - xmin, "h": ymax - ymin})
+    recommendation = case.recommended
+    if recommendation not in options:
+        # the desk recommends nothing when every option is unsafe: the car stays stopped
+        recommendation = "wait_for_removal" if "wait_for_removal" in options else options[0]
+    return {"description": case.situation, "boxes": boxes, "recommendation": recommendation,
+            "degraded": False}
 
 
 @router.post("/assist")
-async def analyze_assist_clip(
-    data: AssistInputPayload,
-    store: Store = Depends(get_store),
-    event_bus: EventBus = Depends(get_event_bus),
-) -> dict[str, Any]:
-    """Analyzes stopped car obstacle clip. Writes to Firestore 'assistance_cases'."""
-    reason_lower = data.reason.lower()
-    hint_lower = (data.hint or "").lower()
+async def analyze_assist_clip(data: AssistInputPayload,
+                              flows: BridgeFlows = Depends(get_bridge_flows)) -> dict[str, Any]:
+    """A stopped car's clip at the assistance desk (AssistanceDesk.on_request)."""
+    rt = flows.rt
+    if not data.options:
+        raise HTTPException(422, "no options offered")
+    raws = [_frame(f) for f in data.frames if f]
+    uris = await asyncio.gather(*(_evidence(rt, f"{EVIDENCE_PREFIX}/assist/{data.case_id}_f{i}.jpg", raw)
+                                  for i, raw in enumerate(raws)))
+    flows.desk.frames[data.case_id] = [Media(mime="image/jpeg", data=raw, uri=uri, label=f"frame {i}")
+                                       for i, (raw, uri) in enumerate(zip(raws, uris))]
+    vin = data.vin or "unknown"
+    request = AssistRequest(case_id=data.case_id, vin=vin, location="threejs", reason=data.reason,
+                            options=data.options, clip_uri=uris[-1] if uris else None)
+    try:
+        with gemini_only("assist"):
+            case = await flows.desk.on_request(request)
+    finally:
+        flows.desk.frames.pop(data.case_id, None)
+    answer = assist_answer(case, data.options)
+    await _status(rt, "assist.analysis", 2, f"{vin} {data.case_id} → {answer['recommendation']}",
+                  case.situation, vin=vin, case_id=data.case_id, recommended=answer["recommendation"],
+                  people_or_moving_equipment=case.people_or_moving_equipment)
+    return answer
 
-    is_person = "worker" in reason_lower or "person" in reason_lower or "worker" in hint_lower
-    
-    if is_person:
-        recommendation = "wait_for_removal"
-        desc = "Worker and hazard blocking lane. AI policy safety stop active."
-        boxes = [{"label": "worker", "x": 0.42, "y": 0.35, "w": 0.16, "h": 0.42}]
-    else:
-        recommendation = "pass_left_3kmh" if "pass_left_3kmh" in data.options else data.options[0]
-        desc = f"Static obstacle ({data.reason}) in lane."
-        boxes = [{"label": "obstacle", "x": 0.40, "y": 0.45, "w": 0.20, "h": 0.25}]
 
-    ranking = [
-        {
-            "option": opt,
-            "reason": "Highest safety score" if opt == recommendation else "Alternative manoeuvre",
-            "risk": "Low" if opt == recommendation else ("High" if opt != "wait_for_removal" and is_person else "Medium"),
-        }
-        for opt in data.options
-    ]
+# -------------------------------------------------------------------------------------------------
+# Route choice (flow 1)
+# -------------------------------------------------------------------------------------------------
 
-    # Persist to Firestore / Store
-    vin = data.vin or "VIN-UNKNOWN"
-    case = AssistanceCase(
-        case_id=data.case_id,
-        vin=vin,
-        location="buffer_zone_b",
-        situation=desc,
-        options=data.options,
-        ranking=ranking,
-        objects=boxes,
-        people_or_moving_equipment=is_person,
-        recommended=recommendation,
-        confidence=0.94,
-    )
-    _safe_store_put(store, case)
+# What each of the simulator's two ways from the report point is (marshal_ai flows/route.py).
+WAYS = {
+    "finishing_corner": "the shorter way, through the finishing corner, a blind corner the forklifts use",
+    "lane_c": "along lane C, about 13 m longer",
+}
 
-    return {
-        "caseId": data.case_id,
-        "description": desc,
-        "boxes": boxes,
-        "recommendation": recommendation,
-        "ranking": ranking,
-        "confidence": 0.94,
-        "people_or_moving_equipment": is_person,
-        "degraded": False,
-    }
+
+def route_prompt(hazard: str, options: list[str]) -> str:
+    lines = ["A car drives from report_point towards the yard. The ways it can take:"]
+    for option in options:
+        hazards = hazard if option == "finishing_corner" and hazard else "none reported"
+        lines.append(f"- {option}: {WAYS.get(option, option)}; hazards: {hazards}")
+    lines += ["", "Which way should it take?"]
+    return "\n".join(lines)
 
 
 @router.post("/route")
-async def choose_route_hazard(data: RouteInputPayload) -> dict[str, Any]:
-    """Chooses alternate route to bypass road hazard."""
-    hazard_lower = data.hazardDescription.lower()
-    
-    # Forklift or block on finishing corner -> route via lane_c
-    if "lane_c" in data.options and ("finishing" in hazard_lower or "forklift" in hazard_lower or "hazard" in hazard_lower):
-        chosen = "lane_c"
-        reason = "Lane C clear; bypassing reported hazard at finishing corner"
-    else:
-        chosen = data.options[0]
-        reason = f"Proceeding via default route {chosen}"
+async def choose_route_hazard(data: RouteInputPayload,
+                              flows: BridgeFlows = Depends(get_bridge_flows)) -> dict[str, Any]:
+    """The way from the report point, as a decision (route.choose: one token, a probability per way)."""
+    rt = flows.rt
+    options = list(dict.fromkeys(data.options))
+    if not options:
+        raise HTTPException(422, "no route options")
+    hazard = data.hazardDescription.strip()
+    if len(options) == 1:
+        return {"route": options[0], "confidence": 1.0, "reason": "the only way offered", "degraded": False}
+    started = time.monotonic()
+    with gemini_only("route"):
+        decision = await ask(rt, route_flow.TASK, route_prompt(hazard, options),
+                             decision_schema(*options), system=route_flow.SYSTEM)
+    seconds = round(time.monotonic() - started, 2)
+    probs = {k: round(v, 3) for k, v in decision.probs.items()}
+    reason = (f"Gemini: {decision.choice} (p={decision.confidence:.2f})"
+              + (f"; hazard reported: {hazard}" if hazard else "; nothing reported on either way"))
+    await route_flow.announce(rt, {"vin": "threejs", "choice": decision.choice, "by": "gemini",
+                                   "probs": probs, "why": reason, "seconds": seconds})
+    return {"route": decision.choice, "confidence": round(decision.confidence, 3), "reason": reason,
+            "degraded": False}
 
-    return {
-        "route": chosen,
-        "confidence": 0.95,
-        "reason": reason,
-        "degraded": False,
-    }
+
+# -------------------------------------------------------------------------------------------------
+# Yard re-plan (flow 1)
+# -------------------------------------------------------------------------------------------------
+
+class YardMove(BaseModel):
+    vin: str
+    from_: str = Field(alias="from")
+    to: str
+
+    model_config = {"populate_by_name": True}
 
 
-@router.post("/parking")
-async def plan_parking_step(data: ParkingInputPayload) -> dict[str, Any]:
-    """Verifies parking manoeuvre into slot."""
-    return {
-        "decision": "proceed",
-        "confidence": 0.97,
-        "degraded": False,
-    }
+class YardReplanAnswer(BaseModel):
+    moves: list[YardMove]
+    reason: str = Field(description="one sentence")
+
+
+YARD_SYSTEM = """You re-plan a finished-car yard. Vacate reserved slots and bring priority cars to the
+lowest free slots, with as few moves as possible. Moves run in order; a move takes a car from the slot
+it is in to a slot that is free at that moment and not reserved. Never invent a car or a slot."""
+
+
+def valid_moves(layout: dict[str, str | None], reserved: set[str], moves: list[YardMove]) -> bool:
+    """The moves replayed on the layout: each from the car's slot to a free, unreserved slot."""
+    layout = dict(layout)
+    for m in moves:
+        if m.from_ not in layout or m.to not in layout:
+            return False
+        if layout[m.from_] != m.vin or layout[m.to] is not None or m.to in reserved:
+            return False
+        layout[m.to], layout[m.from_] = m.vin, None
+    return True
 
 
 @router.post("/yard")
-async def replan_yard_slots(data: YardInputPayload) -> dict[str, Any]:
-    """Calculates optimal yard slot moves."""
-    return {
-        "moves": [],
-        "reason": "Yard slot assignment verified optimal with no reshuffle required",
-        "degraded": False,
-    }
+async def replan_yard_slots(data: YardInputPayload,
+                            flows: BridgeFlows = Depends(get_bridge_flows)) -> dict[str, Any]:
+    """Slot moves for reserved slots and priority cars; checked in code before they go back."""
+    rt = flows.rt
+    reserved = set(data.constraints.get("reservedSlots") or [])
+    prompt = (f"Layout (slot -> car, null = free): {data.layout}\n"
+              f"Reserved slots: {sorted(reserved)}\n"
+              f"Priority cars: {data.constraints.get('priorityVins') or []}\n"
+              f"Why: {data.constraints.get('reason') or 'not given'}")
+    with gemini_only("yard"):
+        plan = await ask(rt, "yard.replan", prompt, YardReplanAnswer, system=YARD_SYSTEM)
+    if not valid_moves(data.layout, reserved, plan.moves):
+        # a move onto a taken or reserved slot never reaches the yard: the simulator plans it offline
+        raise HTTPException(503, "yard: Gemini's moves do not fit the layout")
+    moves = [{"vin": m.vin, "from": m.from_, "to": m.to} for m in plan.moves]
+    await _status(rt, "yard.replan", 1, f"yard re-plan: {len(moves)} move(s)", plan.reason, moves=moves)
+    return {"moves": moves, "reason": plan.reason.strip() or "Gemini yard re-plan", "degraded": False}
 
+
+# -------------------------------------------------------------------------------------------------
+# Batch tasks
+# -------------------------------------------------------------------------------------------------
 
 @router.post("/ai-task")
 async def execute_generic_ai_task(data: GenericAiTaskPayload) -> dict[str, Any]:
-    """Universal task handler for batch.plan, batch.feedback, and lab scenarios."""
-    task = data.task
-    payload = data.payload
-
-    if task == "batch.plan":
-        requested_cars = payload.get("requestedCars", 3)
-        return {
-            "output": {
-                "manifest": [
-                    {"vin": f"VIN-B01-{i+1}", "colour": ["blue", "red", "silver"][i % 3], "model": "Sedan"}
-                    for i in range(requested_cars)
-                ],
-                "selectedCases": [f"TC-0{i+1}" for i in range(min(requested_cars, 4))],
-            },
-            "degraded": False,
-        }
-
-    if task == "batch.feedback":
-        return {
-            "output": {
-                "summary": "Shift completed successfully across all 7 operational flows.",
-                "flowRatings": {f"flow_{i}": 1.0 for i in range(1, 8)},
-            },
-            "degraded": False,
-        }
-
-    return {
-        "output": {"status": "ok", "task": task},
-        "degraded": False,
-    }
+    """Not bridged yet: the simulator's batch tasks (src/ai) call Gemini themselves."""
+    raise HTTPException(501, f"{data.task}: not bridged; the simulator answers it itself")
