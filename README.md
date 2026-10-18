@@ -11,9 +11,11 @@ Built by **IONIFY** for the Google Cloud AI Builder Cup 2026.
 
 | Branch | What it is |
 | --- | --- |
-| **`main`** (this branch) | Marshal itself: the flows, Gemini, the rules, the CARLA plant and its scripts, the evaluations. Same as `rey-qais-merge`. |
+| **`main`** (this branch) | Marshal itself: the flows, Gemini, the rules, the CARLA plant and its scripts, the evaluations. |
 | **[`faris-be`](https://github.com/Reynxzz/marshal-ai/tree/faris-be)** | **Backend**: the Marshal API (FastAPI, `src/marshal_api`) on Cloud Run, including the bridge that runs these flows with real Gemini on the browser plant's camera frames (`api/v1/sim_bridge.py`). Deploys with `.github/workflows/deploy-backend.yml`. |
 | **[`frontend-demo`](https://github.com/Reynxzz/marshal-ai/tree/frontend-demo)** | **Frontend**: the supervisor dashboard and the browser plant (Three.js on CARLA's road layout), served at **[marshal.cmid.cloud](https://marshal.cmid.cloud)**. Deploys to Cloud Run with `.github/workflows/deploy-cloudrun.yml`; infrastructure in `infra/gcp` (Terraform). |
+
+Work goes on a short-lived branch off the one it changes, and comes back through a pull request.
 
 ## How it works
 
