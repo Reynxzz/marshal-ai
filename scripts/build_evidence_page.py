@@ -20,8 +20,8 @@ import os
 from collections import defaultdict
 from pathlib import Path
 
-BUCKET = "marshal-artifacts-id-rd-ca-hanif-ali"
-PROJECT = os.environ.get("GOOGLE_CLOUD_PROJECT", "id-rd-ca-hanif-ali")
+BUCKET = "marshal-artifacts-id-rd-ca-qais-jabbar"
+PROJECT = os.environ.get("GOOGLE_CLOUD_PROJECT", "id-rd-ca-qais-jabbar")
 
 # What each group of frames was for, in plain words.
 GROUPS = {
