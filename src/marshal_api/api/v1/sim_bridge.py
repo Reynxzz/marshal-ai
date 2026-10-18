@@ -41,7 +41,7 @@ from pydantic import BaseModel, Field
 
 from marshal_ai.config import settings as ai_settings
 from marshal_ai.driving import AssistRequest
-from marshal_ai.events import Topic, make_bus
+from marshal_ai.events import EventBus, Topic, make_bus
 from marshal_ai.fakeworld import GATE_VIEWS
 from marshal_ai.flows import route as route_flow
 from marshal_ai.flows.assistance import AssistanceDesk
@@ -185,6 +185,35 @@ def gemini_only(name: str):
         raise HTTPException(503, f"{name}: Gemini unavailable ({', '.join(failed)})")
 
 
+class StatusOnlyBus:
+    """The API bus, carrying the bridge's results as status lines on vehicle-status only.
+
+    On Pub/Sub the topics are shared with the CARLA plant, whose subscriptions act on what arrives:
+    its Report Router would take a simulator car's inspection result for one of its own. The plant
+    reads vehicle-status for mission.done alone, so a status line there reaches the Control Tower's
+    /events and the dashboards and nothing else.
+    """
+
+    LEVEL = {"pass": "good", "review": "warn", "fail": "bad"}
+
+    def __init__(self, bus: EventBus):
+        self.bus = bus
+
+    def __getattr__(self, name):
+        return getattr(self.bus, name)
+
+    async def publish(self, topic: Topic, message) -> None:
+        data = message.model_dump(mode="json") if isinstance(message, BaseModel) else dict(message)
+        if topic is not Topic.VEHICLE_STATUS:
+            verdict = str(data.get("verdict", ""))
+            data = {"type": f"threejs.{topic.value}", "flow": 3 if data.get("kind") == "visual" else 4,
+                    "source": "threejs", "vin": data.get("vin"),
+                    "title": f"{data.get('vin', '?')} {data.get('kind', topic.value)} {verdict.upper()}",
+                    "detail": "; ".join(data.get("observations") or [])[:300],
+                    "level": self.LEVEL.get(verdict.lower(), "info"), "record": data}
+        await self.bus.publish(Topic.VEHICLE_STATUS, data)
+
+
 class BridgeFlows:
     """marshal_ai's flows on a runtime of their own: Gemini, store, artifacts, bus.
 
@@ -214,7 +243,7 @@ def build_bridge_flows() -> BridgeFlows:
     # The in-process demo plant (MARSHAL_RUN_PLANT=1) is subscribed to the API's bus and would take the
     # simulator's results for its own cars, so the bridge then publishes on a bus of its own.
     bus = make_bus("memory") if get_settings().run_plant else get_event_bus()
-    return BridgeFlows(build_runtime(s, bus=bus))
+    return BridgeFlows(build_runtime(s, bus=StatusOnlyBus(bus)))
 
 
 def get_bridge_flows() -> BridgeFlows:

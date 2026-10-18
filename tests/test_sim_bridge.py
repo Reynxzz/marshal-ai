@@ -38,9 +38,10 @@ def bridge():
     """The bridge on a FakeLLM; returns (client, flows, llm, published events)."""
     llm = FakeLLM()
     rt = build_runtime(SETTINGS, llm=llm)
+    rt.bus = sim_bridge.StatusOnlyBus(rt.bus)
     flows = sim_bridge.BridgeFlows(rt)
     published: list[tuple[Topic, dict]] = []
-    for topic in (Topic.VEHICLE_STATUS, Topic.INSPECTION_RESULTS):
+    for topic in Topic:
         rt.bus.subscribe(topic, lambda data, topic=topic: published.append((topic, data)))
     api.dependency_overrides[sim_bridge.get_bridge_flows] = lambda: flows
     try:
@@ -64,7 +65,10 @@ def test_gate_pass_runs_the_visual_inspector(bridge):
     result = flows.rt.store.get(InspectionResult, "P001:visual")
     assert result.verdict == Verdict.PASS
     assert flows.rt.store.get(Car, "P001").build_sheet.colour == "blue"
-    assert [t for t, _ in published] == [Topic.INSPECTION_RESULTS]
+    # a status line on vehicle-status only: the CARLA plant's subscriptions never see the car
+    assert [(t, d["type"], d["level"]) for t, d in published] == [
+        (Topic.VEHICLE_STATUS, "threejs.inspection-results", "good")]
+    assert published[0][1]["record"]["verdict"] == "PASS"
 
 
 def test_gate_damage_and_wrong_colour_fail_the_car(bridge):
@@ -136,7 +140,7 @@ def test_lamp_step_runs_the_functional_checker_and_keeps_every_step(bridge):
     assert [(i.name, i.camera_ok) for i in result.checklist] == [("headlights", True), ("brake_lights", False)]
     assert result.verdict == Verdict.FAIL
     assert not any("headlights=off" in c.prompt for c in llm.calls)
-    assert [t for t, _ in published] == [Topic.INSPECTION_RESULTS] * 2
+    assert [(t, d["type"]) for t, d in published] == [(Topic.VEHICLE_STATUS, "threejs.inspection-results")] * 2
 
 
 def test_lamp_unknown_step_is_rejected(bridge):
@@ -165,7 +169,7 @@ def test_assist_runs_the_desk_and_never_passes_a_person(bridge):
     assert case.vin == "P004" and case.people_or_moving_equipment is True
     assert [len(c.media) for c in llm.calls] == [2, 2]
     assert flows.desk.frames == {}
-    assert published[-1][1]["type"] == "assist.analysis"
+    assert [(t, d["type"]) for t, d in published] == [(Topic.VEHICLE_STATUS, "assist.analysis")]
 
 
 def test_assist_without_gemini_is_503(bridge):
