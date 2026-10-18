@@ -292,16 +292,19 @@ function extrude(shape: THREE.Shape, width: number, bevel: number): THREE.Extrud
 /**
  * A Tesla-style car (local +X is the nose), compatible with setCarLamps / setCarFaults /
  * updateCarMesh: lamp materials live on `userData.parts` as the engine car's do.
+ * @param paint - Body colour for the real car (camera frames); grey Tesla-screen car when omitted.
+ * @param paint - Body colour for the real car (camera frames); the grey screen car when omitted.
  * @returns Car group with a soft contact shadow.
  */
-export function createTeslaCar(): EngineCar {
+export function createTeslaCar(paint?: string | number): EngineCar {
   const group = new THREE.Group()
   group.name = 'tesla-car'
-  const body = new THREE.MeshStandardMaterial({
-    color: TESLA.car,
-    roughness: 0.32,
-    metalness: 0.15,
-  })
+  // A paint colour gives the real car (camera frames): glossier, a metallic clear coat.
+  const body = new THREE.MeshStandardMaterial(
+    paint === undefined
+      ? { color: TESLA.car, roughness: 0.32, metalness: 0.15 }
+      : { color: paint, roughness: 0.22, metalness: 0.45 },
+  )
   const glass = new THREE.MeshStandardMaterial({
     color: TESLA.glass,
     roughness: 0.15,
@@ -309,11 +312,14 @@ export function createTeslaCar(): EngineCar {
   })
   const tyre = new THREE.MeshStandardMaterial({ color: TESLA.tyre, roughness: 0.9 })
 
-  group.add(new THREE.Mesh(extrude(bodyShape(), CAR_WIDTH_M, 0.22), body))
-  group.add(new THREE.Mesh(extrude(cabinShape(), CAR_WIDTH_M - 0.34, 0.2), glass))
+  const shell = extrude(bodyShape(), CAR_WIDTH_M, 0.16)
+  shell.computeBoundingBox()
+  group.add(new THREE.Mesh(shell, body))
+  group.add(new THREE.Mesh(extrude(cabinShape(), CAR_WIDTH_M - 0.34, 0.16), glass))
   for (const x of [CAR_WHEELBASE_M / 2, -CAR_WHEELBASE_M / 2]) {
-    for (const z of [CAR_WIDTH_M / 2 - 0.2, -(CAR_WIDTH_M / 2 - 0.2)]) {
-      const wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.34, 0.26, 20), tyre)
+    // Tyres flush with the body sides, as on the real car.
+    for (const z of [CAR_WIDTH_M / 2 - 0.13, -(CAR_WIDTH_M / 2 - 0.13)]) {
+      const wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.34, 0.24, 24), tyre)
       wheel.rotation.x = Math.PI / 2
       wheel.position.set(x, 0.34, z)
       group.add(wheel)
@@ -334,9 +340,13 @@ export function createTeslaCar(): EngineCar {
   shadow.rotation.x = -Math.PI / 2
   shadow.scale.set(CAR_LENGTH_M * 0.62, CAR_WIDTH_M * 0.75, 1)
   shadow.position.y = 0.03
+  // The real car (camera frames) gets a real shadow from the sun instead.
+  shadow.visible = paint === undefined
   group.add(shadow)
 
-  const half = CAR_LENGTH_M / 2
+  // Lamps sit on the body's surface: its bevel pushes the nose and tail past the side profile.
+  const nose = shell.boundingBox.max.x
+  const tail = shell.boundingBox.min.x
   const headlight = lamp(0xffffff)
   const brake = lamp(0xff2a1f)
   const reverse = lamp(0xffffff)
@@ -354,13 +364,36 @@ export function createTeslaCar(): EngineCar {
     group.add(mesh)
   }
   for (const side of [1, -1]) {
-    add(headlight, [0.08, 0.06, 0.42], half - 0.12, 0.74, side * 0.6)
-    add(side === 1 ? right : left, [0.08, 0.06, 0.14], half - 0.18, 0.74, side * 0.86)
-    add(side === 1 ? right : left, [0.08, 0.06, 0.14], -half + 0.06, 0.86, side * 0.84)
-    add(reverse, [0.06, 0.05, 0.16], -half + 0.03, 0.62, side * 0.45)
+    // Headlight strips and front indicators.
+    add(headlight, [0.14, 0.08, 0.46], nose - 0.07, 0.62, side * 0.56)
+    add(side === 1 ? right : left, [0.14, 0.06, 0.14], nose - 0.09, 0.62, side * 0.84)
+    // Tail-light clusters at the rear corners (brake), indicator and reverse below them.
+    add(brake, [0.1, 0.12, 0.38], tail + 0.03, 0.82, side * 0.62)
+    add(side === 1 ? right : left, [0.1, 0.05, 0.16], tail + 0.03, 0.71, side * 0.74)
+    add(reverse, [0.1, 0.06, 0.16], tail + 0.04, 0.58, side * 0.42)
   }
-  // Full-width tail light bar.
-  add(brake, [0.06, 0.06, 1.4], -half + 0.05, 0.86, 0)
+  // Light bar across the tailgate between the clusters (brake).
+  add(brake, [0.1, 0.04, 0.86], tail + 0.03, 0.88, 0)
+
+  if (paint !== undefined) {
+    // The real car's details: black lower bumper, diffuser and sills, rims, mirrors, rear plate.
+    const trim = new THREE.MeshStandardMaterial({ color: 0x141619, roughness: 0.7 })
+    const rim = new THREE.MeshStandardMaterial({ color: 0xbcc1c8, roughness: 0.3, metalness: 0.85 })
+    const plate = new THREE.MeshStandardMaterial({ color: 0xf1f1ec, roughness: 0.5 })
+    add(trim, [0.14, 0.16, CAR_WIDTH_M - 0.3], nose - 0.08, 0.38, 0)
+    add(trim, [0.14, 0.14, CAR_WIDTH_M - 0.4], tail + 0.06, 0.38, 0)
+    add(plate, [0.03, 0.13, 0.44], tail - 0.005, 0.66, 0)
+    for (const side of [1, -1]) {
+      add(trim, [CAR_LENGTH_M * 0.5, 0.09, 0.03], 0, 0.36, side * (CAR_WIDTH_M / 2 + 0.005))
+      add(body, [0.2, 0.1, 0.16], 0.98, 1.0, side * (CAR_WIDTH_M / 2 + 0.04))
+      for (const x of [CAR_WHEELBASE_M / 2, -CAR_WHEELBASE_M / 2]) {
+        const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, 0.02, 20), rim)
+        hub.rotation.x = Math.PI / 2
+        hub.position.set(x, 0.34, side * (CAR_WIDTH_M / 2 - 0.004))
+        group.add(hub)
+      }
+    }
+  }
 
   group.userData.parts = {
     body,

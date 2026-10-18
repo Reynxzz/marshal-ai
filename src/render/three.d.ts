@@ -52,4 +52,10 @@ declare module 'three' {
   export type Points = any
   export const Points: any
   export const PointsMaterial: any
+  export const BackSide: any
+  export const PCFSoftShadowMap: any
+  export const ACESFilmicToneMapping: any
+  export type CanvasTexture = any
+  export const CanvasTexture: any
+  export const RepeatWrapping: any
 }

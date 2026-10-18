@@ -6,7 +6,6 @@ import * as THREE from 'three'
 import {
   type CarFault,
   type CarLamps,
-  createCarMesh as createEngineCar,
   updateCarMesh as placeEngineCar,
   setCarFaults,
   setCarLamps,
@@ -18,13 +17,22 @@ import {
   buildReworkProps,
   buildYardCars,
 } from '#/lib/simulator/world/dress'
-import { addDuskLighting } from '#/lib/simulator/world/lighting'
 import { boundsOf, createLaneGraph } from '#/lib/simulator/world/plantMap'
 import { buildRoads } from '#/lib/simulator/world/roadBuilder'
 import { createCarMesh, updateCarMesh } from '#/render/cars'
 import type { CarSnapshot } from '#/sim/vehicle'
 import { focusColour } from './focus'
 import { DOCK_POSE, type PlantLayout, type PlantMarker, toThree } from './plantMap'
+import {
+  addDaylight,
+  buildCarton,
+  buildWorker,
+  DAYLIGHT,
+  type Daylight,
+  grainTexture,
+  shadowed,
+  surfaceTextures,
+} from './realLook'
 import type { SimCar, SimProp, SimPropKind, SimSnapshot } from './snapshot'
 import {
   buildTeslaMap,
@@ -80,6 +88,8 @@ export type PlantSceneOptions = {
 
 export type PlantScene = {
   scene: THREE.Scene
+  /** Keeps the sun's shadows sharp around a CARLA-frame point (dressed daylight; else a no-op). */
+  focusLight(x: number, y: number): void
   /** Shows or hides the focus beacon and highlight rings (hidden for camera frames). */
   setOverlays(visible: boolean): void
   /** Syncs cars, props, trucks and highlights; `time` (seconds) animates the beacon. */
@@ -94,7 +104,6 @@ export type PlantScene = {
 }
 
 const BACKGROUND = 0x12171d
-const DUSK_SKY = 0x2a3442
 const ROAD_WIDTH = 5
 const AMBER = '#E39B2E'
 const BLUE = '#7FA7FF'
@@ -189,13 +198,18 @@ function buildMarker(parent: THREE.Object3D, marker: PlantMarker, mat: Materials
   }
 }
 
-function buildProp(kind: SimPropKind, mat: Materials): THREE.Group {
+function buildProp(kind: SimPropKind, mat: Materials, real = false): THREE.Group {
   const group = new THREE.Group()
   switch (kind) {
     case 'box':
-      add(group, new THREE.BoxGeometry(1.2, 1, 1.2), mat.box, 0, 0.5, 0)
+      if (real) group.add(buildCarton())
+      else add(group, new THREE.BoxGeometry(1.2, 1, 1.2), mat.box, 0, 0.5, 0)
       break
     case 'worker':
+      if (real) {
+        group.add(buildWorker())
+        break
+      }
       add(group, new THREE.CylinderGeometry(0.28, 0.28, 1.3, 10), mat.hiVis, 0, 0.65, 0)
       add(group, new THREE.SphereGeometry(0.2, 12, 10), mat.skin, 0, 1.5, 0)
       break
@@ -209,6 +223,7 @@ function buildProp(kind: SimPropKind, mat: Materials): THREE.Group {
       buildTruck(group, mat)
       break
   }
+  if (real) shadowed(group)
   const halo = ring(AMBER, kind === 'truck' ? 5 : 1, kind === 'truck' ? 5.5 : 1.3)
   halo.name = 'halo'
   halo.visible = false
@@ -252,7 +267,7 @@ export function createPlantScene(layout: PlantLayout, options: PlantSceneOptions
   const tesla = options.style === 'tesla'
   const dressed = options.dressed === true && !tesla
   const scene = new THREE.Scene()
-  const sky = tesla ? TESLA.haze : dressed ? DUSK_SKY : BACKGROUND
+  const sky = tesla ? TESLA.haze : dressed ? DAYLIGHT.haze : BACKGROUND
   scene.background = new THREE.Color(sky)
   scene.fog = tesla
     ? new THREE.Fog(sky, TESLA_FOG.near, TESLA_FOG.far)
@@ -265,14 +280,15 @@ export function createPlantScene(layout: PlantLayout, options: PlantSceneOptions
     mat.truckCab.color.set(TESLA.car)
   }
 
+  let daylight: Daylight | null = null
   if (tesla) {
     scene.add(new THREE.HemisphereLight(0xffffff, 0xb9bfc8, 1.5))
     const sun = new THREE.DirectionalLight(0xffffff, 1.3)
     sun.position.set(layout.center.x - 40, 120, layout.center.y + 60)
     scene.add(sun)
   } else if (dressed) {
-    scene.add(new THREE.HemisphereLight(0xc9d4e6, 0x1b222b, 0.45))
-    addDuskLighting(scene, layout.center)
+    daylight = addDaylight(scene, layout.center)
+    mat.ground.color.set(DAYLIGHT.concrete)
   } else {
     scene.add(new THREE.HemisphereLight(0xdfe6f0, 0x1b222b, 0.9))
     const sun = new THREE.DirectionalLight(0xffffff, 1.6)
@@ -332,7 +348,29 @@ export function createPlantScene(layout: PlantLayout, options: PlantSceneOptions
       lineEnd.y,
     )
   }
-  if (!tesla) for (const marker of layout.markers) buildMarker(map, marker, mat)
+  // The camera world (dressed) shows what is physically there: no marker posts at named points.
+  if (!tesla) {
+    for (const marker of layout.markers) {
+      if (dressed && !['gate', 'track', 'rework', 'slot', 'dock'].includes(marker.kind)) continue
+      buildMarker(map, marker, mat)
+    }
+  }
+  if (dressed) {
+    shadowed(map)
+    ground.receiveShadow = true
+    // The test-track pad is a darker, newer asphalt (one texture repeat every 6 m of its 30 x 8 m).
+    const pad = grainTexture('#3a3d42', 0.2)
+    if (pad) {
+      pad.repeat.set(5, 1.4)
+      mat.track.map = pad
+      mat.track.color.set(0xffffff)
+      mat.track.needsUpdate = true
+    }
+    surfaceTextures(map.getObjectByName('roads'), ground, [
+      bounds.maxX - bounds.minX + 160,
+      bounds.maxY - bounds.minY + 160,
+    ])
+  }
 
   const shared = new Set<THREE.Material>(Object.values(mat))
   /** Removes an object and frees its own geometries and materials (shared ones stay). */
@@ -379,7 +417,7 @@ export function createPlantScene(layout: PlantLayout, options: PlantSceneOptions
         const group = tesla
           ? createTeslaCar()
           : dressed
-            ? createEngineCar(car.colour)
+            ? (shadowed(createTeslaCar(car.colour)) as THREE.Group)
             : createCarMesh(carSnapshot(car))
         // Tesla look: a thin ring, so it marks the car without covering the road.
         const halo = tesla ? ring(AMBER, 2.95, 3.12) : ring(AMBER, 2.8, 3.4)
@@ -418,7 +456,7 @@ export function createPlantScene(layout: PlantLayout, options: PlantSceneOptions
       let entry = props.get(prop.id)
       if (!entry || entry.kind !== prop.kind) {
         if (entry) release(entry.group)
-        entry = { group: buildProp(prop.kind, mat), kind: prop.kind }
+        entry = { group: buildProp(prop.kind, mat, dressed), kind: prop.kind }
         scene.add(entry.group)
         props.set(prop.id, entry)
       }
@@ -527,6 +565,7 @@ export function createPlantScene(layout: PlantLayout, options: PlantSceneOptions
 
   return {
     scene,
+    focusLight: (x, y) => daylight?.focus(x, y),
     setOverlays,
     sync,
     labels: () => (focusLabel ? [...markerLabels, focusLabel] : markerLabels),

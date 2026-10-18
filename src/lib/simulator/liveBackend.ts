@@ -62,6 +62,11 @@ function createShooter(scene: THREE.Scene): { shoot: Shoot; dispose(): void } | 
   }
   renderer.setPixelRatio(1)
   renderer.outputColorSpace = THREE.SRGBColorSpace
+  // Daylight with soft sun shadows and a filmic response (realLook.ts), closer to a real camera.
+  renderer.shadowMap.enabled = true
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap
+  renderer.toneMapping = THREE.ACESFilmicToneMapping
+  renderer.toneMappingExposure = 1.05
   const camera = new THREE.PerspectiveCamera(60, 16 / 9, 0.1, 600)
   return {
     shoot(pose, width, height) {
@@ -140,6 +145,8 @@ export function createLiveBackend(): LiveBackend {
       focusPose: null,
     }
     plant.sync(snapshot)
+    const centre = engine.listCars().find((car) => car.vin === subject) ?? cameras[0]
+    if (centre) plant.focusLight(centre.x, centre.y)
     return shooter.shoot
   }
 
