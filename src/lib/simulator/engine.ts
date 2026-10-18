@@ -541,6 +541,19 @@ export class ThreeJsEngine implements DrivingSystem {
   }
 
   /**
+   * The rest of a car's route, from where it is now (the dashboard's path ribbon).
+   * @param vin - Car.
+   * @returns The car's position, then the route points still ahead; empty without a mission.
+   */
+  routeAhead(vin: string): { x: number; y: number }[] {
+    const car = this.cars.get(vin)
+    const mission = car?.mission
+    if (!car || !mission || mission.route.length === 0) return []
+    const rest = mission.route.slice(mission.routeIndex + 1).map(({ x, y }) => ({ x, y }))
+    return [{ x: car.x, y: car.y }, ...rest]
+  }
+
+  /**
    * Every car with its pose and paint, for the camera scene.
    * @returns VIN, pose (yaw degrees) and RGB 0..1 per car.
    */

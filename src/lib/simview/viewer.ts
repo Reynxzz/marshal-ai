@@ -2,7 +2,14 @@
 // focused car (or the overview) and positions HTML labels over the canvas. Browser only.
 
 import * as THREE from 'three'
-import { type CameraPose, followCamera, overviewCamera, stepCamera } from './camera'
+import {
+  type CameraPose,
+  chaseCamera,
+  followCamera,
+  overviewCamera,
+  stepCamera,
+  teslaOverviewCamera,
+} from './camera'
 import type { PlantLayout } from './plantMap'
 import {
   createPlantScene,
@@ -64,7 +71,7 @@ export const createSimViewer: SimViewerFactory = (canvas, overlay, layout, optio
   renderer.setPixelRatio(dpr)
   const plant: PlantScene = createPlantScene(layout, options)
   const camera = new THREE.PerspectiveCamera(50, 1, 0.5, 2000)
-  const overview = overviewCamera(layout)
+  const overview = options?.style === 'tesla' ? teslaOverviewCamera(layout) : overviewCamera(layout)
   let pose: CameraPose = overview
   let width = 1
   let height = 1
@@ -91,7 +98,11 @@ export const createSimViewer: SimViewerFactory = (canvas, overlay, layout, optio
     renderer.setScissorTest(true)
     renderer.setViewport(rect.x, rect.y, rect.width, rect.height)
     renderer.setScissor(rect.x, rect.y, rect.width, rect.height)
+    // The map camera sits 300 m up: past the fog's far end, so it renders without fog.
+    const fog = plant.scene.fog
+    plant.scene.fog = null
     renderer.render(plant.scene, minimap)
+    plant.scene.fog = fog
     renderer.setScissorTest(false)
     renderer.setViewport(0, 0, width, height)
   }
@@ -129,7 +140,8 @@ export const createSimViewer: SimViewerFactory = (canvas, overlay, layout, optio
     frame(snapshot, dt) {
       time += dt
       plant.sync(snapshot, time)
-      const goal = snapshot.focusPose ? followCamera(snapshot.focusPose) : overview
+      const follow = options?.style === 'tesla' ? chaseCamera : followCamera
+      const goal = snapshot.focusPose ? follow(snapshot.focusPose) : overview
       pose = stepCamera(pose, goal, dt)
       camera.position.set(...pose.position)
       camera.lookAt(...pose.target)

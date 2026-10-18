@@ -30,10 +30,8 @@ function wantsLiveEngine(): boolean {
 
 function ShiftPage() {
   // Swap the backend during the first render, before the 3D view and the store start.
-  const [live] = useState(() => {
-    const on = wantsLiveEngine()
-    if (on) useShiftStore.getState().setBackend(createLiveBackend)
-    return on
+  useState(() => {
+    if (wantsLiveEngine()) useShiftStore.getState().setBackend(createLiveBackend)
   })
-  return <Dashboard simCanvas={<SimCanvas dressed={live} />} />
+  return <Dashboard simCanvas={<SimCanvas />} />
 }

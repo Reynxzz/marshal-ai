@@ -26,6 +26,20 @@ export function overviewCamera(layout: PlantLayout): CameraPose {
 }
 
 /**
+ * Overview in the Tesla look: lower and further back, so the plant recedes into the haze.
+ * @param layout - Plant layout.
+ * @returns Camera pose looking across the plant.
+ */
+export function teslaOverviewCamera(layout: PlantLayout): CameraPose {
+  const { bounds, center } = layout
+  const span = Math.max(bounds.maxX - bounds.minX, bounds.maxY - bounds.minY)
+  return {
+    position: [center.x, span * 0.5, center.y + span * 0.72],
+    target: [center.x, 0, center.y - span * 0.05],
+  }
+}
+
+/**
  * Follow camera behind a car (CARLA pose, yaw in degrees).
  * @param pose - Car pose in the CARLA frame.
  * @returns Camera pose looking at the car.
@@ -38,6 +52,24 @@ export function followCamera(pose: Pose): CameraPose {
   const x = pose.x - FOLLOW.back * c - FOLLOW.side * s
   const z = pose.y - FOLLOW.back * s + FOLLOW.side * c
   return { position: [x, FOLLOW.up, z], target: [pose.x, 1, pose.y] }
+}
+
+/** Tesla-style chase camera: low behind the car, looking past it down the road. */
+export const CHASE = { back: 12, up: 5.2, ahead: 9 } as const
+
+/**
+ * Chase camera behind a car, as the Tesla screen frames the car it drives.
+ * @param pose - Car pose in the CARLA frame.
+ * @returns Camera pose looking ahead of the car.
+ */
+export function chaseCamera(pose: Pose): CameraPose {
+  const yaw = (pose.yaw * Math.PI) / 180
+  const c = Math.cos(yaw)
+  const s = Math.sin(yaw)
+  return {
+    position: [pose.x - CHASE.back * c, CHASE.up, pose.y - CHASE.back * s],
+    target: [pose.x + CHASE.ahead * c, 0.4, pose.y + CHASE.ahead * s],
+  }
 }
 
 function lerp3(a: Vec3, b: Vec3, t: number): Vec3 {

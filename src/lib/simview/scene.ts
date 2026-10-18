@@ -26,6 +26,16 @@ import type { CarSnapshot } from '#/sim/vehicle'
 import { focusColour } from './focus'
 import { DOCK_POSE, type PlantLayout, type PlantMarker, toThree } from './plantMap'
 import type { SimCar, SimProp, SimPropKind, SimSnapshot } from './snapshot'
+import {
+  buildTeslaMap,
+  clipPath,
+  createRibbon,
+  createTeslaCar,
+  setTeslaFocus,
+  TESLA,
+  TESLA_FOG,
+  updateRibbon,
+} from './teslaLook'
 
 /** A world-space anchor for an HTML label. */
 export type LabelAnchor = {
@@ -55,6 +65,13 @@ export type PlantSceneOptions = {
   dressed?: boolean
   /** Lamp state per car for the dressed car model; lamps stay off when it returns null. */
   carLook?: (vin: string) => CarLook | null
+  /**
+   * 'tesla': the dashboard look (teslaLook.ts) - pale fogged plant, lane markings, grey cars with
+   * lamps from `carLook`, the followed car blue with its path from `carPath` as a ribbon.
+   */
+  style?: 'tesla'
+  /** The route still ahead of a car (CARLA frame, from the car forward); for the ribbon. */
+  carPath?: (vin: string) => { x: number; y: number }[]
 }
 
 export type PlantScene = {
@@ -228,13 +245,28 @@ function carSnapshot(car: SimCar): CarSnapshot {
  * @returns Scene with sync, labels and dispose.
  */
 export function createPlantScene(layout: PlantLayout, options: PlantSceneOptions = {}): PlantScene {
-  const dressed = options.dressed === true
+  const tesla = options.style === 'tesla'
+  const dressed = options.dressed === true && !tesla
   const scene = new THREE.Scene()
-  scene.background = new THREE.Color(dressed ? DUSK_SKY : BACKGROUND)
-  scene.fog = new THREE.Fog(dressed ? DUSK_SKY : BACKGROUND, 260, 700)
+  const sky = tesla ? TESLA.haze : dressed ? DUSK_SKY : BACKGROUND
+  scene.background = new THREE.Color(sky)
+  scene.fog = tesla
+    ? new THREE.Fog(sky, TESLA_FOG.near, TESLA_FOG.far)
+    : new THREE.Fog(sky, 260, 700)
   const mat = materials()
+  if (tesla) {
+    mat.ground.color.set(TESLA.ground)
+    mat.road.color.set(TESLA.road)
+    mat.truckBox.color.set(TESLA.massing)
+    mat.truckCab.color.set(TESLA.car)
+  }
 
-  if (dressed) {
+  if (tesla) {
+    scene.add(new THREE.HemisphereLight(0xffffff, 0xb9bfc8, 1.5))
+    const sun = new THREE.DirectionalLight(0xffffff, 1.3)
+    sun.position.set(layout.center.x - 40, 120, layout.center.y + 60)
+    scene.add(sun)
+  } else if (dressed) {
     scene.add(new THREE.HemisphereLight(0xc9d4e6, 0x1b222b, 0.45))
     addDuskLighting(scene, layout.center)
   } else {
@@ -245,18 +277,25 @@ export function createPlantScene(layout: PlantLayout, options: PlantSceneOptions
   }
 
   const { bounds, center } = layout
+  // Tesla look: a floor well past the fog's far end, so it fades into the haze with no edge.
   const ground = new THREE.Mesh(
-    new THREE.PlaneGeometry(bounds.maxX - bounds.minX + 160, bounds.maxY - bounds.minY + 160),
+    tesla
+      ? new THREE.PlaneGeometry(4000, 4000, 40, 40)
+      : new THREE.PlaneGeometry(bounds.maxX - bounds.minX + 160, bounds.maxY - bounds.minY + 160),
     mat.ground,
   )
   ground.rotation.x = -Math.PI / 2
-  ground.position.set(center.x, 0, center.y)
+  // Sunk a little in the Tesla look: the roads and markings sit centimetres above it, too close to
+  // win the depth test from the overview's distance otherwise.
+  ground.position.set(center.x, tesla ? -0.12 : 0, center.y)
   scene.add(ground)
 
   const map = new THREE.Group()
   scene.add(map)
-  const graph = dressed ? createLaneGraph() : null
-  if (graph) {
+  const graph = dressed || tesla ? createLaneGraph() : null
+  if (tesla && graph) {
+    map.add(buildTeslaMap(layout, graph))
+  } else if (graph) {
     map.add(buildRoads(graph))
     map.add(buildFence(boundsOf(graph.points)))
     map.add(buildYardCars(graph.points))
@@ -289,7 +328,7 @@ export function createPlantScene(layout: PlantLayout, options: PlantSceneOptions
       lineEnd.y,
     )
   }
-  for (const marker of layout.markers) buildMarker(map, marker, mat)
+  if (!tesla) for (const marker of layout.markers) buildMarker(map, marker, mat)
 
   const shared = new Set<THREE.Material>(Object.values(mat))
   /** Removes an object and frees its own geometries and materials (shared ones stay). */
@@ -320,31 +359,43 @@ export function createPlantScene(layout: PlantLayout, options: PlantSceneOptions
   )
   beacon.rotation.x = Math.PI
   beacon.visible = false
+  const ribbon = createRibbon()
+  scene.add(ribbon)
   let focusLabel: LabelAnchor | null = null
   let overlays = true
 
-  const syncCars = (list: SimCar[]): void => {
+  const syncCars = (list: SimCar[], focusVin: string | null): void => {
     const seen = new Set<string>()
     for (const car of list) {
       seen.add(car.vin)
       let entry = cars.get(car.vin)
       if (!entry) {
-        const group = dressed ? createEngineCar(car.colour) : createCarMesh(carSnapshot(car))
-        const halo = ring(AMBER, 2.8, 3.4)
+        const group = tesla
+          ? createTeslaCar()
+          : dressed
+            ? createEngineCar(car.colour)
+            : createCarMesh(carSnapshot(car))
+        // Tesla look: a thin ring, so it marks the car without covering the road.
+        const halo = tesla ? ring(AMBER, 2.95, 3.12) : ring(AMBER, 2.8, 3.4)
         group.add(halo)
         scene.add(group)
         entry = { group, halo }
         cars.set(car.vin, entry)
       }
-      if (dressed) {
+      if (dressed || tesla) {
         placeEngineCar(entry.group, car)
         const look = options.carLook?.(car.vin)
         setCarLamps(entry.group, look?.lamps ?? OFF_LAMPS)
         setCarFaults(entry.group, new Set(look?.faults ?? []))
+        if (tesla) setTeslaFocus(entry.group, car.vin === focusVin)
       } else {
         updateCarMesh(entry.group, carSnapshot(car))
       }
-      entry.halo.visible = overlays && car.highlight !== null
+      // Tesla look: the followed car is already blue, so only a car needing a person gets a ring.
+      entry.halo.visible =
+        overlays &&
+        car.highlight !== null &&
+        !(tesla && car.vin === focusVin && car.highlight === 'selected')
       if (car.highlight) entry.halo.material.color.set(car.highlight === 'selected' ? BLUE : AMBER)
     }
     for (const [vin, entry] of cars) {
@@ -400,14 +451,16 @@ export function createPlantScene(layout: PlantLayout, options: PlantSceneOptions
   }
 
   const sync = (snapshot: SimSnapshot, time = 0): void => {
-    syncCars(snapshot.cars)
+    syncCars(snapshot.cars, snapshot.focus?.vin ?? null)
     syncProps(snapshot.props)
     syncTrucks(snapshot.trucks.slice(0, 3).map((truck) => truck.id))
     const { focus, focusPose } = snapshot
     if (focus && focusPose) {
       const colour = focusColour(focus)
-      beacon.visible = overlays
+      beacon.visible = overlays && !tesla
       beacon.material.color.set(colour)
+      const path = tesla && overlays ? (options.carPath?.(focus.vin) ?? []) : []
+      updateRibbon(ribbon, clipPath(path))
       beacon.position.set(focusPose.x, 4.4 + Math.sin(time * 3) * 0.3, focusPose.y)
       focusLabel = {
         id: `focus-${focus.vin}`,
@@ -418,6 +471,7 @@ export function createPlantScene(layout: PlantLayout, options: PlantSceneOptions
       }
     } else {
       beacon.visible = false
+      ribbon.visible = false
       focusLabel = null
     }
   }
@@ -453,6 +507,7 @@ export function createPlantScene(layout: PlantLayout, options: PlantSceneOptions
     overlays = visible
     if (!visible) {
       beacon.visible = false
+      ribbon.visible = false
       for (const entry of cars.values()) entry.halo.visible = false
       for (const entry of props.values()) {
         const halo = entry.group.getObjectByName('halo')

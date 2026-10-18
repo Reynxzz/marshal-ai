@@ -26,11 +26,6 @@ export type SimCanvasProps = {
   createViewer?: SimViewerFactory
   /** Plant layout (defaults to the TEAM_PLAN named points). */
   layout?: PlantLayout
-  /**
-   * Draws the engine's dressed world and car model, with lamps read from the running backend
-   * (the scene the live cameras capture).
-   */
-  dressed?: boolean
 }
 
 /**
@@ -47,13 +42,27 @@ function backendCarLook(vin: string): CarLook | null {
 type LampSource = { lampsOf(vin: string): CarLook['lamps']; faultsOf(vin: string): string[] }
 
 /**
+ * The route still ahead of a car, when the running backend plans routes (the live engine).
+ * @param vin - Car VIN.
+ * @returns Path points from the car forward, or none.
+ */
+function backendCarPath(vin: string): { x: number; y: number }[] {
+  const engine = getShiftBackend() as {
+    routeAhead?: (vin: string) => { x: number; y: number }[]
+  } | null
+  return engine?.routeAhead?.(vin) ?? []
+}
+
+/**
  * Live 3D plant view for the dashboard. Follows the selected car, or the car a decision waits on,
  * and shows every car moving otherwise. Client only: WebGL starts in an effect and a text
  * fallback replaces the canvas when it fails.
- * @param props - Optional viewer factory, layout and dressed world.
+ * Drawn in the Tesla look (simview/teslaLook.ts), with lamps and routes read from the running
+ * backend when it reports them.
+ * @param props - Optional viewer factory and layout.
  * @returns The simulator view.
  */
-export function SimCanvas({ createViewer = createSimViewer, layout, dressed }: SimCanvasProps) {
+export function SimCanvas({ createViewer = createSimViewer, layout }: SimCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const overlayRef = useRef<HTMLDivElement>(null)
   const [failed, setFailed] = useState(false)
@@ -91,9 +100,11 @@ export function SimCanvas({ createViewer = createSimViewer, layout, dressed }: S
     if (!canvas || !overlay) return
     let viewer: SimViewer
     try {
-      viewer = dressed
-        ? createViewer(canvas, overlay, plant, { dressed: true, carLook: backendCarLook })
-        : createViewer(canvas, overlay, plant)
+      viewer = createViewer(canvas, overlay, plant, {
+        style: 'tesla',
+        carLook: backendCarLook,
+        carPath: backendCarPath,
+      })
     } catch {
       setFailed(true)
       return
@@ -126,7 +137,7 @@ export function SimCanvas({ createViewer = createSimViewer, layout, dressed }: S
       else window.removeEventListener('resize', resize)
       viewer.dispose()
     }
-  }, [createViewer, plant, dressed])
+  }, [createViewer, plant])
 
   const caption = focusCaption(focus, shift)
   const label = focusAriaLabel(focus, shift)

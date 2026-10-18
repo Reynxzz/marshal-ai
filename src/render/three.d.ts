@@ -41,4 +41,12 @@ declare module 'three' {
   export const MeshBasicMaterial: any
   export const HemisphereLight: any
   export const DoubleSide: any
+  export type MeshLambertMaterial = any
+  export const MeshLambertMaterial: any
+  export type Shape = any
+  export const Shape: any
+  export type ExtrudeGeometry = any
+  export const ExtrudeGeometry: any
+  export const CircleGeometry: any
+  export const Float32BufferAttribute: any
 }
