@@ -114,6 +114,8 @@ export type LampInput = z.infer<typeof lampInputSchema>
 
 export const assistInputSchema = z.object({
   case_id: id(),
+  /** The stopped car (the Marshal API records its case under it). */
+  vin: id().optional(),
   reason: text(),
   options: z.array(assistOptionSchema).min(1).max(3),
   frames: frames(),

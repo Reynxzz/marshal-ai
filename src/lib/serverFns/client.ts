@@ -57,6 +57,12 @@ const getBackendUrl = (): string => {
   return 'http://localhost:8000/api/v1'
 }
 
+/**
+ * Calls the Marshal API's simulator bridge (faris-be src/marshal_api/api/v1/sim_bridge.py), which
+ * runs marshal-ai's own Gemini flows and keeps the records. Any non-2xx (503: Gemini unavailable
+ * there; 422: nothing it can judge, e.g. no frames) throws, and the caller falls back to this
+ * app's own server function.
+ */
 async function callBridge<T>(endpoint: string, data: unknown): Promise<T> {
   const base = getBackendUrl()
   const res = await fetch(`${base}/bridge/${endpoint}`, {
@@ -96,12 +102,10 @@ const remote: MarshalAi = {
     }
   },
   async planParkingStep(input) {
-    try {
-      return await callBridge<ParkingStep>('parking', input)
-    } catch {
-      const { planParkingStep } = await import('./parking')
-      return planParkingStep({ data: input })
-    }
+    // Not bridged: the candidate paths come from this app's A* (server-side, in ./parking), so
+    // Gemini is asked here. The Marshal API has no parking endpoint.
+    const { planParkingStep } = await import('./parking')
+    return planParkingStep({ data: input })
   },
   async chooseRouteHazard(input) {
     try {

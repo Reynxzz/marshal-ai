@@ -43,6 +43,7 @@ export async function handleAssistRequest(
   const fitted = fitFrames(event.clip_frames)
   const input = {
     case_id: event.case_id,
+    vin: event.vin,
     reason: event.reason,
     options: [...event.options],
     frames: fitted.frames,
