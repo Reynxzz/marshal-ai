@@ -188,6 +188,8 @@ type EngineCar = {
   avoidStart: { x: number; y: number } | null
   /** Assist case the pass-left maneuver belongs to. */
   avoidCase: string | null
+  /** How far the pass-left backs up: AVOID_BACKUP_M, less when a car is close behind. */
+  avoidBackup_m: number
   /** Closest distance to a prop during the pass-left maneuver. */
   avoidClosest: number
   /** Front-wheel angle last commanded, radians (positive = left). */
@@ -375,14 +377,11 @@ export class ThreeJsEngine implements DrivingSystem {
       if (cmd.option === 'wait_for_removal') {
         car.waitingCase = cmd.case_id
         car.waited_s = 0
-      } else if (cmd.option === 'pass_left_3kmh') {
-        car.avoidPhase = 'backup'
-        car.avoidStart = { x: car.x, y: car.y }
-        car.avoidCase = cmd.case_id
-        car.avoidClosest = Number.POSITIVE_INFINITY
-      } else if (!this.rerouteViaLaneC(car)) {
-        // No lane C on the way: fall back to passing the obstacle.
-        car.avoidPhase = 'backup'
+      } else if (cmd.option === 'pass_left_3kmh' || !this.rerouteViaLaneC(car)) {
+        // Pass left (or no lane C on the way): back up for room, as far as the gap behind allows,
+        // then crawl past in the left lane.
+        car.avoidBackup_m = this.backupRoom(car)
+        car.avoidPhase = car.avoidBackup_m > 0.3 ? 'backup' : 'swerve'
         car.avoidStart = { x: car.x, y: car.y }
         car.avoidCase = cmd.case_id
         car.avoidClosest = Number.POSITIVE_INFINITY
@@ -447,6 +446,7 @@ export class ThreeJsEngine implements DrivingSystem {
       avoidStart: null,
       avoidCase: null,
       avoidClosest: Number.POSITIVE_INFINITY,
+      avoidBackup_m: AVOID_BACKUP_M,
       steer: 0,
       accel_mps2: 0,
       yawRate: 0,
@@ -1034,7 +1034,7 @@ export class ThreeJsEngine implements DrivingSystem {
         car.x - (car.avoidStart?.x ?? car.x),
         car.y - (car.avoidStart?.y ?? car.y),
       )
-      if (backed >= AVOID_BACKUP_M) car.avoidPhase = 'swerve'
+      if (backed >= car.avoidBackup_m) car.avoidPhase = 'swerve'
       return
     }
 
@@ -1119,7 +1119,10 @@ export class ThreeJsEngine implements DrivingSystem {
 
     // Blocked detection (M6.3): still for 5 s with a non-plant obstacle close ahead.
     const near = this.nearestProp(car, BLOCKED_RADIUS_M, BLOCKED_LATERAL_M)
-    if (car.speed_mps < BLOCKED_SPEED_MPS && near !== null && car.avoidPhase === null) {
+    // A car queued behind another car is waiting for that car, not blocked by the prop beyond it:
+    // the car at the front of the queue is the one that asks for help.
+    const queued = near !== null && leader !== null && leader < near.ahead
+    if (car.speed_mps < BLOCKED_SPEED_MPS && near !== null && !queued && car.avoidPhase === null) {
       car.blockedFor += dt
     } else {
       car.blockedFor = 0
@@ -1317,6 +1320,25 @@ export class ThreeJsEngine implements DrivingSystem {
     if (ahead <= 0 || ahead > QUEUE_LOOKAHEAD_M) return null
     if (Math.abs(dx * fy - dy * fx) > QUEUE_LATERAL_M) return null
     return ahead
+  }
+
+  /**
+   * How far a car can back up for a pass-left: AVOID_BACKUP_M, or less to keep a metre to the
+   * car behind it in the lane (backing into a queued car was what approving a pass did).
+   */
+  private backupRoom(car: EngineCar): number {
+    const fx = Math.cos(car.yaw)
+    const fy = Math.sin(car.yaw)
+    let room: number = AVOID_BACKUP_M
+    for (const other of this.cars.values()) {
+      if (other.vin === car.vin) continue
+      const dx = other.x - car.x
+      const dy = other.y - car.y
+      const behind = -(dx * fx + dy * fy)
+      if (behind <= 0 || Math.abs(dx * fy - dy * fx) > QUEUE_LATERAL_M) continue
+      room = Math.min(room, behind - CAR_LENGTH_M - 1)
+    }
+    return Math.max(0, room)
   }
 
   /** Updates a car's measured motion after a fixed step: acceleration, yaw rate, odometer. */

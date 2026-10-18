@@ -138,3 +138,47 @@ describe('obstacle scan and assist flow (M6)', () => {
     expect(engine.assistHint('AC-VIN-1-1')).toBe('worker=1')
   })
 })
+
+describe('a queue behind a box', () => {
+  function queue() {
+    const engine = new ThreeJsEngine()
+    const requests: AssistRequestEvent[] = []
+    engine.on('assist.request', (event) => requests.push(event))
+    // Three cars on the lane towards the test track, a box ahead of the first.
+    engine.spawnProp('box-1', 'box', 52, POINTS.line_end.y, 0)
+    engine.spawn('A', { at: 'inspection_gate', colour: [1, 0, 0] })
+    engine.spawn('B', { at: 'buffer_zone_b', colour: [0, 1, 0] })
+    engine.spawn('C', { at: 'line_end', colour: [0, 0, 1] })
+    for (const vin of ['A', 'B', 'C']) {
+      engine.send({ op: 'mission.go', mission_id: `M-${vin}`, vin, waypoints: ['test_track'] })
+    }
+    runUntil(engine, () => false, 60)
+    return { engine, requests }
+  }
+
+  it('only the car at the front asks for help; the ones behind queue', () => {
+    const { requests } = queue()
+    expect(requests.map((request) => request.vin)).toEqual(['A'])
+  })
+
+  it('a pass-left backs up no further than the gap to the car behind, then passes', () => {
+    const { engine, requests } = queue()
+    const behind = engine.getPositionXY('B')
+    engine.send({
+      op: 'assist.choose',
+      case_id: requests[0].case_id,
+      vin: 'A',
+      option: 'pass_left_3kmh',
+      chosen_by: 'supervisor',
+    })
+    let closest = Number.POSITIVE_INFINITY
+    for (let t = 0; t < 120; t++) {
+      engine.tick(0.25)
+      const a = engine.getPositionXY('A')
+      closest = Math.min(closest, Math.hypot(a.x - behind.x, a.y - behind.y))
+    }
+    // Centre to centre: a car length plus the metre kept to the car behind.
+    expect(closest).toBeGreaterThan(5.5)
+    expect(engine.getPositionXY('A').x).toBeGreaterThan(54)
+  })
+})
