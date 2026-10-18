@@ -108,19 +108,26 @@ workflow in sync. (`github_deploy_workflows` replaces the former `github_branche
 (`marshal-api`) behind the same LB: the URL map sends `/api` and `/api/*` to it and everything
 else to the frontend. It runs as the `marshal-ai` service account (Vertex AI, Firestore,
 BigQuery, Pub/Sub, `storage.objectAdmin` on the artifacts bucket; an existing account is adopted)
-with the deployed demo settings of faris-be `.env.production` (`MARSHAL_RUN_PLANT=1`, memory
-store and bus, `MARSHAL_LLM=gemini`) plus `GOOGLE_CLOUD_PROJECT`, `MARSHAL_CORS_ORIGINS` (the
-domain) and the bucket names; override or add settings with `api_env`. The request timeout is
-3600 s for the `/api/v1/events` SSE stream, CPU stays allocated for the in-process plant, and the
-Cloud Armor policy also throttles `/api/v1/bridge/*` per IP.
+in live mode on Google Cloud: `MARSHAL_STORE=gcp` (Firestore), `MARSHAL_BUS=gcp` (Pub/Sub),
+`MARSHAL_HISTORY=bq` (BigQuery `marshal.record_history`), `MARSHAL_ARTIFACTS=gcs` (evidence
+photos in the artifacts bucket), `MARSHAL_LLM=gemini`, the in-process demo plant off
+(`MARSHAL_RUN_PLANT=0`: with the gcp store it would write its stand-in cars into the same
+records), plus `GOOGLE_CLOUD_PROJECT`, `MARSHAL_CORS_ORIGINS` (the domain) and the bucket names;
+override or add settings with `api_env`. The simulator's `/api/v1/bridge/*` calls run
+marshal-ai's own Gemini flows (gate, lamp, assistance, route, yard re-plan) and keep their
+records there, next to the CARLA plant's. Terraform also creates the API's seven
+`<topic>--api` Pub/Sub subscriptions (the topics come from faris-be
+`scripts/create_pubsub_topics.py`). The request timeout is 3600 s for the `/api/v1/events` SSE
+stream, CPU stays allocated so the Pub/Sub stream keeps pulling, and the Cloud Armor policy
+also throttles `/api/v1/bridge/*` per IP.
 
 faris-be `.github/workflows/deploy-backend.yml` tests (`uv`, `pytest`) on pull requests and
 pushes, and on pushes to `faris-be` builds the faris-be `Dockerfile`, pushes
 `$GCP_AR_REPO/marshal-api:<sha>` (same Artifact Registry repository, separate image) and deploys
 it with `--min-instances=1 --max-instances=1` (= `api_min_instances` / `api_max_instances`). The
-container creates its SQLite demo database at startup, so its data (and the memory store/bus)
-resets on every new instance or revision; keep one instance until the state moves to
-Firestore/Pub/Sub (`MARSHAL_STORE=gcp`, `MARSHAL_BUS=gcp`) or Cloud SQL (`MARSHAL_DB_URL`).
+container creates its SQLite demo database at startup (only the memory mode's seeded services read
+it); the records live in Firestore, so a new instance or revision keeps them. Keep one instance:
+the bridge's reference cars (the latest passed car per gate camera and lamp step) are held in it.
 
 ## 4. Domain and HTTPS (optional)
 

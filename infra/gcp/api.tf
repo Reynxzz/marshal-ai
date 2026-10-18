@@ -4,6 +4,10 @@
 locals {
   api_artifacts_bucket = var.api_artifacts_bucket != "" ? var.api_artifacts_bucket : "marshal-artifacts-${var.project_id}"
 
+  # marshal_ai.events.Topic
+  api_bus_topics = ["vehicle-status", "assist-requests", "gate-images", "track-steps",
+  "inspection-results", "test-requests", "test-results"]
+
   api_roles = toset([
     "roles/aiplatform.user",     # Gemini on Vertex AI
     "roles/datastore.user",      # Firestore records (MARSHAL_STORE=gcp)
@@ -12,18 +16,23 @@ locals {
     "roles/pubsub.editor", # event bus (MARSHAL_BUS=gcp)
   ])
 
-  # The deployed demo settings (faris-be .env.production), then var.api_env overrides.
+  # Live mode on Google Cloud, then var.api_env overrides. The simulator bridge (/api/v1/bridge/*)
+  # runs marshal-ai's Gemini flows and keeps what they decide like the CARLA plant does: records in
+  # Firestore, every change as a BigQuery history row, evidence photos in the artifacts bucket,
+  # results on Pub/Sub, which the Control Tower reads (/api/v1/*, /events). The in-process demo
+  # plant stays off: with the gcp store it would write its stand-in cars into the same records.
   api_env = merge(
     {
       GOOGLE_GENAI_USE_VERTEXAI = "TRUE"
       GOOGLE_CLOUD_PROJECT      = var.project_id
       GOOGLE_CLOUD_LOCATION     = var.gemini_location
-      MARSHAL_RUN_PLANT         = "1"
-      MARSHAL_PLANT_SPEED       = "8"
+      MARSHAL_RUN_PLANT         = "0"
       MARSHAL_LLM               = "gemini"
       MARSHAL_ROUTE             = "always"
-      MARSHAL_STORE             = "memory"
-      MARSHAL_BUS               = "memory"
+      MARSHAL_STORE             = "gcp"
+      MARSHAL_BUS               = "gcp"
+      MARSHAL_HISTORY           = "bq"
+      MARSHAL_ARTIFACTS         = "gcs"
       MARSHAL_BATCH             = "0"
       MARSHAL_CORS_ORIGINS      = jsonencode(local.https_enabled ? ["https://${var.domain}"] : ["http://${google_compute_global_address.lb.address}"])
       MARSHAL_BUCKET            = local.api_artifacts_bucket
@@ -32,6 +41,24 @@ locals {
     var.api_model != "" ? { MARSHAL_MODEL = var.api_model } : {},
     var.api_env,
   )
+}
+
+# The API's Pub/Sub subscriptions, one per topic (scripts/create_pubsub_topics.py in faris-be makes
+# the topics and the plant's own subscriptions; marshal_api.bridge subscribes as "api"). The bus
+# does not create a missing subscription, and /events would fail without them.
+resource "google_pubsub_subscription" "api" {
+  for_each = toset(local.api_bus_topics)
+
+  name                 = "${each.value}--api"
+  topic                = "projects/${var.project_id}/topics/${each.value}"
+  ack_deadline_seconds = 20
+  # An SSE stream that is not connected leaves messages behind; a day is plenty for a demo.
+  message_retention_duration = "86400s"
+  expiration_policy {
+    ttl = ""
+  }
+
+  depends_on = [google_project_service.required]
 }
 
 # Created outside Terraform first (gcloud); create_ignore_already_exists adopts the existing
