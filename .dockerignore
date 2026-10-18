@@ -1,0 +1,23 @@
+# Keep the Cloud Run build context small: only pyproject/uv.lock, README.md, alembic.ini, src/,
+# migrations/ and scripts/ are copied (Dockerfile).
+.git
+.github
+.venv
+**/__pycache__
+**/*.pyc
+.pytest_cache
+.adk
+.env
+.env.*
+*.egg-info
+dist
+# Local SQLite database: the container creates its own at startup (scripts/start_api.sh).
+marshal.db
+marshal.db-*
+tests
+eval
+docs
+docs-be
+apps
+*.md
+!README.md
