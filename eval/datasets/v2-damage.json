@@ -4,7 +4,7 @@
   "damage": [
     {
       "id": "car-damages-269",
-      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/car-damages-269.jpg",
+      "image": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v2/damage/car-damages-269.jpg",
       "expect_damaged": true,
       "expect_kinds": [
         "broken_part",
@@ -18,7 +18,7 @@
     },
     {
       "id": "car-damages-1342",
-      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/car-damages-1342.jpg",
+      "image": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v2/damage/car-damages-1342.jpg",
       "expect_damaged": true,
       "expect_kinds": [
         "dent",
@@ -34,7 +34,7 @@
     },
     {
       "id": "car-damages-1078",
-      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/car-damages-1078.jpg",
+      "image": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v2/damage/car-damages-1078.jpg",
       "expect_damaged": true,
       "expect_kinds": [
         "broken_part",
@@ -48,7 +48,7 @@
     },
     {
       "id": "car-damages-246",
-      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/car-damages-246.jpg",
+      "image": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v2/damage/car-damages-246.jpg",
       "expect_damaged": true,
       "expect_kinds": [
         "broken_part",
@@ -66,7 +66,7 @@
     },
     {
       "id": "car-damages-245",
-      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/car-damages-245.jpg",
+      "image": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v2/damage/car-damages-245.jpg",
       "expect_damaged": true,
       "expect_kinds": [
         "dent",
@@ -82,7 +82,7 @@
     },
     {
       "id": "car-damages-325",
-      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/car-damages-325.jpg",
+      "image": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v2/damage/car-damages-325.jpg",
       "expect_damaged": true,
       "expect_kinds": [
         "dent",
@@ -98,7 +98,7 @@
     },
     {
       "id": "car-damages-322",
-      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/car-damages-322.jpg",
+      "image": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v2/damage/car-damages-322.jpg",
       "expect_damaged": true,
       "expect_kinds": [
         "broken_part",
@@ -116,7 +116,7 @@
     },
     {
       "id": "car-damages-291",
-      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/car-damages-291.jpg",
+      "image": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v2/damage/car-damages-291.jpg",
       "expect_damaged": true,
       "expect_kinds": [
         "broken_part",
@@ -134,7 +134,7 @@
     },
     {
       "id": "car-damages-652",
-      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/car-damages-652.jpg",
+      "image": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v2/damage/car-damages-652.jpg",
       "expect_damaged": true,
       "expect_kinds": [
         "broken_part",
@@ -148,7 +148,7 @@
     },
     {
       "id": "car-damages-648",
-      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/car-damages-648.jpg",
+      "image": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v2/damage/car-damages-648.jpg",
       "expect_damaged": true,
       "expect_kinds": [
         "broken_part",
@@ -162,7 +162,7 @@
     },
     {
       "id": "car-damages-1273",
-      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/car-damages-1273.jpg",
+      "image": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v2/damage/car-damages-1273.jpg",
       "expect_damaged": true,
       "expect_kinds": [
         "broken_part",
@@ -177,7 +177,7 @@
     },
     {
       "id": "car-damages-1074",
-      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/car-damages-1074.jpg",
+      "image": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v2/damage/car-damages-1074.jpg",
       "expect_damaged": true,
       "expect_kinds": [
         "dent"
@@ -187,7 +187,7 @@
     },
     {
       "id": "car-damages-783",
-      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/car-damages-783.jpg",
+      "image": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v2/damage/car-damages-783.jpg",
       "expect_damaged": true,
       "expect_kinds": [
         "broken_part",
@@ -204,7 +204,7 @@
     },
     {
       "id": "car-damages-646",
-      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/car-damages-646.jpg",
+      "image": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v2/damage/car-damages-646.jpg",
       "expect_damaged": true,
       "expect_kinds": [
         "broken_part",
@@ -223,7 +223,7 @@
     },
     {
       "id": "car-damages-1283",
-      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/car-damages-1283.jpg",
+      "image": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v2/damage/car-damages-1283.jpg",
       "expect_damaged": true,
       "expect_kinds": [
         "broken_part",
@@ -240,7 +240,7 @@
     },
     {
       "id": "car-damages-644",
-      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/car-damages-644.jpg",
+      "image": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v2/damage/car-damages-644.jpg",
       "expect_damaged": true,
       "expect_kinds": [
         "missing_part",
@@ -254,7 +254,7 @@
     },
     {
       "id": "car-damages-212",
-      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/car-damages-212.jpg",
+      "image": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v2/damage/car-damages-212.jpg",
       "expect_damaged": true,
       "expect_kinds": [
         "broken_part",
@@ -269,7 +269,7 @@
     },
     {
       "id": "car-damages-256",
-      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/car-damages-256.jpg",
+      "image": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v2/damage/car-damages-256.jpg",
       "expect_damaged": true,
       "expect_kinds": [
         "dent",
@@ -285,7 +285,7 @@
     },
     {
       "id": "car-damages-905",
-      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/car-damages-905.jpg",
+      "image": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v2/damage/car-damages-905.jpg",
       "expect_damaged": true,
       "expect_kinds": [
         "broken_part",
@@ -303,7 +303,7 @@
     },
     {
       "id": "car-damages-247",
-      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/car-damages-247.jpg",
+      "image": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v2/damage/car-damages-247.jpg",
       "expect_damaged": true,
       "expect_kinds": [
         "broken_part",
@@ -318,7 +318,7 @@
     },
     {
       "id": "car-damages-310",
-      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/car-damages-310.jpg",
+      "image": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v2/damage/car-damages-310.jpg",
       "expect_damaged": true,
       "expect_kinds": [
         "broken_part",
@@ -334,7 +334,7 @@
     },
     {
       "id": "car-damages-892",
-      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/car-damages-892.jpg",
+      "image": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v2/damage/car-damages-892.jpg",
       "expect_damaged": true,
       "expect_kinds": [
         "broken_part",
@@ -353,7 +353,7 @@
     },
     {
       "id": "car-damages-885",
-      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/car-damages-885.jpg",
+      "image": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v2/damage/car-damages-885.jpg",
       "expect_damaged": true,
       "expect_kinds": [
         "broken_part",
@@ -371,7 +371,7 @@
     },
     {
       "id": "car-damages-880",
-      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/car-damages-880.jpg",
+      "image": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v2/damage/car-damages-880.jpg",
       "expect_damaged": true,
       "expect_kinds": [
         "broken_part",
@@ -388,7 +388,7 @@
     },
     {
       "id": "car-damages-141",
-      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/car-damages-141.jpg",
+      "image": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v2/damage/car-damages-141.jpg",
       "expect_damaged": true,
       "expect_kinds": [
         "broken_part",
@@ -404,7 +404,7 @@
     },
     {
       "id": "car-damages-1082",
-      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/car-damages-1082.jpg",
+      "image": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v2/damage/car-damages-1082.jpg",
       "expect_damaged": true,
       "expect_kinds": [
         "broken_part",
@@ -418,7 +418,7 @@
     },
     {
       "id": "car-damages-113",
-      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/car-damages-113.jpg",
+      "image": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v2/damage/car-damages-113.jpg",
       "expect_damaged": true,
       "expect_kinds": [
         "broken_part",
@@ -432,7 +432,7 @@
     },
     {
       "id": "car-damages-1290",
-      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/car-damages-1290.jpg",
+      "image": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v2/damage/car-damages-1290.jpg",
       "expect_damaged": true,
       "expect_kinds": [
         "broken_part",
@@ -447,7 +447,7 @@
     },
     {
       "id": "car-damages-643",
-      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/car-damages-643.jpg",
+      "image": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v2/damage/car-damages-643.jpg",
       "expect_damaged": true,
       "expect_kinds": [
         "broken_part",
@@ -462,7 +462,7 @@
     },
     {
       "id": "car-damages-868",
-      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/car-damages-868.jpg",
+      "image": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v2/damage/car-damages-868.jpg",
       "expect_damaged": true,
       "expect_kinds": [
         "broken_part",
@@ -478,97 +478,97 @@
     },
     {
       "id": "clean-front-bumper-car-damages-710",
-      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/clean-front-bumper-car-damages-710.jpg",
+      "image": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v2/damage/clean-front-bumper-car-damages-710.jpg",
       "expect_damaged": false,
       "note": "Front-bumper with no labelled damage, cropped from Car damages 710.jpg"
     },
     {
       "id": "clean-trunk-car-damages-180",
-      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/clean-trunk-car-damages-180.jpg",
+      "image": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v2/damage/clean-trunk-car-damages-180.jpg",
       "expect_damaged": false,
       "note": "Trunk with no labelled damage, cropped from Car damages 180.png"
     },
     {
       "id": "clean-trunk-car-damages-1289",
-      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/clean-trunk-car-damages-1289.jpg",
+      "image": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v2/damage/clean-trunk-car-damages-1289.jpg",
       "expect_damaged": false,
       "note": "Trunk with no labelled damage, cropped from Car damages 1289.png"
     },
     {
       "id": "clean-back-bumper-car-damages-652",
-      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/clean-back-bumper-car-damages-652.jpg",
+      "image": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v2/damage/clean-back-bumper-car-damages-652.jpg",
       "expect_damaged": false,
       "note": "Back-bumper with no labelled damage, cropped from Car damages 652.png"
     },
     {
       "id": "clean-back-bumper-car-damages-1158",
-      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/clean-back-bumper-car-damages-1158.jpg",
+      "image": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v2/damage/clean-back-bumper-car-damages-1158.jpg",
       "expect_damaged": false,
       "note": "Back-bumper with no labelled damage, cropped from Car damages 1158.png"
     },
     {
       "id": "clean-back-bumper-car-damages-782",
-      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/clean-back-bumper-car-damages-782.jpg",
+      "image": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v2/damage/clean-back-bumper-car-damages-782.jpg",
       "expect_damaged": false,
       "note": "Back-bumper with no labelled damage, cropped from Car damages 782.png"
     },
     {
       "id": "clean-front-bumper-car-damages-102",
-      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/clean-front-bumper-car-damages-102.jpg",
+      "image": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v2/damage/clean-front-bumper-car-damages-102.jpg",
       "expect_damaged": false,
       "note": "Front-bumper with no labelled damage, cropped from Car damages 102.jpg"
     },
     {
       "id": "clean-front-bumper-car-damages-232",
-      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/clean-front-bumper-car-damages-232.jpg",
+      "image": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v2/damage/clean-front-bumper-car-damages-232.jpg",
       "expect_damaged": false,
       "note": "Front-bumper with no labelled damage, cropped from Car damages 232.png"
     },
     {
       "id": "clean-hood-car-damages-225",
-      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/clean-hood-car-damages-225.jpg",
+      "image": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v2/damage/clean-hood-car-damages-225.jpg",
       "expect_damaged": false,
       "note": "Hood with no labelled damage, cropped from Car damages 225.png"
     },
     {
       "id": "clean-back-bumper-car-damages-303",
-      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/clean-back-bumper-car-damages-303.jpg",
+      "image": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v2/damage/clean-back-bumper-car-damages-303.jpg",
       "expect_damaged": false,
       "note": "Back-bumper with no labelled damage, cropped from Car damages 303.png"
     },
     {
       "id": "clean-front-bumper-car-damages-1074",
-      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/clean-front-bumper-car-damages-1074.jpg",
+      "image": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v2/damage/clean-front-bumper-car-damages-1074.jpg",
       "expect_damaged": false,
       "note": "Front-bumper with no labelled damage, cropped from Car damages 1074.png"
     },
     {
       "id": "clean-hood-car-damages-252",
-      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/clean-hood-car-damages-252.jpg",
+      "image": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v2/damage/clean-hood-car-damages-252.jpg",
       "expect_damaged": false,
       "note": "Hood with no labelled damage, cropped from Car damages 252.png"
     },
     {
       "id": "clean-hood-car-damages-266",
-      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/clean-hood-car-damages-266.jpg",
+      "image": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v2/damage/clean-hood-car-damages-266.jpg",
       "expect_damaged": false,
       "note": "Hood with no labelled damage, cropped from Car damages 266.png"
     },
     {
       "id": "clean-front-door-car-damages-1087",
-      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/clean-front-door-car-damages-1087.jpg",
+      "image": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v2/damage/clean-front-door-car-damages-1087.jpg",
       "expect_damaged": false,
       "note": "Front-door with no labelled damage, cropped from Car damages 1087.png"
     },
     {
       "id": "clean-back-bumper-car-damages-1148",
-      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/clean-back-bumper-car-damages-1148.jpg",
+      "image": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v2/damage/clean-back-bumper-car-damages-1148.jpg",
       "expect_damaged": false,
       "note": "Back-bumper with no labelled damage, cropped from Car damages 1148.png"
     },
     {
       "id": "clean-trunk-car-damages-244",
-      "image": "gs://marshal-artifacts-id-rd-ca-hanif-ali/eval/v2/damage/clean-trunk-car-damages-244.jpg",
+      "image": "gs://marshal-artifacts-id-rd-ca-qais-jabbar/eval/v2/damage/clean-trunk-car-damages-244.jpg",
       "expect_damaged": false,
       "note": "Trunk with no labelled damage, cropped from Car damages 244.png"
     }
