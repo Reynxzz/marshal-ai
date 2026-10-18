@@ -287,13 +287,14 @@ export function createTeslaCar(paint?: string | number): EngineCar {
     // Headlight strips and front indicators.
     add(headlight, [0.14, 0.08, 0.46], nose - 0.07, 0.62, side * 0.56)
     add(side === 1 ? right : left, [0.14, 0.06, 0.14], nose - 0.09, 0.62, side * 0.84)
-    // Tail-light clusters at the rear corners (brake), indicator and reverse below them.
-    add(brake, [0.1, 0.12, 0.38], tail + 0.03, 0.82, side * 0.62)
-    add(side === 1 ? right : left, [0.1, 0.05, 0.16], tail + 0.03, 0.71, side * 0.74)
-    add(reverse, [0.1, 0.06, 0.16], tail + 0.04, 0.58, side * 0.42)
+    // Indicator and reverse lamps below the tail-light bar.
+    add(side === 1 ? right : left, [0.1, 0.05, 0.16], tail + 0.03, 0.73, side * 0.74)
+    add(reverse, [0.1, 0.06, 0.16], tail + 0.04, 0.6, side * 0.42)
   }
-  // Light bar across the tailgate between the clusters (brake).
-  add(brake, [0.1, 0.04, 0.86], tail + 0.03, 0.88, 0)
+  // One continuous tail-light bar across the full width (brake), as on the CARLA car the R-12
+  // check was written for ("the full width of the rear light bar is lit"): clusters joined by a
+  // thinner bar read as separate lamps, and Gemini judged a lit car's brake lights off.
+  add(brake, [0.1, 0.11, CAR_WIDTH_M - 0.22], tail + 0.03, 0.84, 0)
 
   if (paint !== undefined) {
     // The real car's details: black lower bumper, diffuser and sills, rims, mirrors, rear plate.
