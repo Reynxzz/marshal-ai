@@ -82,10 +82,25 @@ async function evaluateStep(
   if (result.pass) return
 
   mission.failed.push(event.step)
-  // An unverifiable camera check (Gemini down, no hint) is held for a person, not repaired.
+  // A camera check that confirmed nothing is held for a person, not repaired: either Gemini answered
+  // but was not sure enough (below the decision threshold, so no verdict is trusted), or it could
+  // not be reached at all and there was no evidence to answer offline from.
   const held = ctx.state().cars[event.vin]?.reworkReason === 'inspection'
-  const reworkReason = held || result.observed === UNVERIFIED ? 'inspection' : 'lamp'
-  ctx.update((state) => patchCar(state, event.vin, { stage: 'rework', reworkReason }))
+  const unverified = result.observed === UNVERIFIED
+  const reworkReason = held || unverified ? 'inspection' : 'lamp'
+  const lampName = lamp.name.replace(/_/g, ' ')
+  const inspectWhy = !unverified
+    ? undefined
+    : result.degraded
+      ? 'the AI check was unavailable'
+      : `Gemini was not sure the ${lampName} are lit`
+  ctx.update((state) =>
+    patchCar(state, event.vin, {
+      stage: 'rework',
+      reworkReason,
+      ...(inspectWhy ? { inspectWhy } : {}),
+    }),
+  )
   const rework = ctx.go(event.vin, ['rework.electrical'], 'rework')
   rework.routine_steps = [...mission.failed]
 }
@@ -101,7 +116,8 @@ export function handleReworkDone(ctx: FlowContext, vin: string): void {
   if (!car) return
   ctx.update((state) => patchCar(state, vin, { location: 'rework.electrical' }))
   if (car.reworkReason === 'inspection') {
-    const why = 'Held in the rework bay: AI check unavailable, a person inspects the car'
+    const reason = car.inspectWhy ?? 'the AI check was unavailable'
+    const why = `Held in the rework bay: ${reason}, so a person inspects the car`
     ctx.decide(vin, 'PLANT', why, { exception: true })
     return
   }

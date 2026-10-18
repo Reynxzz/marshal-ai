@@ -97,7 +97,7 @@ describe('fail-closed offline checks and shift completion', () => {
     const feed = feedText('VIN-X')
     const fail = 'GEMINI Gate FAIL: not_verified_offline; saw unknown, built blue (0.00)'
     expect(feed).toContain(fail)
-    expect(feed.at(-1)).toMatch(/AI check unavailable/)
+    expect(feed.at(-1)).toMatch(/the AI check was unavailable, so a person inspects/)
   })
 
   it('holds a car for inspection when the offline lamp check has no evidence', async () => {
@@ -120,6 +120,30 @@ describe('fail-closed offline checks and shift completion', () => {
     // Not repaired and re-run in a loop: the car stays in the bay.
     const tracks = missionsOf('VIN-L').filter((cmd) => cmd.waypoints.includes('test_track'))
     expect(tracks).toHaveLength(1)
+  })
+
+  it('says Gemini was unsure, not unavailable, when it answered without confidence', async () => {
+    const { ds, orch, feedText } = setup({
+      ai: {
+        evaluateLampEvidence: async (input) => ({
+          expected: 'ON',
+          observed: input.step === 'brake_lights' ? 'UNVERIFIED' : 'ON',
+          pass: input.step !== 'brake_lights',
+          degraded: false,
+        }),
+      },
+    })
+    orch.start([{ vin: 'VIN-U', colour: 'blue' }])
+    const done = await runUntil(
+      ds,
+      orch.getState,
+      (s) => s.cars['VIN-U'].location === 'rework.electrical',
+    )
+    expect(done).toBe(true)
+    expect(orch.getState().cars['VIN-U']).toMatchObject({ reworkReason: 'inspection' })
+    expect(feedText('VIN-U').at(-1)).toBe(
+      'PLANT Held in the rework bay: Gemini was not sure the brake lights are lit, so a person inspects the car',
+    )
   })
 
   it('completes the shift when a car is held because the yard is full', async () => {

@@ -63,6 +63,8 @@ export type CarState = {
    * could not be verified ('inspection': a person checks the lamps).
    */
   reworkReason?: 'gate' | 'lamp' | 'inspection'
+  /** Why a car held for inspection is held: Gemini unsure, or the AI check unavailable. */
+  inspectWhy?: string
   /** Sim time the car was parked (for the "just parked" cell state). */
   parkedAt?: number
   /** Already in the yard when the shift started: not counted as off the line or in progress. */
