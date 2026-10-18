@@ -1,0 +1,117 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --color-bg: #07090e;
+  --color-surface: #111724;
+  --color-surface-2: #161f30;
+  --color-surface-3: #1e2a40;
+  --color-accent: #38bdf8;
+  --color-accent-strong: #0284c7;
+  --color-good: #10b981;
+  --color-warn: #f59e0b;
+  --color-bad: #f43f5e;
+}
+
+/* ==========================================================================
+   Base & Ambient Background
+   ========================================================================== */
+
+body {
+  background:
+    radial-gradient(1200px 600px at 70% -10%, rgba(2, 132, 199, 0.07), transparent 60%), #0b0f17;
+  color: #f1f5f9;
+  min-height: 100vh;
+}
+
+/* Brand mark */
+.brand__mark {
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+}
+
+.brand__plate {
+  fill: #0f172a;
+  stroke: rgba(56, 189, 248, 0.35);
+}
+
+.brand__line,
+.brand__road {
+  fill: none;
+  stroke: #38bdf8;
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.brand__lamp {
+  fill: #38bdf8;
+}
+
+/* 3D viewer corner brackets */
+.viewer::before,
+.viewer::after {
+  content: "";
+  position: absolute;
+  pointer-events: none;
+  z-index: 2;
+  width: 14px;
+  height: 14px;
+  border-color: rgba(148, 163, 184, 0.35);
+  border-style: solid;
+}
+
+.viewer::before {
+  top: 12px;
+  left: 12px;
+  border-width: 2px 0 0 2px;
+}
+
+.viewer::after {
+  bottom: 12px;
+  right: 12px;
+  border-width: 0 2px 2px 0;
+}
+
+/* Progress bar webkit styling */
+progress::-webkit-progress-bar {
+  border-radius: 999px;
+  background: rgba(2, 6, 23, 0.8);
+}
+
+progress::-webkit-progress-value {
+  border-radius: 999px;
+  background: linear-gradient(90deg, #0284c7, #38bdf8);
+}
+
+progress::-moz-progress-bar {
+  border-radius: 999px;
+  background: linear-gradient(90deg, #0284c7, #38bdf8);
+}
+
+/* Keyframe animations */
+@keyframes alert-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.15s ease-out;
+}

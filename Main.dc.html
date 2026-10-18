@@ -1,0 +1,458 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Marshal live shift</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&amp;family=IBM+Plex+Mono:wght@400;500;600&amp;family=Space+Grotesk:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#12171D}
+a{color:#7FA7FF}a:hover{color:#B8CCFF}
+.ctl{font:500 15px 'IBM Plex Sans',sans-serif;color:#E9E6DE;background:#222A35;border:1px solid #344052;border-radius:8px;min-height:44px;padding:0 16px;cursor:pointer;display:inline-flex;align-items:center;gap:8px}
+.ctl:hover{background:#2B3544}
+.ctl.main{background:#E39B2E;border-color:#E39B2E;color:#12171D;font-weight:600;min-width:120px;justify-content:center}
+.ctl.main:hover{background:#F0AE48}
+.cell{height:30px;border-radius:4px;border:1px solid #2A3340;background:#151B22;color:#12171D;font:600 10px 'IBM Plex Mono',monospace;padding:0;cursor:pointer;transition:background .5s,border-color .5s;min-width:0}
+.cell.empty{color:#4A5565;cursor:default}
+.cell.parked{background:#D9D5CB;border-color:#D9D5CB}
+.cell.fresh{background:#B8CCFF;border-color:#B8CCFF}
+.cell.res{background:#151B22;border:1px dashed #7FA7FF;color:#7FA7FF}
+.cell.alert{background:#E39B2E;border-color:#E39B2E;animation:pulse 1.2s infinite}
+.cell.sel{outline:2px solid #FFFFFF;outline-offset:1px}
+.chip{font:600 12px 'IBM Plex Mono',monospace;border-radius:6px;border:1px solid transparent;padding:0 8px;min-height:30px;cursor:pointer}
+.chip.gate{background:#7FA7FF;color:#12171D}
+.chip.lane{background:#B8CCFF;color:#12171D}
+.chip.alert{background:#E39B2E;color:#12171D;animation:pulse 1.2s infinite}
+.chip.rework{background:#C2621F;color:#FFFFFF}
+.chip.sel{border-color:#FFFFFF}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(227,155,46,.6)}50%{box-shadow:0 0 0 7px rgba(227,155,46,0)}}
+.tag{font:600 11px 'IBM Plex Mono',monospace;letter-spacing:.06em;padding:3px 7px;border-radius:5px;white-space:nowrap}
+.tag.GEMINI{background:#1A47A6;color:#FFFFFF}
+.tag.YARD{background:#5A3A0A;color:#F6C77A}
+.tag.SUPERVISOR{background:#E9E6DE;color:#12171D}
+.tag.PLANT{background:#2B3544;color:#C9CED6}
+.opt{font:500 14px 'IBM Plex Sans',sans-serif;min-height:44px;padding:8px 14px;border-radius:8px;cursor:pointer;text-align:left;background:#222A35;color:#E9E6DE;border:1px solid #344052;display:flex;flex-direction:column;gap:2px;flex:1 1 130px}
+.opt:hover{background:#2B3544}
+.opt.rec{background:#E39B2E;color:#12171D;border-color:#E39B2E}
+.opt.rec:hover{background:#F0AE48}
+.seg{font:500 13px 'IBM Plex Sans',sans-serif;min-height:36px;padding:0 12px;border-radius:6px;border:1px solid #344052;background:#151B22;color:#A9B1BC;cursor:pointer}
+.seg.on{background:#E9E6DE;color:#12171D;border-color:#E9E6DE}
+.truck{border-radius:8px;padding:8px 10px;display:flex;flex-direction:column;gap:2px;border:1px solid #344052;background:#151B22}
+.truck.loading{background:#3A2A10;border-color:#E39B2E}
+.truck.waiting{background:#3A2A10;border-color:#E39B2E;animation:pulse 1.2s infinite}
+.truck.left{opacity:.55}
+</style>
+</helmet>
+<div style="min-height: 100vh; background: #12171D; color: #E9E6DE; font-family: 'IBM Plex Sans', sans-serif; box-sizing: border-box; padding: 24px 16px 40px">
+<div style="max-width: 1400px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px">
+
+<header style="display: flex; flex-wrap: wrap; gap: 16px; align-items: center; justify-content: space-between">
+<div style="display: flex; align-items: center; gap: 14px; flex-wrap: wrap">
+<div style="font-family: 'Space Grotesk', sans-serif; font-size: 28px; font-weight: 700; letter-spacing: -0.01em">Marshal</div>
+<div style="font-size: 16px; color: #A9B1BC">Plant supervisor · Shift A · 06:00 to 08:10</div>
+<span style="font: 600 12px 'IBM Plex Mono', monospace; letter-spacing: .08em; color: #12171D; background: #F6C77A; padding: 4px 8px; border-radius: 5px">MOCKUP · SIMULATED SHIFT</span>
+</div>
+<div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap">
+<div style="font: 500 26px 'IBM Plex Mono', monospace; padding-right: 6px">{{clock}}</div>
+<button class="ctl main" onClick="{{toggle}}">{{playLabel}}</button>
+<button class="ctl" onClick="{{skip}}">Next exception</button>
+<button class="ctl" onClick="{{restart}}">Restart</button>
+<label style="display: inline-flex; align-items: center; gap: 8px; font-size: 14px; color: #C9CED6; min-height: 44px; cursor: pointer"><input type="checkbox" checked="{{pauseOn}}" onChange="{{togglePause}}" style="width: 18px; height: 18px; accent-color: #E39B2E">Pause when I'm needed</label>
+</div>
+</header>
+
+<div style="height: 6px; background: #222A35; border-radius: 3px; overflow: hidden"><div style="height: 100%; width: {{progress}}; background: #E39B2E; transition: width .3s"></div></div>
+
+<div style="background: #1B222B; border: 1px solid #2A3340; border-radius: 12px; padding: 14px 18px; display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: baseline">
+<div style="font: 600 13px 'IBM Plex Mono', monospace; color: #F6C77A; letter-spacing: .06em">LATEST EXCEPTION</div>
+<div style="font-size: 16px; flex: 1 1 360px">{{headline}}</div>
+</div>
+
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px">
+<sc-for list="{{kpis}}" as="k" hint-placeholder-count="6">
+<div style="background: #1B222B; border: 1px solid #2A3340; border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 4px">
+<div style="font-size: 13px; color: #A9B1BC">{{k.label}}</div>
+<div style="font-family: 'Space Grotesk', sans-serif; font-size: 32px; font-weight: 700; line-height: 1.1; color: {{k.color}}">{{k.value}}</div>
+<div style="font-size: 12px; color: #8C95A1">{{k.sub}}</div>
+</div>
+</sc-for>
+</div>
+
+<div style="display: flex; flex-wrap: wrap; gap: 18px; align-items: flex-start">
+
+<div style="flex: 999 1 660px; min-width: 0; display: flex; flex-direction: column; gap: 18px">
+
+<section style="background: #1B222B; border: 1px solid #2A3340; border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 12px">
+<div style="display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 8px">
+<h2 style="margin: 0; font-family: 'Space Grotesk', sans-serif; font-size: 18px; font-weight: 600">Gate and lanes</h2>
+<div style="font-size: 13px; color: #8C95A1">Line rate 1 car a minute · 3 Gemini checks a car</div>
+</div>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px">
+<sc-for list="{{groups}}" as="g" hint-placeholder-count="4">
+<div style="background: #151B22; border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; min-height: 76px">
+<div style="display: flex; justify-content: space-between; font-size: 13px"><span style="color: #C9CED6; font-weight: 600">{{g.label}}</span><span style="font-family: 'IBM Plex Mono', monospace; color: #8C95A1">{{g.count}}</span></div>
+<div style="display: flex; flex-wrap: wrap; gap: 6px">
+<sc-for list="{{g.cars}}" as="c" hint-placeholder-count="2">
+<button class="{{c.cls}}" onClick="{{c.pick}}">{{c.id}}</button>
+</sc-for>
+</div>
+</div>
+</sc-for>
+</div>
+</section>
+
+<section style="background: #1B222B; border: 1px solid #2A3340; border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 12px">
+<div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px">
+<h2 style="margin: 0; font-family: 'Space Grotesk', sans-serif; font-size: 18px; font-weight: 600">Yard · {{yardText}}</h2>
+<div style="display: flex; gap: 12px; flex-wrap: wrap; font-size: 12px; color: #A9B1BC">
+<span style="display: inline-flex; gap: 6px; align-items: center"><span style="width: 12px; height: 12px; border-radius: 3px; border: 1px dashed #7FA7FF"></span>Car on its way</span>
+<span style="display: inline-flex; gap: 6px; align-items: center"><span style="width: 12px; height: 12px; border-radius: 3px; background: #B8CCFF"></span>Just parked</span>
+<span style="display: inline-flex; gap: 6px; align-items: center"><span style="width: 12px; height: 12px; border-radius: 3px; background: #D9D5CB"></span>Parked</span>
+<span style="display: inline-flex; gap: 6px; align-items: center"><span style="width: 12px; height: 12px; border-radius: 3px; background: #E39B2E"></span>Needs you</span>
+</div>
+</div>
+<div style="overflow-x: auto">
+<div style="min-width: 560px; display: flex; gap: 8px">
+<div style="display: grid; grid-template-rows: repeat(8, 30px); row-gap: 5px; font: 600 11px 'IBM Plex Mono', monospace; color: #8C95A1">
+<sc-for list="{{rows}}" as="r" hint-placeholder-count="8"><div style="display: flex; align-items: center; width: 14px">{{r}}</div></sc-for>
+</div>
+<div style="flex: 1; display: grid; grid-template-columns: repeat(10, minmax(0, 1fr)); gap: 5px">
+<sc-for list="{{slots}}" as="s" hint-placeholder-count="80">
+<button class="{{s.cls}}" onClick="{{s.pick}}" aria-label="{{s.aria}}">{{s.label}}</button>
+</sc-for>
+</div>
+</div>
+</div>
+</section>
+
+<section style="background: #1B222B; border: 1px solid #2A3340; border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 12px">
+<h2 style="margin: 0; font-family: 'Space Grotesk', sans-serif; font-size: 18px; font-weight: 600">Dock · trucks of 10</h2>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px">
+<sc-for list="{{trucks}}" as="t" hint-placeholder-count="7">
+<div class="{{t.cls}}">
+<div style="font: 600 14px 'IBM Plex Mono', monospace">{{t.name}}</div>
+<div style="font-size: 13px; color: #C9CED6">{{t.status}}</div>
+</div>
+</sc-for>
+</div>
+</section>
+
+<section style="background: #1B222B; border: 1px solid #2A3340; border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 10px">
+<sc-if value="{{hasSel}}" hint-placeholder-val="{{ false }}">
+<h2 style="margin: 0; font-family: 'Space Grotesk', sans-serif; font-size: 18px; font-weight: 600">Car {{sel.id}} · {{sel.desc}}</h2>
+<div style="font-size: 14px; color: #A9B1BC">Where: <strong style="color: #E9E6DE; font-weight: 600">{{sel.where}}</strong></div>
+<div style="display: flex; flex-direction: column; gap: 6px">
+<sc-for list="{{sel.lines}}" as="l" hint-placeholder-count="3">
+<div style="display: flex; gap: 10px; align-items: baseline; font-size: 14px">
+<span style="font: 500 12px 'IBM Plex Mono', monospace; color: #8C95A1; width: 44px; flex: none">{{l.time}}</span>
+<span class="tag {{l.tagCls}}">{{l.src}}</span>
+<span>{{l.text}}</span>
+</div>
+</sc-for>
+</div>
+</sc-if>
+<sc-if value="{{noSel}}" hint-placeholder-val="{{ true }}">
+<div style="font-size: 14px; color: #8C95A1">Click any car, on the lanes or in the yard, to see every decision made about it.</div>
+</sc-if>
+</section>
+</div>
+
+<div style="flex: 1 1 380px; min-width: 0; display: flex; flex-direction: column; gap: 18px">
+<section style="background: #1B222B; border: 1px solid #2A3340; border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 12px">
+<div style="display: flex; justify-content: space-between; align-items: center">
+<h2 style="margin: 0; font-family: 'Space Grotesk', sans-serif; font-size: 18px; font-weight: 600">Waiting on you</h2>
+<span style="font: 600 13px 'IBM Plex Mono', monospace; background: {{waitBg}}; color: #12171D; border-radius: 20px; padding: 2px 10px">{{waitCount}}</span>
+</div>
+<sc-if value="{{noCards}}" hint-placeholder-val="{{ false }}">
+<div style="font-size: 14px; color: #8C95A1; padding: 8px 0">Nothing needs you. Gemini and the yard rules are handling every routine car.</div>
+</sc-if>
+<sc-for list="{{cards}}" as="card" hint-placeholder-count="1">
+<div style="border: 1px solid #8A6420; background: #221D15; border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 10px">
+<div style="display: flex; justify-content: space-between; gap: 8px; align-items: baseline">
+<div style="font-family: 'Space Grotesk', sans-serif; font-size: 17px; font-weight: 600">{{card.title}}</div>
+<span style="font: 600 11px 'IBM Plex Mono', monospace; color: #F6C77A; letter-spacing: .06em; white-space: nowrap">{{card.kind}}</span>
+</div>
+<img src="{{card.img}}" alt="{{card.alt}}" style="width: 100%; height: 140px; object-fit: cover; border-radius: 6px; display: block">
+<div style="font-size: 14px; line-height: 1.45; color: #D6D2C8">{{card.body}}</div>
+<div style="display: flex; flex-wrap: wrap; gap: 8px">
+<sc-for list="{{card.options}}" as="opt" hint-placeholder-count="2">
+<button class="{{opt.cls}}" onClick="{{opt.choose}}"><span style="font-weight: 600">{{opt.label}}</span><span style="font-size: 12px; opacity: .8">{{opt.sub}}</span></button>
+</sc-for>
+</div>
+</div>
+</sc-for>
+</section>
+
+<section style="background: #1B222B; border: 1px solid #2A3340; border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 10px">
+<div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px">
+<h2 style="margin: 0; font-family: 'Space Grotesk', sans-serif; font-size: 18px; font-weight: 600">Decision feed</h2>
+<div style="display: flex; gap: 6px">
+<button class="{{segAll}}" onClick="{{showAll}}">Everything</button>
+<button class="{{segEx}}" onClick="{{showEx}}">Exceptions only</button>
+</div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 9px; height: 520px; overflow-y: auto; padding-right: 4px">
+<sc-for list="{{feed}}" as="f" hint-placeholder-count="8">
+<div style="display: flex; gap: 10px; align-items: baseline; font-size: 14px; line-height: 1.4">
+<span style="font: 500 12px 'IBM Plex Mono', monospace; color: #8C95A1; width: 44px; flex: none">{{f.time}}</span>
+<span class="tag {{f.tagCls}}">{{f.src}}</span>
+<span>{{f.text}}</span>
+</div>
+</sc-for>
+</div>
+</section>
+</div>
+</div>
+
+<footer style="font-size: 13px; color: #8C95A1; line-height: 1.5">Mockup of the supervisor screen for the demo. The shift, cars, confidences and line rate are sample values. Measured in our evals: gate median 4.9 s a car, lamp check 1.0 s, Gemini 2.5 Flash on Vertex AI in asia-southeast1, so one gate keeps up with a line of a car a minute. The working dashboard is being built in the web app.</footer>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"minutesPerSecond":{"editor":"range","default":3,"min":1,"max":12,"step":1,"unit":"min/s"},"$preview":{"width":1440,"height":1500}}'>
+var N = 120, END = 130, SLOTS = 80, ROWS = 'ABCDEFGH';
+var MODELS = ['Sedan · white · trim L', 'SUV · black · trim L', 'Hatchback · red · trim M', 'Sedan · grey · trim M', 'SUV · blue · trim M'];
+var REVIEW = { 16: 0.51, 51: 0.55, 87: 0.48 };
+var AUTO = { 8: 'front bumper dent (0.93)', 60: 'scratch on the left door (0.91)' };
+var MISMATCH = { 33: 'wrong trim, build sheet says L, car is M (0.97)' };
+var BLOCK = 37;
+var EARLY = 72, T5DUE = 85;
+var TAGCLS = { 'GEMINI': 'GEMINI', 'YARD RULES': 'YARD', 'SUPERVISOR': 'SUPERVISOR', 'PLANT': 'PLANT' };
+var IMG_REVIEW = '/_blob/9bc44a86c7946ff5be91dcf746e1a655';
+var IMG_BLOCK = '/_blob/9716a1200d9513832f7031d9a585c42e';
+var IMG_TRUCK = '/_blob/3e3f8837c6202992acb9f3737a2d2872';
+
+function pad(n) { return (n < 10 ? '00' : n < 100 ? '0' : '') + n; }
+function carId(i) { return 'P' + pad(i + 1); }
+function hhmm(t) { var h = 6 + Math.floor(t / 60), m = t % 60; return '0' + h + ':' + (m < 10 ? '0' : '') + m; }
+function slotName(k) { return ROWS.charAt(Math.floor(k / 10)) + (k % 10 + 1); }
+
+function sim(m, d) {
+  var cars = [], slots = [], feed = [], seq = 0, you = 0, gem = 0, rules = 0;
+  var i, t;
+  for (i = 0; i < N; i++) { cars.push({ i: i, id: carId(i), z: 'none', slot: -1, parkAt: -1, parkedAt: -1 }); }
+  for (i = 0; i < SLOTS; i++) { slots.push(-1); }
+  var trucks = [];
+  for (i = 1; i <= 7; i++) { trucks.push({ n: i, due: 10 + 15 * i, loadAt: -1, leaveAt: -1, early: false, done: false }); }
+  var t5 = trucks[4];
+  function say(tm, src, text, ex, car) { feed.push({ t: tm, src: src, text: text, ex: ex, car: car || '', seq: seq++ }); }
+  function assign(c, tm) {
+    var k = slots.indexOf(-1);
+    rules++;
+    if (k < 0) { c.z = 'wait'; say(tm, 'YARD RULES', c.id + ': yard full, waiting at the gate.', true, c.id); return; }
+    slots[k] = c.i; c.slot = k; c.z = 'lane'; c.parkAt = tm + 2;
+    say(tm, 'YARD RULES', c.id + ' assigned to ' + slotName(k) + '.', false, c.id);
+  }
+  function load(tr, tm) {
+    var ready = cars.filter(function (c) { return c.z === 'Y'; }).sort(function (a, b) { return a.parkedAt - b.parkedAt; }).slice(0, 10);
+    ready.forEach(function (c) { slots[c.slot] = -1; c.slot = -1; c.z = 'dock'; c.truck = tr.n; });
+    tr.loadAt = tm; tr.leaveAt = tm + 4; tr.count = ready.length; rules++;
+    say(tm, 'YARD RULES', 'T-' + tr.n + ': ' + ready.length + ' longest-parked cars sent to the dock.', false);
+  }
+  for (t = 0; t <= m; t++) {
+    if (t < N) {
+      var c = cars[t];
+      gem += 3;
+      if (AUTO[t]) { c.z = 'R'; say(t, 'GEMINI', c.id + ': ' + AUTO[t] + '. Sent to rework.', true, c.id); }
+      else if (MISMATCH[t]) { c.z = 'R'; say(t, 'GEMINI', c.id + ': ' + MISMATCH[t] + '. Sent to rework.', true, c.id); }
+      else if (REVIEW[t] != null) { c.z = 'hold'; you++; say(t, 'GEMINI', c.id + ': rear bumper unsure (' + REVIEW[t] + '). Asking a person.', true, c.id); }
+      else { say(t, 'GEMINI', c.id + ': no defect, matches build sheet, lamps lit.', false, c.id); assign(c, t); }
+    }
+    Object.keys(REVIEW).forEach(function (key) {
+      var k = +key, dec = d['r' + k];
+      if (dec && dec.at === t && cars[k].z === 'hold') {
+        if (dec.c === 'pass') { say(t, 'SUPERVISOR', cars[k].id + ' passed after review.', true, cars[k].id); assign(cars[k], t); }
+        else { cars[k].z = 'R'; say(t, 'SUPERVISOR', cars[k].id + ' sent to rework: rear bumper.', true, cars[k].id); }
+      }
+    });
+    cars.forEach(function (c) {
+      if (c.z === 'lane' && c.parkAt === t) {
+        if (c.i === BLOCK) {
+          c.z = 'block'; you++; gem++;
+          say(t, 'PLANT', c.id + ' stopped in lane B: forklift ahead.', true, c.id);
+          say(t, 'GEMINI', c.id + ' assistance: wait 20 s (0.82). A reroute adds about 90 s.', true, c.id);
+        } else { c.z = 'Y'; c.parkedAt = t; }
+      }
+    });
+    var bd = d.block, bc = cars[BLOCK];
+    if (bd && bd.at === t && bc.z === 'block') {
+      if (bd.c === 'stop') { bc.z = 'held'; say(t, 'SUPERVISOR', bc.id + ' held in the lane. Driver called.', true, bc.id); }
+      else { bc.z = 'Y'; bc.parkedAt = t; say(t, 'SUPERVISOR', bc.id + ': ' + (bd.c === 'wait' ? 'wait chosen. Lane cleared, parked.' : 'reroute chosen. Parked.'), true, bc.id); }
+    }
+    if (t === EARLY) {
+      t5.early = true; you++; gem++;
+      say(t, 'PLANT', 'Truck T-5 arrived 13 min early and needs 10 cars.', true);
+      say(t, 'GEMINI', 'Re-plan: load T-5 now with the 10 longest-parked cars. T-6 takes the next batch.', true);
+      say(t, 'YARD RULES', 'Re-plan checked: all 10 passed the gate, none on hold.', true);
+    }
+    if (d.replan && d.replan.at === t && t5.loadAt < 0) {
+      if (d.replan.c === 'approve') { say(t, 'SUPERVISOR', 'Re-plan for T-5 approved.', true); load(t5, t); }
+      else { say(t, 'SUPERVISOR', 'Re-plan for T-5 rejected. It loads at ' + hhmm(T5DUE) + '.', true); }
+    }
+    trucks.forEach(function (tr) {
+      if (tr.due === t && tr.loadAt < 0) {
+        if (tr.n === 5 && !d.replan) { say(t, 'YARD RULES', 'No answer on the re-plan. T-5 loads on the original plan.', true); }
+        load(tr, t);
+      }
+      if (tr.leaveAt === t) {
+        tr.done = true;
+        cars.forEach(function (c) { if (c.z === 'dock' && c.truck === tr.n) { c.z = 'shipped'; } });
+        say(t, 'PLANT', 'T-' + tr.n + ' left with ' + tr.count + ' cars.', false);
+      }
+    });
+  }
+  var pend = [];
+  Object.keys(REVIEW).forEach(function (key) { var k = +key; if (cars[k].z === 'hold') { pend.push({ type: 'review', i: k }); } });
+  if (cars[BLOCK].z === 'block') { pend.push({ type: 'block', i: BLOCK }); }
+  if (m >= EARLY && t5.loadAt < 0 && !(d.replan && d.replan.at <= m)) { pend.push({ type: 'replan' }); }
+  return { cars: cars, slots: slots, feed: feed, trucks: trucks, pend: pend, you: you, gem: gem, rules: rules };
+}
+
+function whereText(c) {
+  if (c.z === 'lane') { return 'Driving to ' + slotName(c.slot); }
+  if (c.z === 'Y') { return 'Parked in ' + slotName(c.slot); }
+  return { none: 'Not built yet', hold: 'Review hold, waiting on you', R: 'Rework bay', block: 'Stopped in lane B, waiting on you', held: 'Held in lane B, driver called', dock: 'At the dock, loading on T-' + c.truck, shipped: 'Shipped on T-' + c.truck, wait: 'Waiting at the gate' }[c.z];
+}
+
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { m: 0, playing: false, pauseOn: true, sel: null, d: {}, exOnly: false };
+    this.timer = null;
+  }
+  componentWillUnmount() { this.stop(); }
+  stop() { if (this.timer) { clearInterval(this.timer); this.timer = null; } }
+  play() {
+    var self = this;
+    this.stop();
+    var mps = this.props.minutesPerSecond ?? 3;
+    if (this.state.m >= END) { this.setState({ m: 0, d: {}, sel: null }); }
+    this.timer = setInterval(function () {
+      var m = self.state.m;
+      if (m >= END) { self.stop(); self.setState({ playing: false }); return; }
+      var before = sim(m, self.state.d).pend.length;
+      var after = sim(m + 1, self.state.d).pend.length;
+      if (self.state.pauseOn && after > before) { self.stop(); self.setState({ m: m + 1, playing: false }); return; }
+      self.setState({ m: m + 1 });
+    }, Math.round(1000 / mps));
+    this.setState({ playing: true });
+  }
+  decide(key, c) {
+    var d = Object.assign({}, this.state.d);
+    d[key] = { c: c, at: this.state.m };
+    this.setState({ d: d });
+  }
+  renderVals() {
+    var self = this;
+    var m = this.state.m, d = this.state.d;
+    var S = sim(m, d);
+    var sel = this.state.sel;
+    var pick = function (id) { return function () { self.setState({ sel: id }); }; };
+
+    var lines = S.feed.map(function (f) { return { time: hhmm(f.t), src: f.src, tagCls: TAGCLS[f.src], text: f.text, ex: f.ex, car: f.car }; });
+    var shown = (this.state.exOnly ? lines.filter(function (l) { return l.ex; }) : lines).slice(-60).reverse();
+    var exs = lines.filter(function (l) { return l.ex; });
+    var headline = exs.length ? exs[exs.length - 1].time + ' · ' + exs[exs.length - 1].text : 'None yet. Every car so far has been routine.';
+
+    var chip = function (c, kind) { return { id: c.id, cls: 'chip ' + kind + (sel === c.id ? ' sel' : ''), pick: pick(c.id) }; };
+    var atGate = m < N && S.cars[m].z !== 'none' ? [S.cars[m]] : [];
+    var by = function (zs) { return S.cars.filter(function (c) { return zs.indexOf(c.z) !== -1; }); };
+    var lane = by(['lane']).filter(function (c) { return c.i !== m; });
+    var groups = [
+      { label: 'At the gate', count: String(atGate.length), cars: atGate.map(function (c) { return chip(c, c.z === 'hold' ? 'alert' : c.z === 'R' ? 'rework' : 'gate'); }) },
+      { label: 'Driving to a slot', count: String(lane.length), cars: lane.map(function (c) { return chip(c, 'lane'); }) },
+      { label: 'Waiting on you', count: String(by(['hold', 'block']).length), cars: by(['hold', 'block', 'held']).map(function (c) { return chip(c, 'alert'); }) },
+      { label: 'Rework bay', count: String(by(['R']).length), cars: by(['R']).map(function (c) { return chip(c, 'rework'); }) }
+    ];
+
+    var slots = S.slots.map(function (ci, k) {
+      if (ci < 0) { return { cls: 'cell empty', label: '', aria: 'Slot ' + slotName(k) + ', empty', pick: function () {} }; }
+      var c = S.cars[ci];
+      var kind = c.z === 'lane' ? 'res' : c.z === 'block' ? 'alert' : (m - c.parkedAt <= 2 ? 'fresh' : 'parked');
+      return { cls: 'cell ' + kind + (sel === c.id ? ' sel' : ''), label: c.id.slice(1), aria: 'Slot ' + slotName(k) + ', ' + c.id, pick: pick(c.id) };
+    });
+    var parked = S.cars.filter(function (c) { return c.z === 'Y'; }).length;
+    var used = S.slots.filter(function (x) { return x >= 0; }).length;
+
+    var trucks = S.trucks.map(function (tr) {
+      var st, cls = 'truck';
+      if (tr.done) { st = 'Left ' + hhmm(tr.leaveAt) + ' · ' + tr.count + ' cars'; cls += ' left'; }
+      else if (tr.loadAt >= 0) { st = 'Loading ' + tr.count + ' cars'; cls += ' loading'; }
+      else if (tr.early && m >= EARLY) { st = 'Here early · waiting'; cls += ' waiting'; }
+      else { st = 'Due ' + hhmm(tr.due); }
+      return { name: 'T-' + tr.n, status: st, cls: cls };
+    });
+
+    var cards = S.pend.map(function (p) {
+      if (p.type === 'review') {
+        var id = carId(p.i);
+        return { title: 'Gate review · ' + id, kind: 'GEMINI UNSURE', img: IMG_REVIEW, alt: 'Gate camera photo of ' + id,
+          body: 'Gemini could not tell if the rear bumper mark is damage (' + REVIEW[p.i] + '), so it did not decide. The line keeps running while you look.',
+          options: [
+            { label: 'Pass it', sub: 'yard rules pick a slot', cls: 'opt', choose: function () { self.decide('r' + p.i, 'pass'); } },
+            { label: 'Send to rework', sub: 'rework bay', cls: 'opt', choose: function () { self.decide('r' + p.i, 'rework'); } }
+          ] };
+      }
+      if (p.type === 'block') {
+        return { title: 'Assistance · ' + carId(BLOCK), kind: 'CAR STOPPED', img: IMG_BLOCK, alt: 'Top view of lane B with the stopped car',
+          body: carId(BLOCK) + ' stopped behind a forklift in lane B. Gemini recommends waiting: it usually clears in under 20 s. A reroute adds about 90 s. Other cars use lane A.',
+          options: [
+            { label: 'Wait 20 s', sub: 'recommended · 0.82', cls: 'opt rec', choose: function () { self.decide('block', 'wait'); } },
+            { label: 'Reroute', sub: '+90 s', cls: 'opt', choose: function () { self.decide('block', 'reroute'); } },
+            { label: 'Stop, call a driver', sub: 'car holds', cls: 'opt', choose: function () { self.decide('block', 'stop'); } }
+          ] };
+      }
+      return { title: 'Re-plan · Truck T-5', kind: 'PLAN CHANGE', img: IMG_TRUCK, alt: 'A finished car at the gate',
+        body: 'T-5 arrived 13 minutes early and needs 10 cars. Gemini proposes loading the 10 longest-parked cars now. Yard rules check: passed. No answer by ' + hhmm(T5DUE) + ' keeps the original plan.',
+        options: [
+          { label: 'Approve', sub: 'recommended', cls: 'opt rec', choose: function () { self.decide('replan', 'approve'); } },
+          { label: 'Reject', sub: 'load at ' + hhmm(T5DUE), cls: 'opt', choose: function () { self.decide('replan', 'reject'); } }
+        ] };
+    });
+
+    var total = S.gem + S.rules;
+    var alone = total ? Math.floor(1000 * (total - S.you) / total) / 10 : 100;
+    var shipped = S.cars.filter(function (c) { return c.z === 'shipped'; }).length;
+    var kpis = [
+      { label: 'Off the line', value: String(Math.min(m + 1, N)), sub: 'of ' + N + ' in this window', color: '#E9E6DE' },
+      { label: 'Decisions made', value: String(total), sub: S.gem + ' by Gemini · ' + S.rules + ' by yard rules', color: '#7FA7FF' },
+      { label: 'Needed you', value: String(S.you), sub: alone + '% handled without you', color: '#F6C77A' },
+      { label: 'In the yard', value: parked + ' / ' + SLOTS, sub: used + ' slots taken or reserved', color: '#E9E6DE' },
+      { label: 'Shipped', value: String(shipped), sub: S.trucks.filter(function (x) { return x.done; }).length + ' trucks gone', color: '#E9E6DE' },
+      { label: 'Rework', value: String(S.cars.filter(function (c) { return c.z === 'R'; }).length), sub: 'found at the gate', color: '#E8A06A' }
+    ];
+
+    var selCar = sel ? S.cars.filter(function (c) { return c.id === sel; })[0] : null;
+    var selVal = selCar ? { id: selCar.id, desc: MODELS[selCar.i % 5], where: whereText(selCar),
+      lines: lines.filter(function (l) { return l.car === selCar.id; }).slice().reverse() } : { id: '', desc: '', where: '', lines: [] };
+
+    return {
+      clock: hhmm(m), progress: Math.round(100 * m / END) + '%',
+      playLabel: this.state.playing ? 'Pause' : (m >= END ? 'Play again' : 'Play shift'),
+      toggle: function () { if (self.state.playing) { self.stop(); self.setState({ playing: false }); } else { self.play(); } },
+      skip: function () {
+        self.stop();
+        var mm = self.state.m, base = sim(mm, self.state.d).pend.length;
+        while (mm < END) { mm++; if (sim(mm, self.state.d).pend.length > base) { break; } }
+        self.setState({ m: mm, playing: false });
+      },
+      restart: function () { self.stop(); self.setState({ playing: false, m: 0, d: {}, sel: null }); },
+      pauseOn: this.state.pauseOn,
+      togglePause: function () { self.setState({ pauseOn: !self.state.pauseOn }); },
+      headline: headline, kpis: kpis, groups: groups,
+      rows: ROWS.split(''), slots: slots, yardText: used + ' of ' + SLOTS + ' slots in use',
+      trucks: trucks, cards: cards, noCards: cards.length === 0, waitCount: String(cards.length), waitBg: cards.length ? '#F6C77A' : '#8C95A1',
+      feed: shown,
+      segAll: 'seg' + (this.state.exOnly ? '' : ' on'), segEx: 'seg' + (this.state.exOnly ? ' on' : ''),
+      showAll: function () { self.setState({ exOnly: false }); }, showEx: function () { self.setState({ exOnly: true }); },
+      hasSel: !!selCar, noSel: !selCar, sel: selVal
+    };
+  }
+}
+</script>
+</body>
+</html>

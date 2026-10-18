@@ -1,0 +1,14 @@
+node_modules
+dist
+.output
+.tanstack
+.nitro
+.git
+.github
+.env
+.env.*
+!.env.example
+.agents
+infra
+coverage
+.DS_Store

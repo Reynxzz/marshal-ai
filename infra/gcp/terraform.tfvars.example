@@ -1,0 +1,16 @@
+# Copy to terraform.tfvars (git-ignored) and adjust.
+project_id = "my-gcp-project"
+
+# Optional overrides (defaults shown).
+# region            = "asia-southeast2"
+# name_prefix       = "marshal-threejs"
+# github_repository = "farissbayu/marshal-fe"
+# github_branches   = ["threejs", "feat/qais-marshal-flows-gcp"]
+# github_workflow_file = "deploy-cloudrun.yml"
+# github_repository_id = "" # numeric id: gh api repos/OWNER/NAME --jq .id
+# ai_rate_limit_per_minute = 120
+# domain            = "" # e.g. "marshal.example.com" to enable HTTPS
+# gemini_location   = "asia-southeast1"
+# gemini_model      = "gemini-2.5-flash"
+# min_instances     = 1 # keep equal to --min-instances in the deploy workflow
+# max_instances     = 1 # keep equal to --max-instances in the deploy workflow

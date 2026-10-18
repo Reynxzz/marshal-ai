@@ -1,0 +1,21 @@
+node_modules
+.DS_Store
+dist
+dist-ssr
+*.local
+.env
+.nitro
+.tanstack
+.output
+.vinxi
+__unconfig*
+todos.json
+coverage
+!.env.example
+# Terraform (infra/gcp): keep .terraform.lock.hcl, never commit state or tfvars
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+crash.log

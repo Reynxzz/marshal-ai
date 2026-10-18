@@ -1,0 +1,73 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.5.15/schema.json",
+  "files": {
+    "includes": [
+      "**",
+      "!**/node_modules",
+      "!**/dist",
+      "!**/.output",
+      "!**/.tanstack",
+      "!**/.nitro",
+      "!**/.vinxi",
+      "!**/routeTree.gen.ts",
+      "!**/.agents",
+      "!**/Main.dc.html"
+    ]
+  },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 100
+  },
+  "css": {
+    "parser": {
+      "tailwindDirectives": true
+    }
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "single",
+      "semicolons": "asNeeded",
+      "trailingCommas": "all"
+    }
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "preset": "recommended",
+      "suspicious": {
+        "noExplicitAny": "off"
+      }
+    }
+  },
+  "overrides": [
+    {
+      "includes": ["src/sim/**/*.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "three": "src/sim must be pure TypeScript (no three.js)",
+                  "react": "src/sim must be pure TypeScript (no React)",
+                  "react-dom": "src/sim must be pure TypeScript (no React)",
+                  "@google/adk": "src/sim must be pure TypeScript (no AI SDKs)",
+                  "@google/genai": "src/sim must be pure TypeScript (no AI SDKs)"
+                },
+                "patterns": [
+                  {
+                    "group": ["@google/*"],
+                    "message": "src/sim must be pure TypeScript (no AI SDKs)"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}
