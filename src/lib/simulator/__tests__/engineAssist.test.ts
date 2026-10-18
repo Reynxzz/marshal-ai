@@ -182,3 +182,80 @@ describe('a queue behind a box', () => {
     expect(engine.getPositionXY('A').x).toBeGreaterThan(54)
   })
 })
+
+describe('a car blocked at the report point, the supervisor picks another option than waiting', () => {
+  // As the dashboard's shift stages it: a box 6 m ahead of the car, a worker beside it on the left.
+  function blocked(withWorker: boolean) {
+    const engine = new ThreeJsEngine()
+    let done = false
+    engine.on('mission.done', (event: MissionDoneEvent) => {
+      if (event.mission_id === 'M1') done = true
+    })
+    engine.spawn('P', { at: 'test_track', colour: [0, 0, 1] })
+    engine.send({
+      op: 'mission.go',
+      mission_id: 'M1',
+      vin: 'P',
+      waypoints: ['report_point', 'finishing', 'yard.entry'],
+    })
+    const report = POINTS.report_point
+    runUntil(engine, () => {
+      const p = engine.getPositionXY('P')
+      return Math.hypot(p.x - report.x, p.y - report.y) < 4
+    })
+    const at = engine.getPositionXY('P')
+    const yaw = (at.yaw * Math.PI) / 180
+    const ahead = (metres: number, side = 0) =>
+      [
+        at.x + metres * Math.cos(yaw) - side * Math.sin(yaw),
+        at.y + metres * Math.sin(yaw) + side * Math.cos(yaw),
+      ] as const
+    engine.spawnProp('box', 'box', ...ahead(6), at.yaw)
+    if (withWorker) engine.spawnProp('worker', 'worker', ...ahead(7, 1), at.yaw + 90)
+    engine.raiseAssist('P', 'AC-P-1', 'Box and worker blocking the lane', [
+      'wait_for_removal',
+      'pass_left_3kmh',
+      'reroute_lane_c',
+    ])
+    for (let step = 0; step < 8; step++) engine.tick(0.5)
+    return { engine, finished: () => done }
+  }
+
+  for (const withWorker of [false, true]) {
+    const who = withWorker ? 'box and worker' : 'box'
+    it(`pass left (${who}): drives round them and on to the yard`, () => {
+      const { engine, finished } = blocked(withWorker)
+      engine.send({
+        op: 'assist.choose',
+        case_id: 'AC-P-1',
+        vin: 'P',
+        option: 'pass_left_3kmh',
+        chosen_by: 'supervisor',
+      })
+      expect(runUntil(engine, finished)).toBe(true)
+      const outcome = engine.assistOutcomes['AC-P-1'] as { closest_m?: number }
+      expect(Number(outcome.closest_m)).toBeGreaterThan(2)
+    })
+
+    it(`reroute via lane C (${who}): gets past them, takes lane C, reaches the yard`, () => {
+      const { engine, finished } = blocked(withWorker)
+      engine.send({
+        op: 'assist.choose',
+        case_id: 'AC-P-1',
+        vin: 'P',
+        option: 'reroute_lane_c',
+        chosen_by: 'supervisor',
+      })
+      let minLaneC = Number.POSITIVE_INFINITY
+      for (let step = 0; step < 1200 && !finished(); step++) {
+        engine.tick(0.5)
+        const p = engine.getPositionXY('P')
+        minLaneC = Math.min(minLaneC, Math.hypot(p.x - POINTS.lane_c.x, p.y - POINTS.lane_c.y))
+      }
+      expect(finished()).toBe(true)
+      expect(minLaneC).toBeLessThan(10)
+      const outcome = engine.assistOutcomes['AC-P-1'] as { closest_m?: number }
+      expect(Number(outcome.closest_m)).toBeGreaterThan(1.4)
+    })
+  }
+})

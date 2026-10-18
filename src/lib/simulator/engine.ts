@@ -113,6 +113,10 @@ const CLEAR_RADIUS_M = 15
 /** Pass-left maneuver (TEAM_PLAN M6.4): back up for room, crawl at 3 km/h, this offset, return. */
 export const AVOID_SPEED_MPS = 3 / 3.6
 export const AVOID_OFFSET_M = 3.5
+/** Clearance a pass keeps between the car's side and a prop's centre, metres. */
+const AVOID_CLEARANCE_M = 1.2
+/** Pure-pursuit lookahead while passing: short, so the car is out before it draws level. */
+const AVOID_LOOKAHEAD_M = 4
 export const AVOID_BACKUP_M = 6
 export const AVOID_BACKUP_SPEED_MPS = 1
 /** The offset is held until the obstacle is this far behind / outside this corridor. */
@@ -188,6 +192,10 @@ type EngineCar = {
   avoidStart: { x: number; y: number } | null
   /** Assist case the pass-left maneuver belongs to. */
   avoidCase: string | null
+  /** Props the car is driving around (those blocking it when the case was decided). */
+  avoidProps: string[]
+  /** Lateral offset of the pass from the lane, metres (positive = left of the heading). */
+  avoidOffset_m: number
   /** How far the pass-left backs up: AVOID_BACKUP_M, less when a car is close behind. */
   avoidBackup_m: number
   /** Closest distance to a prop during the pass-left maneuver. */
@@ -377,14 +385,21 @@ export class ThreeJsEngine implements DrivingSystem {
       if (cmd.option === 'wait_for_removal') {
         car.waitingCase = cmd.case_id
         car.waited_s = 0
-      } else if (cmd.option === 'pass_left_3kmh' || !this.rerouteViaLaneC(car)) {
-        // Pass left (or no lane C on the way): back up for room, as far as the gap behind allows,
-        // then crawl past in the left lane.
-        car.avoidBackup_m = this.backupRoom(car)
-        car.avoidPhase = car.avoidBackup_m > 0.3 ? 'backup' : 'swerve'
-        car.avoidStart = { x: car.x, y: car.y }
-        car.avoidCase = cmd.case_id
-        car.avoidClosest = Number.POSITIVE_INFINITY
+      } else {
+        // Pass left, or reroute via lane C. Either way the car first has to get past what blocks
+        // it: a blocker sitting where lane C leaves the loop is on the new route too. So whatever
+        // is in its way is driven around (back up for room, as far as the gap behind allows, then
+        // crawl past on the left) and, for a reroute, the route then carries on through lane C.
+        if (cmd.option === 'reroute_lane_c') this.rerouteViaLaneC(car)
+        car.avoidProps = this.blockingProps(car)
+        car.avoidOffset_m = this.passOffset(car, cmd.option === 'pass_left_3kmh')
+        if (cmd.option === 'pass_left_3kmh' || car.avoidProps.length > 0) {
+          car.avoidBackup_m = this.backupRoom(car)
+          car.avoidPhase = car.avoidBackup_m > 0.3 ? 'backup' : 'swerve'
+          car.avoidStart = { x: car.x, y: car.y }
+          car.avoidCase = cmd.case_id
+          car.avoidClosest = Number.POSITIVE_INFINITY
+        }
       }
     }
   }
@@ -445,6 +460,8 @@ export class ThreeJsEngine implements DrivingSystem {
       avoidPhase: null,
       avoidStart: null,
       avoidCase: null,
+      avoidProps: [],
+      avoidOffset_m: AVOID_OFFSET_M,
       avoidClosest: Number.POSITIVE_INFINITY,
       avoidBackup_m: AVOID_BACKUP_M,
       steer: 0,
@@ -1137,11 +1154,13 @@ export class ThreeJsEngine implements DrivingSystem {
       targetSpeed = Math.min(targetSpeed, AVOID_SPEED_MPS)
       const closest = this.nearestPropDistance(car)
       if (closest !== null) car.avoidClosest = Math.min(car.avoidClosest, closest)
-      // Keep the offset until the obstacle is well behind: clearing while it is still abeam
-      // would merge the car straight back into it.
-      const tracked = this.nearestProp(car, AVOID_TRACK_RANGE_M, AVOID_TRACK_LATERAL_M, true)
-      if (tracked === null || tracked.ahead < -0.5) {
+      // Keep the offset until what blocked the car is well behind: clearing while it is still
+      // abeam would merge the car straight back into it. The props are the ones that blocked it,
+      // not whatever is nearest now: after backing up they can be out of a short scan's range,
+      // which ended the pass before it began and left the car standing at the box.
+      if (this.avoidPropsPassed(car)) {
         car.avoidPhase = null
+        car.avoidProps = []
         if (car.avoidCase) {
           const outcome = this.assistOutcomes[car.avoidCase] as Record<string, unknown> | undefined
           this.assistOutcomes[car.avoidCase] = {
@@ -1167,10 +1186,11 @@ export class ThreeJsEngine implements DrivingSystem {
       }
     }
     if (car.avoidPhase === 'swerve') {
-      // Pass on the left of the lane (heading rotated +90 degrees in the map frame).
+      // Pass beside the lane at the chosen offset (positive = left of the heading).
+      const near = pointAhead(mission.route, mission.routeIndex, AVOID_LOOKAHEAD_M)
       lookahead = {
-        x: lookahead.x - Math.sin(car.yaw) * AVOID_OFFSET_M,
-        y: lookahead.y + Math.cos(car.yaw) * AVOID_OFFSET_M,
+        x: near.x - Math.sin(car.yaw) * car.avoidOffset_m,
+        y: near.y + Math.cos(car.yaw) * car.avoidOffset_m,
       }
     }
     const steer = purePursuitSteer(car, lookahead)
@@ -1221,6 +1241,60 @@ export class ThreeJsEngine implements DrivingSystem {
       if (best === null || reach < Math.abs(best.ahead)) best = { kind: prop.kind, ahead, distance }
     }
     return best
+  }
+
+  /**
+   * How far beside the lane a pass runs: far enough that the car's side keeps
+   * AVOID_CLEARANCE_M to every prop it drives around. A pass-left goes left of them all; a reroute
+   * takes whichever side needs the smaller swerve (a worker beside a box on the left: the right).
+   */
+  private passOffset(car: EngineCar, leftOnly: boolean): number {
+    const fx = Math.cos(car.yaw)
+    const fy = Math.sin(car.yaw)
+    const lateral = car.avoidProps
+      .map((id) => this.props.get(id))
+      .filter((prop): prop is PropState => prop !== undefined)
+      .map((prop) => (prop.x - car.x) * -fy + (prop.y - car.y) * fx)
+    if (lateral.length === 0) return AVOID_OFFSET_M
+    const need = CAR_WIDTH_M / 2 + AVOID_CLEARANCE_M
+    const left = Math.max(...lateral) + need
+    const right = Math.min(...lateral) - need
+    if (leftOnly) return Math.max(left, AVOID_OFFSET_M)
+    return Math.abs(right) < Math.abs(left) ? right : left
+  }
+
+  /** Ids of the props blocking a car: in its lane, inside the blocked radius ahead. */
+  private blockingProps(car: EngineCar): string[] {
+    const fx = Math.cos(car.yaw)
+    const fy = Math.sin(car.yaw)
+    const ids: string[] = []
+    for (const prop of this.props.values()) {
+      const dx = prop.x - car.x
+      const dy = prop.y - car.y
+      const ahead = dx * fx + dy * fy
+      if (ahead <= 0 || ahead > BLOCKED_RADIUS_M) continue
+      if (Math.abs(dx * fy - dy * fx) > BLOCKED_LATERAL_M) continue
+      ids.push(prop.id)
+    }
+    return ids
+  }
+
+  /**
+   * True once every prop a pass is driving around is gone or more than a metre behind the car
+   * (with none tracked, as before: nothing in the scan corridor ahead or abeam).
+   */
+  private avoidPropsPassed(car: EngineCar): boolean {
+    if (car.avoidProps.length === 0) {
+      const tracked = this.nearestProp(car, AVOID_TRACK_RANGE_M, AVOID_TRACK_LATERAL_M, true)
+      return tracked === null || tracked.ahead < -0.5
+    }
+    const fx = Math.cos(car.yaw)
+    const fy = Math.sin(car.yaw)
+    return car.avoidProps.every((id) => {
+      const prop = this.props.get(id)
+      if (!prop) return true
+      return (prop.x - car.x) * fx + (prop.y - car.y) * fy < -1
+    })
   }
 
   /** Straight distance to the nearest prop of any kind, or null. */
