@@ -132,6 +132,12 @@ variable "api_artifacts_bucket" {
   default     = ""
 }
 
+variable "local_dev_backend_access" {
+  description = "Also grant the frontend runtime service account the backend's roles (Firestore, BigQuery, Pub/Sub, artifacts bucket), because the team runs frontend and backend locally with its exported JSON key. The deployed frontend itself only needs Vertex AI."
+  type        = bool
+  default     = true
+}
+
 variable "api_model" {
   description = "Optional MARSHAL_MODEL for the API. Empty keeps the code defaults (marshal_ai and marshal_api pick their own models)."
   type        = string

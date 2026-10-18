@@ -12,6 +12,26 @@ resource "google_project_iam_member" "runtime_vertex" {
   member  = google_service_account.runtime.member
 }
 
+# Local development: the team runs the frontend AND the backend locally with an exported JSON key
+# of this account (GOOGLE_APPLICATION_CREDENTIALS), so it also gets the backend's roles (same set
+# as the marshal-ai account in api.tf) instead of roles/owner. Set local_dev_backend_access =
+# false once local runs use their own credentials; the deployed frontend only needs Vertex AI.
+resource "google_project_iam_member" "runtime_local_dev" {
+  for_each = var.local_dev_backend_access ? setsubtract(local.api_roles, ["roles/aiplatform.user"]) : toset([])
+
+  project = var.project_id
+  role    = each.value
+  member  = google_service_account.runtime.member
+}
+
+resource "google_storage_bucket_iam_member" "runtime_local_dev_artifacts" {
+  count = var.local_dev_backend_access ? 1 : 0
+
+  bucket = local.api_artifacts_bucket
+  role   = "roles/storage.objectAdmin"
+  member = google_service_account.runtime.member
+}
+
 resource "google_cloud_run_v2_service" "app" {
   name                = var.name_prefix
   location            = var.region
